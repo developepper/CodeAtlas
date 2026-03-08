@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  docs-and-meta:
+    name: Docs and Metadata Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required planning docs exist
+        run: |
+          test -f docs/engineering-principles.md
+          test -f docs/workflow/github-process.md
+          test -f docs/architecture/rust-code-intelligence-plan.md
+          test -f docs/planning/issue-backlog.md
+
+  rust-quality:
+    name: Rust Quality Gate
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('**/Cargo.toml') != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all --all-features
+
+      - name: Build
+        run: cargo build --workspace --all-features
+
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --all-features --no-deps
+
+  msrv-check:
+    name: MSRV Check
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('**/Cargo.toml') != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve MSRV from workspace Cargo.toml
+        id: msrv
+        shell: bash
+        run: |
+          MSRV=$(grep -E '^rust-version\s*=\s*"[0-9]+\.[0-9]+(\.[0-9]+)?"' Cargo.toml | head -n1 | sed -E 's/.*"([0-9]+\.[0-9]+(\.[0-9]+)?)".*/\1/')
+          if [ -z "$MSRV" ]; then
+            echo "No rust-version found in workspace Cargo.toml; skipping check"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "msrv=$MSRV" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup MSRV toolchain
+        if: steps.msrv.outputs.skip == 'false'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.msrv }}
+
+      - name: Cache cargo registry and build
+        if: steps.msrv.outputs.skip == 'false'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo check (MSRV)
+        if: steps.msrv.outputs.skip == 'false'
+        run: cargo check --workspace --all-features

@@ -1,0 +1,25 @@
+name: Manual Task
+about: Non-code repository/admin/configuration work.
+labels: [manual]
+body:
+  - type: input
+    id: task
+    attributes:
+      label: Manual Task
+      description: Exact action required.
+    validations:
+      required: true
+  - type: textarea
+    id: owner
+    attributes:
+      label: Owner
+      description: Who will perform this manual step?
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: How completion will be verified.
+    validations:
+      required: true

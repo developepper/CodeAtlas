@@ -1,0 +1,57 @@
+name: Ticket
+about: Single-deliverable implementation issue intended for one PR.
+labels: [ticket]
+body:
+  - type: input
+    id: problem
+    attributes:
+      label: Problem
+      description: What user/developer problem does this ticket solve?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Include only what fits into one reviewable PR.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Use a checklist of measurable criteria.
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing Requirements
+      description: Unit/integration/security/perf checks required.
+      value: |
+        - Unit:
+        - Integration:
+        - Security:
+        - Performance:
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Blocking issues or prerequisites.
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition Of Done
+      description: Criteria for closing this issue.
+      value: |
+        - [ ] Acceptance criteria met
+        - [ ] Tests added/updated and passing
+        - [ ] Docs updated if needed
+        - [ ] CI green
+    validations:
+      required: true

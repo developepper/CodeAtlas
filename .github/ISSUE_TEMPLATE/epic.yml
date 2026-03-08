@@ -1,0 +1,39 @@
+name: Epic
+about: Outcome-level planning issue that groups related tickets.
+labels: [epic]
+body:
+  - type: input
+    id: objective
+    attributes:
+      label: Objective
+      description: Single sentence describing the outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In Scope
+      description: What this epic includes.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out Of Scope
+      description: What this epic explicitly excludes.
+    validations:
+      required: true
+  - type: textarea
+    id: tickets
+    attributes:
+      label: Child Tickets
+      description: List ticket issues that should each map to one PR.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Epic Definition Of Done
+      description: Measurable completion criteria.
+    validations:
+      required: true
