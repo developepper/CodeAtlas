@@ -29,19 +29,23 @@ Primary interface target:
 
 ## Current Status
 
-CodeAtlas is currently in planning and repository setup.
+CodeAtlas has completed foundation milestones M0 (governance/CI) and M1 (workspace/core-model baseline), and is now executing implementation milestones.
 
 What exists now:
 
 - Product and implementation specification in `docs/specifications/`.
 - Issue-driven execution plan with one-PR-per-issue policy.
 - Governance and contribution workflow docs.
-- GitHub Actions CI scaffold for PRs and pushes to `master`.
-- Rust workspace baseline (`Cargo.toml`, `rust-toolchain.toml`) and placeholder crate (`crates/workspace-placeholder`).
+- GitHub Actions CI quality gates for PRs and pushes to `master` (fmt, clippy, tests, build, docs, MSRV check).
+- Rust workspace baseline (`Cargo.toml`, `rust-toolchain.toml`) with `core-model` and placeholder crates.
+- `core-model` canonical schemas for Symbol/File/Repo records.
+- Stable symbol ID construction/validation and deterministic collision disambiguation rules.
+- Serialization/deserialization compatibility fixtures and snapshot tests.
+- Schema version parsing baseline and migration compatibility contract.
 
 What does not exist yet:
 
-- Production Rust crates for indexing, storage, query, and serving.
+- Production Rust crates for indexing, storage/query engines, adapters, and serving interfaces.
 - Production indexing/query engine behavior.
 - Released binaries or hosted deployment.
 

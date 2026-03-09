@@ -1,6 +1,7 @@
 # GitHub Issue Backlog
 
 This backlog is designed for one-PR-per-issue execution.
+Progress note: Epic 0 and Epic 1 implementation tickets are complete; execution is continuing with Epic 2+ tickets.
 
 ## Epic 0: Repository Governance and CI Foundation
 
