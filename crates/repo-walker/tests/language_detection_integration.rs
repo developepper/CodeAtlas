@@ -27,7 +27,8 @@ fn mixed_language_fixture_detection_is_deterministic() {
         .write("docs/readme.unknown", "plain text\n")
         .expect("write unknown");
 
-    let files = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
+    let result = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
+    let files = result.files;
     let mut detected = BTreeMap::new();
 
     for file in files {
