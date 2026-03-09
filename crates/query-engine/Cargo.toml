@@ -1,0 +1,16 @@
+[package]
+name = "query-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+core-model.workspace = true
+store.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
