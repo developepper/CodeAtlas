@@ -102,12 +102,19 @@ pub struct ParsedFile {
     pub language: String,
     pub output: AdapterOutput,
     pub content_hash: String,
+    /// Raw file content, carried through for blob storage.
+    pub content: Vec<u8>,
 }
 
 /// Per-file error captured during the parse stage (non-fatal).
+///
+/// Carries the failing adapter's identity when available, so callers can
+/// trace failures back to a specific adapter.
 #[derive(Debug)]
 pub struct FileError {
     pub path: PathBuf,
+    /// The adapter that produced the error, if applicable.
+    pub adapter_id: Option<String>,
     pub error: String,
 }
 
@@ -140,6 +147,7 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
             );
             file_errors.push(FileError {
                 path: file.relative_path.clone(),
+                adapter_id: None,
                 error: format!("no adapter for language '{}'", file.language),
             });
             continue;
@@ -153,7 +161,10 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
         };
 
         // Try adapters in priority order; use the first that succeeds.
+        // Non-fatal errors are recorded but do not prevent lower-priority
+        // adapters from being tried.
         let mut succeeded = false;
+        let mut per_file_errors: Vec<FileError> = Vec::new();
         for adapter in &adapters {
             match adapter.index_file(&idx_ctx, &source_file) {
                 Ok(output) => {
@@ -163,6 +174,7 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
                         language: file.language.clone(),
                         output,
                         content_hash,
+                        content: file.content.clone(),
                     });
                     succeeded = true;
                     break;
@@ -173,26 +185,28 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
                         path = %file.relative_path.display(),
                         adapter = adapter.adapter_id(),
                         error = %e,
-                        "adapter failed"
+                        "adapter failed, trying next"
                     );
-                    file_errors.push(FileError {
+                    per_file_errors.push(FileError {
                         path: file.relative_path.clone(),
+                        adapter_id: Some(adapter.adapter_id().to_string()),
                         error: e.to_string(),
                     });
-                    break;
+                    continue;
                 }
             }
         }
 
-        if !succeeded
-            && file_errors
-                .last()
-                .map_or(true, |e| e.path != file.relative_path)
-        {
-            file_errors.push(FileError {
-                path: file.relative_path.clone(),
-                error: "all adapters returned unsupported".to_string(),
-            });
+        if !succeeded {
+            if per_file_errors.is_empty() {
+                file_errors.push(FileError {
+                    path: file.relative_path.clone(),
+                    adapter_id: None,
+                    error: "all adapters returned unsupported".to_string(),
+                });
+            } else {
+                file_errors.append(&mut per_file_errors);
+            }
         }
     }
 
@@ -220,16 +234,20 @@ fn file_content_hash(content: &[u8]) -> String {
 // Persist stage
 // ---------------------------------------------------------------------------
 
-/// Persists parsed results to the metadata store inside a single SQLite
-/// transaction. All repo, file, and symbol writes are atomic: either
-/// everything commits or nothing does.
+/// Persists parsed results to the metadata and blob stores.
 ///
-/// Respects FK ordering: repo → files → symbols. Any validation failure
-/// aborts the entire transaction (automatic rollback on drop) to prevent
-/// inconsistent state between aggregate counts and actual persisted records.
+/// Content blobs are written first (idempotent, content-addressed) so they
+/// are available before the metadata transaction opens. Metadata writes
+/// (repo → files → symbols) happen inside a single SQLite transaction:
+/// either everything commits or nothing does.
+///
+/// Any validation failure aborts the entire transaction (automatic rollback
+/// on drop) to prevent inconsistent state between aggregate counts and
+/// actual persisted records.
 pub fn persist(
     ctx: &PipelineContext<'_>,
     store: &mut store::MetadataStore,
+    blob_store: &store::BlobStore,
     parse_output: &ParseOutput,
 ) -> Result<(), PipelineError> {
     let now = OffsetDateTime::now_utc()
@@ -298,7 +316,18 @@ pub fn persist(
         )));
     }
 
-    // -- Begin atomic transaction --
+    // -- Write content blobs (idempotent, before metadata transaction) --
+
+    for parsed in &parse_output.parsed_files {
+        blob_store.put(&parsed.content).map_err(|e| {
+            PipelineError::Persist(store::StoreError::Blob {
+                path: Some(parsed.relative_path.clone()),
+                reason: format!("failed to write blob: {e}"),
+            })
+        })?;
+    }
+
+    // -- Begin atomic metadata transaction --
 
     let tx = store.transaction().map_err(PipelineError::Persist)?;
 
