@@ -1,0 +1,17 @@
+[package]
+name = "indexer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+adapter-api.workspace = true
+core-model.workspace = true
+repo-walker = { path = "../repo-walker" }
+store = { path = "../store" }
+time.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
