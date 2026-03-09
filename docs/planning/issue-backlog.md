@@ -1,7 +1,7 @@
 # GitHub Issue Backlog
 
 This backlog is designed for one-PR-per-issue execution.
-Progress note: Epic 0 and Epic 1 implementation tickets are complete; execution is continuing with Epic 2+ tickets.
+Progress note: Epics 0, 1, 2 (discovery), and 3 (adapters) are complete. Epic 4 (storage) is in progress — metadata store (#28) is merged; blob storage (#29) and atomic commit (#30) are next. The indexer skeleton (#60, last Epic 3 item) is unblocked and on the critical path.
 
 ## Epic 0: Repository Governance and CI Foundation
 
