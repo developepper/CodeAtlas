@@ -1,0 +1,14 @@
+{
+  "repo_id": "repo-1",
+  "file_path": "src/main.rs",
+  "language": "rust",
+  "file_hash": "def456",
+  "summary": "Main executable module",
+  "symbol_count": 7,
+  "quality_mix": {
+    "semantic_percent": 80.0,
+    "syntax_percent": 20.0
+  },
+  "updated_at": "2026-03-09T00:00:00Z",
+  "legacy_note": "ignored by serde for forward compatibility"
+}
