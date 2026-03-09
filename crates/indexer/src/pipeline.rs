@@ -24,9 +24,16 @@ pub struct IndexResult {
 
 /// Runs the full indexing pipeline: discovery → parse → persist.
 ///
+/// The metadata store is passed separately from the pipeline context so that
+/// only the persist stage borrows it mutably, while discovery and parse
+/// operate with an immutable context.
+///
 /// Returns an [`IndexResult`] with aggregate metrics and any per-file
 /// errors encountered during parsing.
-pub fn run(ctx: &PipelineContext<'_>) -> Result<IndexResult, PipelineError> {
+pub fn run(
+    ctx: &PipelineContext<'_>,
+    store: &mut store::MetadataStore,
+) -> Result<IndexResult, PipelineError> {
     info!(repo_id = %ctx.repo_id, "pipeline started");
 
     // Stage 1: Discovery
@@ -42,7 +49,7 @@ pub fn run(ctx: &PipelineContext<'_>) -> Result<IndexResult, PipelineError> {
         .sum();
 
     // Stage 3: Persist
-    stage::persist(ctx, &parse_output)?;
+    stage::persist(ctx, store, &parse_output)?;
 
     let metrics = IndexMetrics {
         files_discovered: discovery.metrics.files_discovered,

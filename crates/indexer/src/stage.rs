@@ -220,11 +220,18 @@ fn file_content_hash(content: &[u8]) -> String {
 // Persist stage
 // ---------------------------------------------------------------------------
 
-/// Persists parsed results to the metadata store.
+/// Persists parsed results to the metadata store inside a single SQLite
+/// transaction. All repo, file, and symbol writes are atomic: either
+/// everything commits or nothing does.
 ///
-/// Respects FK ordering: repo → files → symbols. Validation failures on
-/// individual records are logged and skipped (non-fatal).
-pub fn persist(ctx: &PipelineContext<'_>, parse_output: &ParseOutput) -> Result<(), PipelineError> {
+/// Respects FK ordering: repo → files → symbols. Any validation failure
+/// aborts the entire transaction (automatic rollback on drop) to prevent
+/// inconsistent state between aggregate counts and actual persisted records.
+pub fn persist(
+    ctx: &PipelineContext<'_>,
+    store: &mut store::MetadataStore,
+    parse_output: &ParseOutput,
+) -> Result<(), PipelineError> {
     let now = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .map_err(|e| PipelineError::Internal(format!("timestamp format error: {e}")))?;
@@ -242,32 +249,35 @@ pub fn persist(ctx: &PipelineContext<'_>, parse_output: &ParseOutput) -> Result<
     let mut file_stats: Vec<FileStats> = Vec::with_capacity(parse_output.parsed_files.len());
 
     for parsed in &parse_output.parsed_files {
-        let valid_symbols = parsed
-            .output
-            .symbols
-            .iter()
-            .filter(|sym| {
-                let file_path_str = parsed.relative_path.to_string_lossy();
-                build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind).is_ok()
-            })
-            .count() as u64;
+        let sym_count = parsed.output.symbols.len() as u64;
+
+        // Validate all symbol IDs upfront — any failure is fatal.
+        for sym in &parsed.output.symbols {
+            let file_path_str = parsed.relative_path.to_string_lossy();
+            build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind).map_err(|e| {
+                PipelineError::Validation(format!(
+                    "invalid symbol ID for '{}' in {}: {e}",
+                    sym.name, file_path_str
+                ))
+            })?;
+        }
 
         let semantic = if parsed.output.quality_level == QualityLevel::Semantic {
-            valid_symbols
+            sym_count
         } else {
             0
         };
 
         file_stats.push(FileStats {
-            symbol_count: valid_symbols,
+            symbol_count: sym_count,
             semantic_count: semantic,
         });
 
         *language_counts.entry(parsed.language.clone()).or_insert(0) += 1;
-        total_symbol_count += valid_symbols;
+        total_symbol_count += sym_count;
     }
 
-    // -- Step 1: upsert repo record (no FK parent) --
+    // -- Validate repo record before opening transaction --
 
     let schema_version = current_index_schema_version();
     let repo_record = RepoRecord {
@@ -288,13 +298,16 @@ pub fn persist(ctx: &PipelineContext<'_>, parse_output: &ParseOutput) -> Result<
         )));
     }
 
-    ctx.store
-        .repos()
+    // -- Begin atomic transaction --
+
+    let tx = store.transaction().map_err(PipelineError::Persist)?;
+
+    // Step 1: upsert repo record (no FK parent)
+    tx.repos()
         .upsert(&repo_record)
         .map_err(PipelineError::Persist)?;
 
-    // -- Step 2: upsert file records (FK → repos) --
-
+    // Step 2: upsert file records (FK → repos)
     for (parsed, stats) in parse_output.parsed_files.iter().zip(file_stats.iter()) {
         let file_path_str = parsed.relative_path.to_string_lossy();
 
@@ -322,23 +335,19 @@ pub fn persist(ctx: &PipelineContext<'_>, parse_output: &ParseOutput) -> Result<
             updated_at: now.clone(),
         };
 
-        if let Err(e) = file_record.validate() {
-            warn!(
-                path = %file_path_str,
-                error = %e,
-                "skipping file record that failed validation"
-            );
-            continue;
-        }
+        file_record.validate().map_err(|e| {
+            PipelineError::Validation(format!(
+                "file record validation failed for '{}': {e}",
+                file_path_str
+            ))
+        })?;
 
-        ctx.store
-            .files()
+        tx.files()
             .upsert(&file_record)
             .map_err(PipelineError::Persist)?;
     }
 
-    // -- Step 3: upsert symbol records (FK → files) --
-
+    // Step 3: upsert symbol records (FK → files)
     for parsed in &parse_output.parsed_files {
         let file_path_str = parsed.relative_path.to_string_lossy();
         let default_confidence = match parsed.output.quality_level {
@@ -347,18 +356,14 @@ pub fn persist(ctx: &PipelineContext<'_>, parse_output: &ParseOutput) -> Result<
         };
 
         for sym in &parsed.output.symbols {
-            let symbol_id = match build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind) {
-                Ok(id) => id,
-                Err(e) => {
-                    warn!(
-                        path = %file_path_str,
-                        symbol = %sym.name,
-                        error = %e,
-                        "skipping symbol with invalid ID"
-                    );
-                    continue;
-                }
-            };
+            // Symbol ID was pre-validated in pass 1; safe to unwrap.
+            let symbol_id = build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind)
+                .map_err(|e| {
+                    PipelineError::Validation(format!(
+                        "invalid symbol ID for '{}' in {}: {e}",
+                        sym.name, file_path_str
+                    ))
+                })?;
 
             let confidence = sym.confidence_score.unwrap_or(default_confidence);
 
@@ -388,21 +393,21 @@ pub fn persist(ctx: &PipelineContext<'_>, parse_output: &ParseOutput) -> Result<
                 semantic_refs: None,
             };
 
-            if let Err(e) = record.validate() {
-                warn!(
-                    symbol_id = %record.id,
-                    error = %e,
-                    "skipping symbol that failed validation"
-                );
-                continue;
-            }
+            record.validate().map_err(|e| {
+                PipelineError::Validation(format!(
+                    "symbol record validation failed for '{}' in {}: {e}",
+                    sym.name, file_path_str
+                ))
+            })?;
 
-            ctx.store
-                .symbols()
+            tx.symbols()
                 .upsert(&record)
                 .map_err(PipelineError::Persist)?;
         }
     }
+
+    // -- Commit the transaction atomically --
+    tx.commit().map_err(PipelineError::Persist)?;
 
     info!(
         files_persisted = parse_output.parsed_files.len(),

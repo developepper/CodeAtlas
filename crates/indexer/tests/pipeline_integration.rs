@@ -145,18 +145,17 @@ fn setup_test_repo() -> TempDir {
 fn pipeline_end_to_end_smoke_test() {
     let repo_dir = setup_test_repo();
     let router = StubRouter::new();
-    let db = store::MetadataStore::open_in_memory().expect("open store");
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        store: &db,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: Some("test-correlation-001".to_string()),
     };
 
-    let result = run(&ctx).expect("pipeline should succeed");
+    let result = run(&ctx, &mut db).expect("pipeline should succeed");
 
     // Discovery found at least the one .rs file.
     assert!(
@@ -219,13 +218,11 @@ fn pipeline_end_to_end_smoke_test() {
 fn discovery_stage_finds_files() {
     let repo_dir = setup_test_repo();
     let router = StubRouter::new();
-    let db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        store: &db,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
     };
@@ -238,13 +235,11 @@ fn discovery_stage_finds_files() {
 #[test]
 fn discovery_stage_rejects_invalid_root() {
     let router = StubRouter::new();
-    let db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: PathBuf::from("/nonexistent/path"),
         router: &router,
-        store: &db,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
     };
@@ -263,13 +258,11 @@ fn discovery_detects_extensionless_script_via_content() {
     .expect("write script");
 
     let router = StubRouter::new();
-    let db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: dir.path().to_path_buf(),
         router: &router,
-        store: &db,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
     };
@@ -297,13 +290,11 @@ fn parse_stage_handles_no_adapter() {
     std::fs::write(repo_dir.path().join("script.py"), "print('hi')\n").expect("write py file");
 
     let router = StubRouter::new();
-    let db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        store: &db,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
     };
@@ -332,13 +323,11 @@ fn parse_stage_uses_context_default_policy() {
     // SyntaxOnly (the global default for Rust), the router returns no
     // adapters and the file lands in file_errors instead of parsed_files.
     let router = PolicyGatingRouter::expecting(AdapterPolicy::SemanticPreferred);
-    let db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        store: &db,
         default_policy: AdapterPolicy::SemanticPreferred,
         correlation_id: None,
     };

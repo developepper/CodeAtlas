@@ -215,6 +215,131 @@ fn rollback_to_zero_and_reapply_on_disk() {
 }
 
 // ---------------------------------------------------------------------------
+// Transaction: atomic commit
+// ---------------------------------------------------------------------------
+
+#[test]
+fn transaction_commit_persists_all_writes() {
+    let mut store = MetadataStore::open_in_memory().unwrap();
+
+    {
+        let tx = store.transaction().unwrap();
+        tx.repos().upsert(&test_repo()).unwrap();
+        tx.files().upsert(&test_file("src/lib.rs")).unwrap();
+        tx.symbols()
+            .upsert(&test_symbol("src/lib.rs", "Config", SymbolKind::Class))
+            .unwrap();
+        tx.commit().unwrap();
+    }
+
+    // All three records are visible after commit.
+    assert!(store.repos().get("integration-repo").unwrap().is_some());
+    assert!(store
+        .files()
+        .get("integration-repo", "src/lib.rs")
+        .unwrap()
+        .is_some());
+    assert!(store
+        .symbols()
+        .get("src/lib.rs::Config#class")
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn transaction_drop_without_commit_rolls_back() {
+    let mut store = MetadataStore::open_in_memory().unwrap();
+
+    // Pre-populate a repo so we can verify it survives the rollback.
+    store.repos().upsert(&test_repo()).unwrap();
+
+    {
+        let tx = store.transaction().unwrap();
+        tx.files().upsert(&test_file("src/lib.rs")).unwrap();
+        tx.symbols()
+            .upsert(&test_symbol("src/lib.rs", "Config", SymbolKind::Class))
+            .unwrap();
+        // Drop without commit — automatic rollback.
+    }
+
+    // Repo still exists (was committed before the transaction).
+    assert!(store.repos().get("integration-repo").unwrap().is_some());
+    // File and symbol were never committed.
+    assert!(store
+        .files()
+        .get("integration-repo", "src/lib.rs")
+        .unwrap()
+        .is_none());
+    assert!(store
+        .symbols()
+        .get("src/lib.rs::Config#class")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn transaction_rollback_on_error_leaves_store_unchanged() {
+    let mut store = MetadataStore::open_in_memory().unwrap();
+
+    // Attempt a transaction that inserts a repo then hits a validation error
+    // on a symbol. The transaction is dropped, so all writes roll back.
+    let result: Result<(), store::StoreError> = (|| {
+        let tx = store.transaction()?;
+        tx.repos().upsert(&test_repo())?;
+        tx.files().upsert(&test_file("src/main.rs"))?;
+
+        // Symbol with empty name fails validation.
+        let mut bad_sym = test_symbol("src/main.rs", "main", SymbolKind::Function);
+        bad_sym.name = "".to_string();
+        tx.symbols().upsert(&bad_sym)?;
+
+        tx.commit()?;
+        Ok(())
+    })();
+
+    assert!(result.is_err());
+    // Nothing was persisted because the transaction was dropped.
+    assert!(store.repos().get("integration-repo").unwrap().is_none());
+}
+
+#[test]
+fn transaction_crash_retry_simulation() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("crash_sim.db");
+
+    // First attempt: open, begin transaction, write, then "crash" (drop without commit).
+    {
+        let mut store = MetadataStore::open(&db_path).unwrap();
+        let tx = store.transaction().unwrap();
+        tx.repos().upsert(&test_repo()).unwrap();
+        tx.files().upsert(&test_file("src/lib.rs")).unwrap();
+        // Simulate crash: drop tx without commit.
+        drop(tx);
+        // Verify nothing persisted in this session.
+        assert!(store.repos().get("integration-repo").unwrap().is_none());
+    }
+
+    // Second attempt (retry): reopen, transact, commit successfully.
+    {
+        let mut store = MetadataStore::open(&db_path).unwrap();
+        // Database is clean — no partial state from the "crash".
+        assert!(store.repos().get("integration-repo").unwrap().is_none());
+
+        let tx = store.transaction().unwrap();
+        tx.repos().upsert(&test_repo()).unwrap();
+        tx.files().upsert(&test_file("src/lib.rs")).unwrap();
+        tx.commit().unwrap();
+
+        assert!(store.repos().get("integration-repo").unwrap().is_some());
+        assert!(store
+            .files()
+            .get("integration-repo", "src/lib.rs")
+            .unwrap()
+            .is_some());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Validation enforcement
 // ---------------------------------------------------------------------------
 
