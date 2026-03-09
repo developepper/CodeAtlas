@@ -29,25 +29,33 @@ Primary interface target:
 
 ## Current Status
 
-CodeAtlas has completed foundation milestones M0 (governance/CI) and M1 (workspace/core-model baseline), and is now executing implementation milestones.
+Milestones M0 (governance/CI), M1 (core model), M2 (discovery), and M3 (adapters) are complete. M4 (storage) is in progress.
 
-What exists now:
+### Workspace crates
+
+| Crate | Purpose | Status |
+|-------|---------|--------|
+| `core-model` | Canonical Symbol/File/Repo schemas, symbol ID construction, schema versioning | Complete |
+| `repo-walker` | Repository traversal with gitignore/security filters, language detection, structured logging | Complete |
+| `adapter-api` | `LanguageAdapter` and `AdapterRouter` traits, routing policy, contract test harness | Complete |
+| `adapter-syntax-treesitter` | Tree-sitter-based syntax extraction (Rust supported, table-driven for extensibility) | Complete |
+| `store` | SQLite metadata persistence with versioned migrations, typed CRUD for repos/files/symbols | Complete |
+
+### Infrastructure
 
 - Product and implementation specification in `docs/specifications/`.
 - Issue-driven execution plan with one-PR-per-issue policy.
 - Governance and contribution workflow docs.
 - GitHub Actions CI quality gates for PRs and pushes to `master` (fmt, clippy, tests, build, docs, MSRV check).
-- Rust workspace baseline (`Cargo.toml`, `rust-toolchain.toml`) with `core-model` and placeholder crates.
-- `core-model` canonical schemas for Symbol/File/Repo records.
-- Stable symbol ID construction/validation and deterministic collision disambiguation rules.
-- Serialization/deserialization compatibility fixtures and snapshot tests.
-- Schema version parsing baseline and migration compatibility contract.
+- Serde compatibility fixtures and snapshot tests for schema forward-compatibility.
+- Adapter contract test harness for preventing adapter drift across implementations.
 
-What does not exist yet:
+### What does not exist yet
 
-- Production Rust crates for indexing, storage/query engines, adapters, and serving interfaces.
-- Production indexing/query engine behavior.
-- Released binaries or hosted deployment.
+- Indexer pipeline orchestration (next: #60).
+- Content-addressed blob storage and atomic index commit.
+- Query engine, MCP server, and CLI interfaces.
+- Incremental indexing, semantic adapters, and production deployment.
 
 ## Design Principles
 
