@@ -6,6 +6,9 @@ use core_model::{QualityLevel, SymbolKind, Validate, ValidationError, Validation
 
 pub mod router;
 
+#[cfg(feature = "test-harness")]
+pub mod contract;
+
 // ---------------------------------------------------------------------------
 // Adapter selection policy
 // ---------------------------------------------------------------------------
