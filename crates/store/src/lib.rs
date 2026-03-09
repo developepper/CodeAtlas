@@ -1,17 +1,20 @@
-//! Metadata persistence layer (SQLite-first).
+//! Persistence layer for CodeAtlas.
 //!
-//! Provides [`MetadataStore`] for persisting repository, file, and symbol
-//! records. Schema is managed through versioned migrations.
+//! Provides [`MetadataStore`] (SQLite) for persisting repository, file,
+//! and symbol records, and [`BlobStore`] (filesystem) for content-addressed
+//! blob storage of raw file snapshots.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
+pub mod blob_store;
 mod file_store;
 mod migrations;
 mod repo_store;
 mod symbol_store;
 
+pub use blob_store::{content_hash, BlobStore};
 pub use file_store::FileStore;
 pub use migrations::{rollback_to, SCHEMA_VERSION};
 pub use repo_store::RepoStore;
@@ -21,7 +24,7 @@ pub use symbol_store::SymbolStore;
 // Error type
 // ---------------------------------------------------------------------------
 
-/// Errors produced by the metadata store.
+/// Errors produced by the metadata or blob store.
 #[derive(Debug)]
 pub enum StoreError {
     /// A SQLite operation failed.
@@ -30,6 +33,11 @@ pub enum StoreError {
     Migration { version: u32, reason: String },
     /// A record failed validation before persistence.
     Validation(String),
+    /// A blob storage operation failed.
+    Blob {
+        path: Option<PathBuf>,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for StoreError {
@@ -40,6 +48,13 @@ impl std::fmt::Display for StoreError {
                 write!(f, "migration v{version} failed: {reason}")
             }
             Self::Validation(msg) => write!(f, "validation error: {msg}"),
+            Self::Blob { path, reason } => {
+                if let Some(path) = path {
+                    write!(f, "blob error at '{}': {reason}", path.display())
+                } else {
+                    write!(f, "blob error: {reason}")
+                }
+            }
         }
     }
 }

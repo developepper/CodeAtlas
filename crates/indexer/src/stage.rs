@@ -157,7 +157,7 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
         for adapter in &adapters {
             match adapter.index_file(&idx_ctx, &source_file) {
                 Ok(output) => {
-                    let content_hash = simple_content_hash(&file.content);
+                    let content_hash = file_content_hash(&file.content);
                     parsed_files.push(ParsedFile {
                         relative_path: file.relative_path.clone(),
                         language: file.language.clone(),
@@ -208,14 +208,12 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
     }
 }
 
-/// Simple deterministic content hash (sum of bytes mod u64). Production
-/// will use SHA-256 once blob storage (#29) lands.
-fn simple_content_hash(content: &[u8]) -> String {
-    let mut hash: u64 = 0;
-    for &byte in content {
-        hash = hash.wrapping_mul(31).wrapping_add(u64::from(byte));
-    }
-    format!("{hash:016x}")
+/// Computes the SHA-256 content hash for a file's content.
+///
+/// Delegates to [`store::content_hash`] so the indexer and blob store
+/// use the same canonical hash function.
+fn file_content_hash(content: &[u8]) -> String {
+    store::content_hash(content)
 }
 
 // ---------------------------------------------------------------------------
