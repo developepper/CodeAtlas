@@ -1,7 +1,8 @@
 //! Integration tests for the indexer pipeline.
 //!
 //! These tests exercise the full discovery → parse → persist flow against
-//! real temp-dir repositories with an in-memory SQLite store.
+//! real temp-dir repositories with an in-memory SQLite store and a
+//! temporary blob store.
 
 use std::path::PathBuf;
 
@@ -9,6 +10,7 @@ use adapter_api::{
     AdapterCapabilities, AdapterError, AdapterOutput, AdapterPolicy, AdapterRouter,
     ExtractedSymbol, IndexContext, LanguageAdapter, SourceFile, SourceSpan,
 };
+use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
 use core_model::{QualityLevel, SymbolKind};
 use indexer::{run, stage, PipelineContext, PipelineError};
 use tempfile::TempDir;
@@ -125,6 +127,32 @@ impl AdapterRouter for StubRouter {
     }
 }
 
+/// Router backed by real tree-sitter adapters. Returns adapters for all
+/// languages supported by `adapter-syntax-treesitter`.
+struct TreeSitterRouter {
+    adapters: Vec<TreeSitterAdapter>,
+}
+
+impl TreeSitterRouter {
+    fn new() -> Self {
+        let adapters = supported_languages()
+            .iter()
+            .filter_map(|lang| create_adapter(lang))
+            .collect();
+        Self { adapters }
+    }
+}
+
+impl AdapterRouter for TreeSitterRouter {
+    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
+        self.adapters
+            .iter()
+            .filter(|a| a.language() == language)
+            .map(|a| a as &dyn LanguageAdapter)
+            .collect()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -137,13 +165,19 @@ fn setup_test_repo() -> TempDir {
     dir
 }
 
+fn setup_blob_store(dir: &TempDir) -> store::BlobStore {
+    store::BlobStore::open(&dir.path().join("blobs")).expect("open blob store")
+}
+
 // ---------------------------------------------------------------------------
-// End-to-end pipeline smoke test
+// End-to-end pipeline smoke test (stub adapter)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn pipeline_end_to_end_smoke_test() {
     let repo_dir = setup_test_repo();
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
     let router = StubRouter::new();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
@@ -155,7 +189,7 @@ fn pipeline_end_to_end_smoke_test() {
         correlation_id: Some("test-correlation-001".to_string()),
     };
 
-    let result = run(&ctx, &mut db).expect("pipeline should succeed");
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
 
     // Discovery found at least the one .rs file.
     assert!(
@@ -208,6 +242,346 @@ fn pipeline_end_to_end_smoke_test() {
     assert_eq!(symbol.name, "main");
     assert_eq!(symbol.kind, SymbolKind::Function);
     assert_eq!(symbol.repo_id, "test-repo");
+
+    // Verify blob was written and is retrievable by content hash.
+    let content = std::fs::read(repo_dir.path().join("src/main.rs")).expect("read source");
+    let hash = store::content_hash(&content);
+    assert!(blob_store.exists(&hash).expect("blob exists check"));
+    let blob = blob_store
+        .get(&hash)
+        .expect("get blob")
+        .expect("blob present");
+    assert_eq!(blob, content);
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end with real tree-sitter adapter
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pipeline_end_to_end_with_treesitter_adapter() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+
+    // Write a non-trivial Rust file with multiple symbol types.
+    std::fs::write(
+        src.join("lib.rs"),
+        r#"/// A configuration holder.
+pub struct Config {
+    pub name: String,
+}
+
+impl Config {
+    /// Creates a new Config.
+    pub fn new(name: &str) -> Self {
+        Self { name: name.to_string() }
+    }
+}
+
+/// Top-level helper function.
+pub fn greet(config: &Config) -> String {
+    format!("Hello, {}!", config.name)
+}
+"#,
+    )
+    .expect("write lib.rs");
+
+    std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("write main.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "treesitter-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // Both .rs files were parsed.
+    assert_eq!(result.metrics.files_parsed, 2);
+    assert!(result.file_errors.is_empty(), "no file errors expected");
+
+    // Verify repo aggregates.
+    let repo = db
+        .repos()
+        .get("treesitter-repo")
+        .expect("query repo")
+        .expect("repo record");
+    assert_eq!(repo.file_count, 2);
+    assert!(
+        repo.symbol_count >= 3,
+        "expected at least Config, new, greet"
+    );
+
+    // Verify lib.rs file record.
+    let lib_file = db
+        .files()
+        .get("treesitter-repo", "src/lib.rs")
+        .expect("query file")
+        .expect("lib.rs record");
+    assert_eq!(lib_file.language, "rust");
+    assert!(lib_file.symbol_count >= 3);
+
+    // Verify symbol records have correct provenance.
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("treesitter-repo", "src/lib.rs")
+        .expect("list symbols");
+    assert!(symbol_ids.len() >= 3);
+
+    // Verify source_adapter provenance on a symbol.
+    let first_sym = db
+        .symbols()
+        .get(&symbol_ids[0])
+        .expect("get symbol")
+        .expect("symbol exists");
+    assert!(
+        first_sym.source_adapter.contains("syntax-treesitter"),
+        "source_adapter should identify tree-sitter: {}",
+        first_sym.source_adapter
+    );
+    assert_eq!(first_sym.quality_level, QualityLevel::Syntax);
+
+    // Verify blobs were written for both files.
+    let lib_content = std::fs::read(src.join("lib.rs")).expect("read lib.rs");
+    let lib_hash = store::content_hash(&lib_content);
+    assert!(blob_store.exists(&lib_hash).expect("blob exists"));
+
+    let main_content = std::fs::read(src.join("main.rs")).expect("read main.rs");
+    let main_hash = store::content_hash(&main_content);
+    assert!(blob_store.exists(&main_hash).expect("blob exists"));
+}
+
+#[test]
+fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+
+    // Write a Rust file (supported) and a Python file (unsupported by tree-sitter router).
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write rs");
+    std::fs::write(repo_dir.path().join("script.py"), "print('hi')\n").expect("write py");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "mixed-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // Rust file parsed successfully.
+    assert_eq!(result.metrics.files_parsed, 1);
+
+    // Python file recorded as an error (no adapter available).
+    let py_errors: Vec<_> = result
+        .file_errors
+        .iter()
+        .filter(|e| e.path.to_string_lossy().contains("script.py"))
+        .collect();
+    assert!(
+        !py_errors.is_empty(),
+        "expected error for unsupported Python file"
+    );
+    assert!(
+        py_errors[0].error.contains("no adapter"),
+        "error should indicate no adapter: {}",
+        py_errors[0].error
+    );
+    // No adapter was tried, so adapter_id should be None.
+    assert!(
+        py_errors[0].adapter_id.is_none(),
+        "adapter_id should be None when no adapters available"
+    );
+
+    // Repo still persisted with the successful file.
+    let repo = db
+        .repos()
+        .get("mixed-repo")
+        .expect("query repo")
+        .expect("repo record");
+    assert_eq!(repo.file_count, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Adapter fallback and error provenance
+// ---------------------------------------------------------------------------
+
+/// An adapter that always fails with an Internal error.
+struct FailingAdapter;
+
+impl LanguageAdapter for FailingAdapter {
+    fn adapter_id(&self) -> &str {
+        "failing-adapter"
+    }
+
+    fn language(&self) -> &str {
+        "rust"
+    }
+
+    fn capabilities(&self) -> &AdapterCapabilities {
+        const CAPS: AdapterCapabilities = AdapterCapabilities {
+            quality_level: QualityLevel::Syntax,
+            default_confidence: 0.7,
+            supports_type_refs: false,
+            supports_call_refs: false,
+            supports_container_refs: false,
+            supports_doc_extraction: false,
+        };
+        &CAPS
+    }
+
+    fn index_file(
+        &self,
+        _ctx: &IndexContext,
+        _file: &SourceFile,
+    ) -> Result<AdapterOutput, AdapterError> {
+        Err(AdapterError::Parse {
+            path: _file.relative_path.clone(),
+            reason: "simulated failure".to_string(),
+        })
+    }
+}
+
+/// Router that returns a failing adapter first, then the stub adapter.
+/// Verifies the pipeline falls through to the second adapter on error.
+struct FallbackRouter {
+    failing: FailingAdapter,
+    fallback: StubAdapter,
+}
+
+impl FallbackRouter {
+    fn new() -> Self {
+        Self {
+            failing: FailingAdapter,
+            fallback: StubAdapter,
+        }
+    }
+}
+
+impl AdapterRouter for FallbackRouter {
+    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
+        if language == "rust" {
+            vec![&self.failing, &self.fallback]
+        } else {
+            vec![]
+        }
+    }
+}
+
+#[test]
+fn adapter_fallback_continues_past_failing_adapter() {
+    let repo_dir = setup_test_repo();
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = FallbackRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "fallback-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // The file should have been parsed by the fallback adapter.
+    assert_eq!(
+        result.metrics.files_parsed, 1,
+        "fallback adapter should have succeeded"
+    );
+
+    // No file errors — the failing adapter's error should not prevent success.
+    assert!(
+        result.file_errors.is_empty(),
+        "file should have been parsed by fallback adapter, got errors: {:?}",
+        result.file_errors
+    );
+
+    // Verify the symbol was persisted.
+    let repo = db
+        .repos()
+        .get("fallback-repo")
+        .expect("query repo")
+        .expect("repo record");
+    assert!(repo.symbol_count >= 1);
+}
+
+/// Router that only returns the failing adapter — no fallback.
+struct FailOnlyRouter {
+    failing: FailingAdapter,
+}
+
+impl FailOnlyRouter {
+    fn new() -> Self {
+        Self {
+            failing: FailingAdapter,
+        }
+    }
+}
+
+impl AdapterRouter for FailOnlyRouter {
+    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
+        if language == "rust" {
+            vec![&self.failing]
+        } else {
+            vec![]
+        }
+    }
+}
+
+#[test]
+fn adapter_error_carries_adapter_id_provenance() {
+    let repo_dir = setup_test_repo();
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = FailOnlyRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "fail-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // No files parsed.
+    assert_eq!(result.metrics.files_parsed, 0);
+
+    // Error carries the adapter ID for provenance.
+    let rs_errors: Vec<_> = result
+        .file_errors
+        .iter()
+        .filter(|e| e.path.to_string_lossy().contains("main.rs"))
+        .collect();
+    assert!(!rs_errors.is_empty(), "expected error for main.rs");
+    assert_eq!(
+        rs_errors[0].adapter_id.as_deref(),
+        Some("failing-adapter"),
+        "error should carry the failing adapter's ID"
+    );
+    assert!(
+        rs_errors[0].error.contains("simulated failure"),
+        "error message should contain adapter error: {}",
+        rs_errors[0].error
+    );
 }
 
 // ---------------------------------------------------------------------------

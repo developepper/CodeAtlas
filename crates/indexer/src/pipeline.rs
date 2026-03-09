@@ -1,5 +1,7 @@
 //! Top-level pipeline orchestration.
 
+use std::collections::HashSet;
+
 use tracing::info;
 
 use crate::context::PipelineContext;
@@ -24,15 +26,16 @@ pub struct IndexResult {
 
 /// Runs the full indexing pipeline: discovery → parse → persist.
 ///
-/// The metadata store is passed separately from the pipeline context so that
-/// only the persist stage borrows it mutably, while discovery and parse
-/// operate with an immutable context.
+/// The metadata store and blob store are passed separately from the pipeline
+/// context so that only the persist stage borrows them, while discovery and
+/// parse operate with an immutable context.
 ///
 /// Returns an [`IndexResult`] with aggregate metrics and any per-file
 /// errors encountered during parsing.
 pub fn run(
     ctx: &PipelineContext<'_>,
     store: &mut store::MetadataStore,
+    blob_store: &store::BlobStore,
 ) -> Result<IndexResult, PipelineError> {
     info!(repo_id = %ctx.repo_id, "pipeline started");
 
@@ -48,13 +51,18 @@ pub fn run(
         .map(|f| f.output.symbols.len())
         .sum();
 
-    // Stage 3: Persist
-    stage::persist(ctx, store, &parse_output)?;
+    // Stage 3: Persist (blobs first, then metadata in a transaction)
+    stage::persist(ctx, store, blob_store, &parse_output)?;
 
     let metrics = IndexMetrics {
         files_discovered: discovery.metrics.files_discovered,
         files_parsed: parse_output.parsed_files.len(),
-        files_errored: parse_output.file_errors.len(),
+        files_errored: parse_output
+            .file_errors
+            .iter()
+            .map(|e| &e.path)
+            .collect::<HashSet<_>>()
+            .len(),
         symbols_extracted,
     };
 
