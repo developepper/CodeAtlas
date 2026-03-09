@@ -6,8 +6,13 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+pub mod schema_version;
 pub mod symbol_id;
 
+pub use schema_version::{
+    current_index_schema_version, migration_decision, parse_schema_version,
+    CoreModelMigrationContract, MigrationContract, MigrationDecision, SchemaVersion,
+};
 pub use symbol_id::{
     build_symbol_id, disambiguate_symbol_id, normalize_file_path, normalize_qualified_name,
     parse_symbol_id, validate_symbol_id, ParsedSymbolId,
@@ -268,6 +273,7 @@ impl Validate for RepoRecord {
         require_non_empty(&self.indexed_at, "indexed_at")?;
         require_non_empty(&self.index_version, "index_version")?;
 
+        parse_schema_version(&self.index_version)?;
         validate_rfc3339_timestamp(&self.indexed_at, "indexed_at")?;
         validate_optional_string(&self.git_head, "git_head")?;
 
@@ -412,7 +418,7 @@ mod tests {
             display_name: "CodeAtlas".to_string(),
             source_root: "/repo".to_string(),
             indexed_at: "2026-03-09T00:00:00Z".to_string(),
-            index_version: "v1".to_string(),
+            index_version: "1.0.0".to_string(),
             language_counts,
             file_count: 10,
             symbol_count: 90,
