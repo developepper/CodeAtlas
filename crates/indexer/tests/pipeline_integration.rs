@@ -871,6 +871,194 @@ fn reindex_cleans_up_removed_symbols_within_file() {
 }
 
 // ---------------------------------------------------------------------------
+// Enrichment field persistence
+// ---------------------------------------------------------------------------
+
+#[test]
+fn enrichment_fields_persisted_for_files_and_symbols() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+
+    std::fs::write(
+        src.join("lib.rs"),
+        r#"/// A configuration holder.
+pub struct Config {
+    pub name: String,
+}
+
+impl Config {
+    /// Creates a new Config.
+    pub fn new(name: &str) -> Self {
+        Self { name: name.to_string() }
+    }
+}
+
+pub fn greet(config: &Config) -> String {
+    format!("Hello, {}!", config.name)
+}
+"#,
+    )
+    .expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "enrich-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+    assert!(result.metrics.files_parsed >= 1);
+
+    // Verify file summary is heuristic (not the old hardcoded placeholder).
+    let file = db
+        .files()
+        .get("enrich-repo", "src/lib.rs")
+        .expect("query file")
+        .expect("file record exists");
+    assert!(
+        file.summary.contains("function") || file.summary.contains("class"),
+        "file summary should describe symbol kinds: {}",
+        file.summary
+    );
+    assert!(
+        !file.summary.starts_with("rust source file\n"),
+        "file summary should not be the old placeholder"
+    );
+
+    // Verify symbol summaries and keywords are populated.
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("enrich-repo", "src/lib.rs")
+        .expect("list symbols");
+    assert!(symbol_ids.len() >= 3, "expected Config, new, greet");
+
+    let mut has_docstring_summary = false;
+    let mut has_keywords = false;
+
+    for id in &symbol_ids {
+        let sym = db
+            .symbols()
+            .get(id)
+            .expect("get symbol")
+            .expect("symbol exists");
+
+        // Every symbol should have a summary.
+        assert!(
+            sym.summary.is_some(),
+            "symbol {} should have a summary",
+            sym.name
+        );
+
+        // Symbols with docstrings should use the docstring as summary.
+        if sym.docstring.is_some() {
+            let summary = sym.summary.as_ref().unwrap();
+            // Should be based on docstring first sentence, not signature.
+            assert!(
+                !summary.starts_with("Function ") && !summary.starts_with("Class "),
+                "symbol {} with docstring should use docstring summary, got: {}",
+                sym.name,
+                summary
+            );
+            has_docstring_summary = true;
+        }
+
+        // At least some symbols should have keywords.
+        if let Some(kw) = &sym.keywords {
+            assert!(!kw.is_empty(), "keywords should not be empty");
+            // Keywords should be sorted and deduplicated.
+            let mut sorted = kw.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(kw, &sorted, "keywords should be sorted and deduplicated");
+            has_keywords = true;
+        }
+    }
+
+    assert!(
+        has_docstring_summary,
+        "at least one symbol should have a docstring-based summary"
+    );
+    assert!(
+        has_keywords,
+        "at least one symbol should have extracted keywords"
+    );
+}
+
+#[test]
+fn enrichment_is_deterministic_across_runs() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(
+        repo_dir.path().join("main.rs"),
+        "fn main() {}\npub fn helper() {}\n",
+    )
+    .expect("write main.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+
+    // Run pipeline twice with separate DBs.
+    let mut db1 = store::MetadataStore::open_in_memory().expect("open store");
+    let mut db2 = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "det-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    run(&ctx, &mut db1, &blob_store).expect("run 1");
+    run(&ctx, &mut db2, &blob_store).expect("run 2");
+
+    // Compare file summaries.
+    let f1 = db1
+        .files()
+        .get("det-repo", "main.rs")
+        .unwrap()
+        .expect("file 1");
+    let f2 = db2
+        .files()
+        .get("det-repo", "main.rs")
+        .unwrap()
+        .expect("file 2");
+    assert_eq!(
+        f1.summary, f2.summary,
+        "file summary should be deterministic"
+    );
+
+    // Compare symbol summaries and keywords.
+    let ids1 = db1
+        .symbols()
+        .list_ids_for_file("det-repo", "main.rs")
+        .unwrap();
+    let ids2 = db2
+        .symbols()
+        .list_ids_for_file("det-repo", "main.rs")
+        .unwrap();
+    assert_eq!(ids1, ids2);
+
+    for (id1, id2) in ids1.iter().zip(ids2.iter()) {
+        let s1 = db1.symbols().get(id1).unwrap().expect("sym 1");
+        let s2 = db2.symbols().get(id2).unwrap().expect("sym 2");
+        assert_eq!(
+            s1.summary, s2.summary,
+            "symbol summary should be deterministic"
+        );
+        assert_eq!(s1.keywords, s2.keywords, "keywords should be deterministic");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Adapter failure isolation
 // ---------------------------------------------------------------------------
 

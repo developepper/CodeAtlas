@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 pub mod context;
+pub mod enrich;
 pub mod pipeline;
 pub mod stage;
 

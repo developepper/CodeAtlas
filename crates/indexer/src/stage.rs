@@ -18,6 +18,7 @@ use time::OffsetDateTime;
 use tracing::{debug, info, warn};
 
 use crate::context::PipelineContext;
+use crate::enrich;
 use crate::PipelineError;
 
 // ---------------------------------------------------------------------------
@@ -395,7 +396,7 @@ pub fn persist(
             file_path: file_path_str.to_string(),
             language: parsed.language.clone(),
             file_hash: parsed.content_hash.clone(),
-            summary: format!("{} source file", parsed.language),
+            summary: enrich::file_summary(&parsed.language, &parsed.output.symbols),
             symbol_count: stats.symbol_count,
             quality_mix,
             updated_at: now.clone(),
@@ -436,6 +437,7 @@ pub fn persist(
 
             let confidence = sym.confidence_score.unwrap_or(default_confidence);
 
+            let keywords = enrich::extract_keywords(sym);
             let record = SymbolRecord {
                 id: symbol_id,
                 repo_id: ctx.repo_id.clone(),
@@ -455,9 +457,13 @@ pub fn persist(
                 source_adapter: parsed.output.source_adapter.clone(),
                 indexed_at: now.clone(),
                 docstring: sym.docstring.clone(),
-                summary: None,
+                summary: Some(enrich::symbol_summary(sym)),
                 parent_symbol_id: None,
-                keywords: None,
+                keywords: if keywords.is_empty() {
+                    None
+                } else {
+                    Some(keywords)
+                },
                 decorators_or_attributes: None,
                 semantic_refs: None,
             };
