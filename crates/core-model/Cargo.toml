@@ -1,0 +1,13 @@
+[package]
+name = "core-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
