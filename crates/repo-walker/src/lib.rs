@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobMatcher};
@@ -12,10 +13,25 @@ pub struct DiscoveredFile {
     pub absolute_path: PathBuf,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct WalkerOptions {
     pub extra_ignore_rules: Vec<String>,
     pub include_git_dir: bool,
+    pub max_file_size_bytes: Option<u64>,
+    pub max_file_count: Option<usize>,
+    pub skip_binary_files: bool,
+}
+
+impl Default for WalkerOptions {
+    fn default() -> Self {
+        Self {
+            extra_ignore_rules: Vec::new(),
+            include_git_dir: false,
+            max_file_size_bytes: None,
+            max_file_count: None,
+            skip_binary_files: true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -27,6 +43,10 @@ pub enum WalkError {
     InvalidIgnoreRule {
         rule: String,
         reason: String,
+    },
+    LimitExceeded {
+        kind: &'static str,
+        limit: usize,
     },
     Io {
         path: Option<PathBuf>,
@@ -42,6 +62,9 @@ impl fmt::Display for WalkError {
             }
             Self::InvalidIgnoreRule { rule, reason } => {
                 write!(f, "invalid ignore rule '{rule}': {reason}")
+            }
+            Self::LimitExceeded { kind, limit } => {
+                write!(f, "configured {kind} limit exceeded: {limit}")
             }
             Self::Io { path, source } => {
                 if let Some(path) = path {
@@ -113,13 +136,38 @@ pub fn walk_repository(
                 source: std::io::Error::other(source.to_string()),
             })?
             .to_path_buf();
+        validate_relative_path(&relative)?;
 
         if !options.include_git_dir && starts_with_git_dir(&relative) {
             continue;
         }
 
+        // `follow_links(false)` prevents descending into symlinked directories,
+        // but symlink entries can still be yielded as files. Explicitly drop them.
+        let metadata = symlink_metadata(&absolute)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+
         if is_ignored_by_extra_rules(&relative, &extra_rules) {
             continue;
+        }
+
+        if exceeds_size_cap(metadata.len(), options.max_file_size_bytes) {
+            continue;
+        }
+
+        if options.skip_binary_files && is_probably_binary_file(&absolute)? {
+            continue;
+        }
+
+        if let Some(limit) = options.max_file_count {
+            if discovered.len() >= limit {
+                return Err(WalkError::LimitExceeded {
+                    kind: "file_count",
+                    limit,
+                });
+            }
         }
 
         discovered.push(DiscoveredFile {
@@ -211,6 +259,64 @@ fn starts_with_git_dir(path: &Path) -> bool {
         .is_some_and(|component| component.as_os_str() == ".git")
 }
 
+fn validate_relative_path(path: &Path) -> Result<(), WalkError> {
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(WalkError::Io {
+                    path: Some(path.to_path_buf()),
+                    source: std::io::Error::other("detected unsafe traversal component"),
+                });
+            }
+            std::path::Component::CurDir | std::path::Component::Normal(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn symlink_metadata(path: &Path) -> Result<fs::Metadata, WalkError> {
+    fs::symlink_metadata(path).map_err(|source| WalkError::Io {
+        path: Some(path.to_path_buf()),
+        source,
+    })
+}
+
+fn exceeds_size_cap(file_size: u64, max_file_size_bytes: Option<u64>) -> bool {
+    let Some(limit) = max_file_size_bytes else {
+        return false;
+    };
+    file_size > limit
+}
+
+fn is_probably_binary_file(path: &Path) -> Result<bool, WalkError> {
+    const SAMPLE_BYTES: usize = 8 * 1024;
+    const KNOWN_BINARY_EXTENSIONS: &[&str] = &[
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "pdf", "zip", "gz", "tar", "7z", "exe",
+        "dll", "so", "dylib", "class", "jar", "woff", "woff2",
+    ];
+
+    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+        let ext = extension.to_ascii_lowercase();
+        if KNOWN_BINARY_EXTENSIONS.contains(&ext.as_str()) {
+            return Ok(true);
+        }
+    }
+
+    let mut file = fs::File::open(path).map_err(|source| WalkError::Io {
+        path: Some(path.to_path_buf()),
+        source,
+    })?;
+    let mut buffer = [0_u8; SAMPLE_BYTES];
+    let read = file.read(&mut buffer).map_err(|source| WalkError::Io {
+        path: Some(path.to_path_buf()),
+        source,
+    })?;
+
+    Ok(buffer[..read].contains(&0))
+}
+
 fn is_ignored_by_extra_rules(path: &Path, rules: &[IgnoreRule]) -> bool {
     let candidate = path.to_string_lossy().replace('\\', "/");
     let mut ignored = false;
@@ -226,7 +332,9 @@ fn is_ignored_by_extra_rules(path: &Path, rules: &[IgnoreRule]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_ignore_rules, is_ignored_by_extra_rules};
+    use super::{
+        compile_ignore_rules, exceeds_size_cap, is_ignored_by_extra_rules, validate_relative_path,
+    };
     use std::path::Path;
 
     #[test]
@@ -269,5 +377,18 @@ mod tests {
         let rules = compile_ignore_rules(&["*.log".to_string()]).expect("compile rules");
         assert!(is_ignored_by_extra_rules(Path::new("logs/run.log"), &rules));
         assert!(is_ignored_by_extra_rules(Path::new("run.log"), &rules));
+    }
+
+    #[test]
+    fn traversal_components_are_rejected() {
+        let err = validate_relative_path(Path::new("../outside.txt"))
+            .expect_err("path traversal should fail");
+        assert!(err.to_string().contains("unsafe traversal"));
+    }
+
+    #[test]
+    fn size_cap_is_strictly_greater_than_limit() {
+        assert!(!exceeds_size_cap(5, Some(5)));
+        assert!(exceeds_size_cap(6, Some(5)));
     }
 }
