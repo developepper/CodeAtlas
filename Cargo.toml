@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core-model", "crates/repo-walker", "crates/workspace-placeholder"]
+members = ["crates/adapter-api", "crates/core-model", "crates/repo-walker", "crates/workspace-placeholder"]
 resolver = "2"
 
 [workspace.package]
@@ -9,6 +9,7 @@ rust-version = "1.81"
 repository = "https://github.com/developepper/CodeAtlas"
 
 [workspace.dependencies]
+core-model = { path = "crates/core-model" }
 globset = "0.4.16"
 ignore = "0.4.24"
 serde = { version = "1.0.219", features = ["derive"] }
