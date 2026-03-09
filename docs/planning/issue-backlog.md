@@ -1,57 +1,60 @@
 # GitHub Issue Backlog
 
 This backlog is designed for one-PR-per-issue execution.
-Progress note: Epics 0, 1, 2 (discovery), and 3 (adapters) are complete. Epic 4 (storage) is in progress — metadata store (#28) is merged; blob storage (#29) and atomic commit (#30) are next. The indexer skeleton (#60, last Epic 3 item) is unblocked and on the critical path.
 
-## Epic 0: Repository Governance and CI Foundation
+Progress (updated 2026-03-09): Milestones M0–M4 are complete. The full
+indexing pipeline is operational — discovery, adapter routing, tree-sitter
+parsing, content-addressed blob storage, metadata persistence with atomic
+commits, aggregate recomputation, stale data cleanup, and enrichment (file
+summaries, symbol summaries, keyword extraction). 259 tests pass across 6
+crates. **M5 Query is the next working milestone** — all dependencies are
+satisfied. Critical path: #61 → #32 → #33 → #34 → #35.
 
-- Ticket: Initialize Rust workspace and baseline repo files
-  - Deliverables: `Cargo.toml` workspace root, `.gitignore`, `README.md`, `rust-toolchain.toml`.
-  - DoD: workspace builds with a placeholder crate.
-- Ticket: Add contribution governance files
-  - Deliverables: `CONTRIBUTING.md`, `CODEOWNERS`, issue templates, PR template.
-  - DoD: templates visible in GitHub UI and validated.
-- Ticket: Add CI workflow for PR and push to master
-  - Deliverables: workflow with fmt, clippy, tests, build, doc checks.
-  - DoD: workflow required and passing.
-- Manual: Configure branch protection and required checks
-  - Deliverables: protected `master`, required review/checks.
-  - DoD: direct pushes blocked.
+## Epic 0: Repository Governance and CI Foundation (complete)
 
-## Epic 1: Workspace and Core Model
+- ~~Ticket: Initialize Rust workspace and baseline repo files~~ (#12)
+- ~~Ticket: Add contribution governance files~~ (#13)
+- ~~Ticket: Add CI workflow for PR and push to master~~ (#14)
+- ~~Manual: Configure branch protection and required checks~~ (#57, #58, #59, #56)
 
-- Ticket: Create `core-model` crate with canonical schemas
-- Ticket: Implement stable symbol ID construction and validation
-- Ticket: Add serialization/deserialization compatibility tests
-- Ticket: Add schema versioning baseline and migration contract
+## Epic 1: Workspace and Core Model (complete)
 
-## Epic 2: Ingestion and Discovery
+- ~~Ticket: Create `core-model` crate with canonical schemas~~ (#16)
+- ~~Ticket: Implement stable symbol ID construction and validation~~ (#17)
+- ~~Ticket: Add serialization/deserialization compatibility tests~~ (#18)
+- ~~Ticket: Add schema versioning baseline and migration contract~~ (#19)
 
-- Ticket: Implement repository walker with ignore rules
-- Ticket: Add security filters (symlink/traversal/binary/size caps)
-- Ticket: Add language detection with deterministic fallback
-- Ticket: Add discovery metrics and structured logging
+## Epic 2: Ingestion and Discovery (complete)
 
-## Epic 3: Adapter API and Syntax Baseline
+- ~~Ticket: Implement repository walker with ignore rules~~ (#20)
+- ~~Ticket: Add security filters (symlink/traversal/binary/size caps)~~ (#21)
+- ~~Ticket: Add language detection with deterministic fallback~~ (#22)
+- ~~Ticket: Add discovery metrics and structured logging~~ (#23)
+- ~~Ticket: Wire indexer pipeline end-to-end~~ (#68)
+- ~~Ticket: Implement enrichment stage (file summary, keywords, searchable fields)~~ (#69)
 
-- Ticket: Create `adapter-api` traits and capability model
-- Ticket: Create `adapter-syntax-treesitter` baseline crate
-- Ticket: Implement adapter routing policy (`semantic_required/preferred/syntax_only`)
-- Ticket: Add adapter contract test harness with fixtures
+## Epic 3: Adapter API and Syntax Baseline (complete)
 
-## Epic 4: Store and Index Commit Path
+- ~~Ticket: Create `adapter-api` traits and capability model~~ (#24)
+- ~~Ticket: Create `adapter-syntax-treesitter` baseline crate~~ (#25)
+- ~~Ticket: Implement adapter routing policy~~ (#26)
+- ~~Ticket: Add adapter contract test harness with fixtures~~ (#27)
+- ~~Ticket: Create indexer crate and pipeline orchestration skeleton~~ (#60)
 
-- Ticket: Create metadata store schema (SQLite-first)
-- Ticket: Create content-addressed blob storage component
-- Ticket: Implement staging-to-swap atomic index commit
-- Ticket: Add repository/file/symbol aggregate updates
+## Epic 4: Store and Index Commit Path (complete)
 
-## Epic 5: Query Engine
+- ~~Ticket: Create metadata store schema (SQLite-first)~~ (#28)
+- ~~Ticket: Create content-addressed blob storage component~~ (#29)
+- ~~Ticket: Implement staging-to-swap atomic index commit~~ (#30)
+- ~~Ticket: Add repository/file/symbol aggregate updates~~ (#31)
 
-- Ticket: Implement `search_symbols` with deterministic ranking/ties
-- Ticket: Implement `get_symbol` and `get_symbols`
-- Ticket: Implement file and repository outline endpoints
-- Ticket: Implement `search_text` fallback
+## Epic 5: Query Engine (next)
+
+- Ticket: Create query-engine crate scaffold and public query trait (#61, p0)
+- Ticket: Implement `search_symbols` with deterministic ranking/ties (#32, p0)
+- Ticket: Implement `get_symbol` and `get_symbols` (#33, p0)
+- Ticket: Implement file and repository outline queries (#34, p1)
+- Ticket: Implement `search_text` fallback (#35, p1)
 
 ## Epic 6: MCP Server
 
