@@ -31,8 +31,8 @@ fn walker_honors_gitignore_and_returns_deterministic_order() {
         .write("subdir/keep.tmp", "kept\n")
         .expect("write file");
 
-    let results = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
-    let paths = relative_paths(&results);
+    let result = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
+    let paths = relative_paths(&result.files);
 
     assert_eq!(
         paths,
@@ -43,6 +43,7 @@ fn walker_honors_gitignore_and_returns_deterministic_order() {
             "subdir/keep.tmp".to_string(),
         ]
     );
+    assert_eq!(result.metrics.files_discovered, 4);
 }
 
 #[test]
@@ -58,18 +59,17 @@ fn walker_applies_extra_ignore_rules_with_negation() {
 
     let options = WalkerOptions {
         extra_ignore_rules: vec!["src/**".to_string(), "!src/main.rs".to_string()],
-        include_git_dir: false,
-        max_file_size_bytes: None,
-        max_file_count: None,
-        skip_binary_files: true,
+        ..WalkerOptions::default()
     };
-    let results = walk_repository(fixture.path(), &options).expect("walk repo");
-    let paths = relative_paths(&results);
+    let result = walk_repository(fixture.path(), &options).expect("walk repo");
+    let paths = relative_paths(&result.files);
 
     assert_eq!(
         paths,
         vec!["README.md".to_string(), "src/main.rs".to_string()]
     );
+    assert_eq!(result.metrics.files_discovered, 2);
+    assert_eq!(result.metrics.files_skipped_extra_rules, 1);
 }
 
 #[test]
@@ -84,8 +84,8 @@ fn walker_honors_dot_ignore_files() {
     fixture.write("tmp/keep.txt", "keep\n").expect("write file");
     fixture.write("README.md", "# Repo\n").expect("write file");
 
-    let results = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
-    let paths = relative_paths(&results);
+    let result = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
+    let paths = relative_paths(&result.files);
 
     assert_eq!(
         paths,
@@ -114,9 +114,10 @@ fn walker_skips_binary_files_by_default() {
         .write_bytes("bin/data.bin", &[0, 1, 2, 3, 4, 5])
         .expect("write binary file");
 
-    let results = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
-    let paths = relative_paths(&results);
+    let result = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
+    let paths = relative_paths(&result.files);
     assert_eq!(paths, vec!["src/main.rs".to_string()]);
+    assert_eq!(result.metrics.files_skipped_binary, 1);
 }
 
 #[test]
@@ -133,10 +134,11 @@ fn walker_applies_file_size_cap() {
         max_file_size_bytes: Some(5),
         ..WalkerOptions::default()
     };
-    let results = walk_repository(fixture.path(), &options).expect("walk repo");
-    let paths = relative_paths(&results);
+    let result = walk_repository(fixture.path(), &options).expect("walk repo");
+    let paths = relative_paths(&result.files);
     // Boundary behavior: exactly 5 bytes is included, >5 bytes is excluded.
     assert_eq!(paths, vec!["small.txt".to_string()]);
+    assert_eq!(result.metrics.files_skipped_size, 1);
 }
 
 #[test]
@@ -152,12 +154,13 @@ fn walker_skips_symlinked_files() {
         .symlink_file("outside.txt", "src/outside-link.txt")
         .expect("create symlink");
 
-    let results = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
-    let paths = relative_paths(&results);
+    let result = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
+    let paths = relative_paths(&result.files);
     assert_eq!(
         paths,
         vec!["outside.txt".to_string(), "src/main.rs".to_string()]
     );
+    assert_eq!(result.metrics.files_skipped_symlink, 1);
 }
 
 #[test]
@@ -168,9 +171,10 @@ fn walker_skips_known_binary_extensions_even_without_nul_bytes() {
         .expect("write extension-marked binary");
     fixture.write("README.md", "# Repo\n").expect("write file");
 
-    let results = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
-    let paths = relative_paths(&results);
+    let result = walk_repository(fixture.path(), &WalkerOptions::default()).expect("walk repo");
+    let paths = relative_paths(&result.files);
     assert_eq!(paths, vec!["README.md".to_string()]);
+    assert_eq!(result.metrics.files_skipped_binary, 1);
 }
 
 #[test]
@@ -185,6 +189,47 @@ fn walker_enforces_file_count_limit() {
     };
     let err = walk_repository(fixture.path(), &options).expect_err("expected file count limit");
     assert!(err.to_string().contains("file_count"));
+}
+
+#[test]
+fn metrics_reflect_all_skip_reasons() {
+    let fixture = FixtureRepo::new().expect("create fixture repo");
+    // Accepted files
+    fixture
+        .write("src/main.rs", "fn main() {}\n")
+        .expect("write text");
+    // Binary file (nul byte)
+    fixture
+        .write_bytes("bin/data.bin", &[0, 1, 2, 3])
+        .expect("write binary");
+    // Oversized file
+    fixture
+        .write("big.txt", &"x".repeat(200))
+        .expect("write big");
+    // Extra-rule-ignored file
+    fixture
+        .write("tmp/cache.txt", "cache")
+        .expect("write ignored");
+    // Symlinked file
+    fixture.write("target.txt", "target").expect("write target");
+    fixture
+        .symlink_file("target.txt", "link.txt")
+        .expect("create symlink");
+
+    let options = WalkerOptions {
+        extra_ignore_rules: vec!["tmp/**".to_string()],
+        max_file_size_bytes: Some(100),
+        ..WalkerOptions::default()
+    };
+    let result = walk_repository(fixture.path(), &options).expect("walk repo");
+
+    assert_eq!(result.metrics.files_discovered, 2); // src/main.rs + target.txt
+    assert_eq!(result.metrics.files_skipped_binary, 1);
+    assert_eq!(result.metrics.files_skipped_size, 1);
+    assert_eq!(result.metrics.files_skipped_extra_rules, 1);
+    assert_eq!(result.metrics.files_skipped_symlink, 1);
+    assert_eq!(result.metrics.total_entries_evaluated(), 6);
+    assert!(result.metrics.walk_duration_ms < 10_000); // sanity: under 10s
 }
 
 fn relative_paths(results: &[repo_walker::DiscoveredFile]) -> Vec<String> {

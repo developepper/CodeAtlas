@@ -3,9 +3,11 @@ use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
+use tracing::{debug, info, info_span, warn};
 
 pub mod language;
 
@@ -24,6 +26,11 @@ pub struct WalkerOptions {
     pub max_file_size_bytes: Option<u64>,
     pub max_file_count: Option<usize>,
     pub skip_binary_files: bool,
+    /// Optional correlation ID attached to every log event emitted during the
+    /// walk, allowing logs from a single request/job to be traced end-to-end.
+    /// When `None`, the field is still emitted as an empty string for schema
+    /// consistency in structured log consumers.
+    pub correlation_id: Option<String>,
 }
 
 impl Default for WalkerOptions {
@@ -34,8 +41,62 @@ impl Default for WalkerOptions {
             max_file_size_bytes: None,
             max_file_count: None,
             skip_binary_files: true,
+            correlation_id: None,
         }
     }
+}
+
+/// Metrics collected during repository discovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryMetrics {
+    /// Number of files accepted by all filters.
+    pub files_discovered: usize,
+    /// Files skipped because they reside under `.git/`.
+    pub files_skipped_git_dir: usize,
+    /// Files skipped because they are symlinks.
+    pub files_skipped_symlink: usize,
+    /// Files skipped by user-provided extra ignore rules.
+    pub files_skipped_extra_rules: usize,
+    /// Files skipped because they exceed the configured size cap.
+    pub files_skipped_size: usize,
+    /// Files skipped because they appear to be binary.
+    pub files_skipped_binary: usize,
+    /// Wall-clock duration of the walk in milliseconds.
+    /// Non-deterministic; do not assert on exact values in tests.
+    pub walk_duration_ms: u64,
+}
+
+impl DiscoveryMetrics {
+    fn new() -> Self {
+        Self {
+            files_discovered: 0,
+            files_skipped_git_dir: 0,
+            files_skipped_symlink: 0,
+            files_skipped_extra_rules: 0,
+            files_skipped_size: 0,
+            files_skipped_binary: 0,
+            walk_duration_ms: 0,
+        }
+    }
+
+    /// Total number of file entries evaluated (discovered + all skipped).
+    pub fn total_entries_evaluated(&self) -> usize {
+        self.files_discovered
+            + self.files_skipped_git_dir
+            + self.files_skipped_symlink
+            + self.files_skipped_extra_rules
+            + self.files_skipped_size
+            + self.files_skipped_binary
+    }
+}
+
+/// Result of a successful repository walk.
+#[derive(Debug)]
+pub struct WalkResult {
+    /// Discovered files, sorted by relative path.
+    pub files: Vec<DiscoveredFile>,
+    /// Metrics collected during the walk.
+    pub metrics: DiscoveryMetrics,
 }
 
 #[derive(Debug)]
@@ -96,15 +157,22 @@ struct IgnoreRule {
     is_ignore: bool,
 }
 
-pub fn walk_repository(
-    root: &Path,
-    options: &WalkerOptions,
-) -> Result<Vec<DiscoveredFile>, WalkError> {
+pub fn walk_repository(root: &Path, options: &WalkerOptions) -> Result<WalkResult, WalkError> {
+    let start = Instant::now();
+
     ensure_root_is_valid(root)?;
     let root = fs::canonicalize(root).map_err(|source| WalkError::Io {
         path: Some(root.to_path_buf()),
         source,
     })?;
+
+    // Intentionally emit an empty string when no correlation ID is provided,
+    // so the field is always present in structured logs for schema consistency.
+    let correlation_id = options.correlation_id.as_deref().unwrap_or("");
+    let span = info_span!("discovery", correlation_id = %correlation_id);
+    let _guard = span.enter();
+
+    info!(root = %root.display(), "discovery walk started");
 
     let extra_rules = compile_ignore_rules(&options.extra_ignore_rules)?;
     let mut builder = WalkBuilder::new(&root);
@@ -118,6 +186,7 @@ pub fn walk_repository(
     builder.follow_links(false);
 
     let mut discovered = Vec::new();
+    let mut metrics = DiscoveryMetrics::new();
 
     for entry in builder.build() {
         let entry = entry.map_err(|err| WalkError::Io {
@@ -128,6 +197,19 @@ pub fn walk_repository(
         let Some(file_type) = entry.file_type() else {
             continue;
         };
+
+        // Symlink check must precede is_file() because the walker may report
+        // symlinks with a non-file type, which would skip them without counting.
+        if file_type.is_symlink() {
+            metrics.files_skipped_symlink += 1;
+            debug!(
+                path = %entry.path().display(),
+                reason = "symlink",
+                "file skipped"
+            );
+            continue;
+        }
+
         if !file_type.is_file() {
             continue;
         }
@@ -143,30 +225,62 @@ pub fn walk_repository(
         validate_relative_path(&relative)?;
 
         if !options.include_git_dir && starts_with_git_dir(&relative) {
+            metrics.files_skipped_git_dir += 1;
+            debug!(
+                path = %relative.display(),
+                reason = "git_dir",
+                "file skipped"
+            );
             continue;
         }
 
-        // `follow_links(false)` prevents descending into symlinked directories,
-        // but symlink entries can still be yielded as files. Explicitly drop them.
+        // Safety net: even after the file_type check above, verify via
+        // symlink_metadata in case the walker resolved the symlink target type.
         let metadata = symlink_metadata(&absolute)?;
         if metadata.file_type().is_symlink() {
+            metrics.files_skipped_symlink += 1;
+            debug!(
+                path = %relative.display(),
+                reason = "symlink",
+                "file skipped"
+            );
             continue;
         }
 
         if is_ignored_by_extra_rules(&relative, &extra_rules) {
+            metrics.files_skipped_extra_rules += 1;
+            debug!(
+                path = %relative.display(),
+                reason = "extra_rules",
+                "file skipped"
+            );
             continue;
         }
 
         if exceeds_size_cap(metadata.len(), options.max_file_size_bytes) {
+            metrics.files_skipped_size += 1;
+            debug!(
+                path = %relative.display(),
+                reason = "size_cap",
+                file_size = metadata.len(),
+                "file skipped"
+            );
             continue;
         }
 
         if options.skip_binary_files && is_probably_binary_file(&absolute)? {
+            metrics.files_skipped_binary += 1;
+            debug!(
+                path = %relative.display(),
+                reason = "binary",
+                "file skipped"
+            );
             continue;
         }
 
         if let Some(limit) = options.max_file_count {
             if discovered.len() >= limit {
+                warn!(kind = "file_count", limit, "discovery limit exceeded");
                 return Err(WalkError::LimitExceeded {
                     kind: "file_count",
                     limit,
@@ -181,7 +295,25 @@ pub fn walk_repository(
     }
 
     discovered.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-    Ok(discovered)
+    metrics.files_discovered = discovered.len();
+    metrics.walk_duration_ms = start.elapsed().as_millis() as u64;
+
+    info!(
+        files_discovered = metrics.files_discovered,
+        files_skipped_git_dir = metrics.files_skipped_git_dir,
+        files_skipped_symlink = metrics.files_skipped_symlink,
+        files_skipped_extra_rules = metrics.files_skipped_extra_rules,
+        files_skipped_size = metrics.files_skipped_size,
+        files_skipped_binary = metrics.files_skipped_binary,
+        total_entries_evaluated = metrics.total_entries_evaluated(),
+        walk_duration_ms = metrics.walk_duration_ms,
+        "discovery walk completed"
+    );
+
+    Ok(WalkResult {
+        files: discovered,
+        metrics,
+    })
 }
 
 fn ensure_root_is_valid(root: &Path) -> Result<(), WalkError> {
@@ -394,5 +526,45 @@ mod tests {
     fn size_cap_is_strictly_greater_than_limit() {
         assert!(!exceeds_size_cap(5, Some(5)));
         assert!(exceeds_size_cap(6, Some(5)));
+    }
+
+    #[test]
+    fn discovery_metrics_total_entries_evaluated() {
+        use super::DiscoveryMetrics;
+        let mut m = DiscoveryMetrics::new();
+        m.files_discovered = 10;
+        m.files_skipped_git_dir = 1;
+        m.files_skipped_symlink = 2;
+        m.files_skipped_extra_rules = 3;
+        m.files_skipped_size = 4;
+        m.files_skipped_binary = 5;
+        assert_eq!(m.total_entries_evaluated(), 25);
+    }
+
+    /// Unit test: log field schema contract.
+    /// Verifies that `DiscoveryMetrics` exposes the exact fields that the
+    /// structured log events must contain per spec 13.1.
+    #[test]
+    fn discovery_metrics_field_schema() {
+        use super::DiscoveryMetrics;
+        let m = DiscoveryMetrics::new();
+        // Assert every metric field exists and initialises to its zero value.
+        assert_eq!(m.files_discovered, 0);
+        assert_eq!(m.files_skipped_git_dir, 0);
+        assert_eq!(m.files_skipped_symlink, 0);
+        assert_eq!(m.files_skipped_extra_rules, 0);
+        assert_eq!(m.files_skipped_size, 0);
+        assert_eq!(m.files_skipped_binary, 0);
+        assert_eq!(m.walk_duration_ms, 0);
+        assert_eq!(m.total_entries_evaluated(), 0);
+    }
+
+    /// Unit test: `WalkerOptions` carries an optional correlation ID
+    /// for structured log correlation per spec 13.2.
+    #[test]
+    fn walker_options_correlation_id_defaults_to_none() {
+        use super::WalkerOptions;
+        let opts = WalkerOptions::default();
+        assert!(opts.correlation_id.is_none());
     }
 }
