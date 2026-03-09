@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use core_model::{QualityLevel, SymbolKind, Validate, ValidationError, ValidationResult};
 
+pub mod router;
+
 // ---------------------------------------------------------------------------
 // Adapter selection policy
 // ---------------------------------------------------------------------------
@@ -83,11 +85,16 @@ impl AdapterCapabilities {
     }
 
     /// Returns `true` if this adapter satisfies the given policy.
+    ///
+    /// - `SemanticRequired`: only semantic adapters satisfy.
+    /// - `SemanticPreferred`: any adapter satisfies (semantic preferred, syntax accepted).
+    /// - `SyntaxOnly`: only syntax adapters satisfy (per spec §5.2: "syntax adapter only").
     #[must_use]
     pub fn satisfies(&self, policy: AdapterPolicy) -> bool {
         match policy {
             AdapterPolicy::SemanticRequired => self.quality_level == QualityLevel::Semantic,
-            AdapterPolicy::SemanticPreferred | AdapterPolicy::SyntaxOnly => true,
+            AdapterPolicy::SemanticPreferred => true,
+            AdapterPolicy::SyntaxOnly => self.quality_level == QualityLevel::Syntax,
         }
     }
 }
@@ -465,8 +472,8 @@ mod tests {
         assert!(syntax.satisfies(AdapterPolicy::SemanticPreferred));
         assert!(!syntax.satisfies(AdapterPolicy::SemanticRequired));
 
-        // Semantic adapter satisfies all policies.
-        assert!(semantic.satisfies(AdapterPolicy::SyntaxOnly));
+        // Semantic adapter satisfies semantic policies but NOT syntax_only.
+        assert!(!semantic.satisfies(AdapterPolicy::SyntaxOnly));
         assert!(semantic.satisfies(AdapterPolicy::SemanticPreferred));
         assert!(semantic.satisfies(AdapterPolicy::SemanticRequired));
     }
