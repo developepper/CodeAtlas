@@ -1,0 +1,15 @@
+[package]
+name = "adapter-syntax-treesitter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+adapter-api.workspace = true
+core-model.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

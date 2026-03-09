@@ -181,10 +181,17 @@ impl Validate for ExtractedSymbol {
 // ---------------------------------------------------------------------------
 
 /// The result of processing a single source file through an adapter.
+///
+/// Self-describing: carries provenance metadata so downstream consumers
+/// do not need to query the adapter separately.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdapterOutput {
     /// Symbols extracted from the file.
     pub symbols: Vec<ExtractedSymbol>,
+    /// Stable identifier of the adapter that produced this output.
+    pub source_adapter: String,
+    /// Quality level of the adapter that produced this output.
+    pub quality_level: QualityLevel,
 }
 
 // ---------------------------------------------------------------------------
@@ -382,6 +389,8 @@ mod tests {
                     docstring: None,
                     parent_qualified_name: None,
                 }],
+                source_adapter: "mock-syntax-rust".to_string(),
+                quality_level: QualityLevel::Syntax,
             })
         }
     }
