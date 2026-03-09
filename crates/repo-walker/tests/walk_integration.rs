@@ -1,8 +1,9 @@
-use std::fs;
 use std::path::Path;
 
 use repo_walker::{walk_repository, WalkerOptions};
-use tempfile::TempDir;
+
+mod common;
+use common::FixtureRepo;
 
 #[test]
 fn walker_honors_gitignore_and_returns_deterministic_order() {
@@ -191,55 +192,4 @@ fn relative_paths(results: &[repo_walker::DiscoveredFile]) -> Vec<String> {
         .iter()
         .map(|item| item.relative_path.to_string_lossy().replace('\\', "/"))
         .collect()
-}
-
-struct FixtureRepo {
-    tempdir: TempDir,
-}
-
-impl FixtureRepo {
-    fn new() -> Result<Self, std::io::Error> {
-        Ok(Self {
-            tempdir: tempfile::tempdir()?,
-        })
-    }
-
-    fn path(&self) -> &Path {
-        self.tempdir.path()
-    }
-
-    fn write(&self, rel: &str, contents: &str) -> Result<(), std::io::Error> {
-        let path = self.path().join(rel);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, contents)
-    }
-
-    fn write_bytes(&self, rel: &str, contents: &[u8]) -> Result<(), std::io::Error> {
-        let path = self.path().join(rel);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, contents)
-    }
-
-    fn symlink_file(&self, source_rel: &str, target_rel: &str) -> Result<(), std::io::Error> {
-        let source = self.path().join(source_rel);
-        let target = self.path().join(target_rel);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        create_symlink_file(&source, &target)
-    }
-}
-
-#[cfg(unix)]
-fn create_symlink_file(source: &Path, target: &Path) -> Result<(), std::io::Error> {
-    std::os::unix::fs::symlink(source, target)
-}
-
-#[cfg(windows)]
-fn create_symlink_file(source: &Path, target: &Path) -> Result<(), std::io::Error> {
-    std::os::windows::fs::symlink_file(source, target)
 }
