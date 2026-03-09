@@ -971,8 +971,7 @@ pub fn greet(config: &Config) -> String {
         }
 
         // At least some symbols should have keywords.
-        if sym.keywords.is_some() {
-            let kw = sym.keywords.as_ref().unwrap();
+        if let Some(kw) = &sym.keywords {
             assert!(!kw.is_empty(), "keywords should not be empty");
             // Keywords should be sorted and deduplicated.
             let mut sorted = kw.clone();
