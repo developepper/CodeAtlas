@@ -5,6 +5,9 @@ use adapter_api::{AdapterPolicy, AdapterRouter, IndexContext};
 /// Configuration and shared state for a single pipeline run.
 ///
 /// Constructed once per index invocation and threaded through every stage.
+/// The metadata store is **not** part of this context — it is passed
+/// separately (as `&mut`) to stages that need write access, keeping the
+/// context immutably shareable across read-only stages.
 pub struct PipelineContext<'a> {
     /// Unique identifier for the repository being indexed.
     pub repo_id: String,
@@ -12,8 +15,6 @@ pub struct PipelineContext<'a> {
     pub source_root: PathBuf,
     /// Adapter router for selecting language adapters.
     pub router: &'a dyn AdapterRouter,
-    /// Metadata store for persistence.
-    pub store: &'a store::MetadataStore,
     /// Default adapter selection policy applied when no per-language override
     /// is configured.
     pub default_policy: AdapterPolicy,

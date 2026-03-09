@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
+use rusqlite::Transaction;
 
 pub mod blob_store;
 mod file_store;
@@ -131,5 +132,55 @@ impl MetadataStore {
     /// Returns the current schema version stored in the database.
     pub fn schema_version(&self) -> Result<u32, StoreError> {
         migrations::current_version(&self.conn)
+    }
+
+    /// Begins a SQLite transaction and returns a [`StoreTransaction`] guard.
+    ///
+    /// All writes performed through the transaction's accessors are buffered
+    /// until [`StoreTransaction::commit`] is called. If the guard is dropped
+    /// without committing, all changes are rolled back automatically.
+    pub fn transaction(&mut self) -> Result<StoreTransaction<'_>, StoreError> {
+        let tx = self.conn.transaction()?;
+        Ok(StoreTransaction { tx })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StoreTransaction
+// ---------------------------------------------------------------------------
+
+/// A transactional guard over the metadata store.
+///
+/// Provides the same `repos()` / `files()` / `symbols()` accessors as
+/// [`MetadataStore`], but all writes are part of a single SQLite transaction.
+/// Call [`commit`](Self::commit) to atomically persist all changes, or simply
+/// drop the guard to roll back.
+pub struct StoreTransaction<'conn> {
+    tx: Transaction<'conn>,
+}
+
+impl<'conn> StoreTransaction<'conn> {
+    /// Returns the repo store accessor within this transaction.
+    #[must_use]
+    pub fn repos(&self) -> RepoStore<'_> {
+        RepoStore::new(&self.tx)
+    }
+
+    /// Returns the file store accessor within this transaction.
+    #[must_use]
+    pub fn files(&self) -> FileStore<'_> {
+        FileStore::new(&self.tx)
+    }
+
+    /// Returns the symbol store accessor within this transaction.
+    #[must_use]
+    pub fn symbols(&self) -> SymbolStore<'_> {
+        SymbolStore::new(&self.tx)
+    }
+
+    /// Atomically commits all writes performed through this transaction.
+    pub fn commit(self) -> Result<(), StoreError> {
+        self.tx.commit()?;
+        Ok(())
     }
 }
