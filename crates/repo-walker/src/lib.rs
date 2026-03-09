@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
 
+pub mod language;
+
+pub use language::{detect_language, detect_language_for_file, Language};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredFile {
     pub relative_path: PathBuf,
