@@ -23,10 +23,9 @@ jobs:
           test -f docs/architecture/rust-code-intelligence-plan.md
           test -f docs/planning/issue-backlog.md
 
-  rust-quality:
-    name: Rust Quality Gate
+  rust-fmt:
+    name: Rust Format Check
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,7 +33,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
@@ -42,14 +41,68 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+  rust-clippy:
+    name: Rust Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
       - name: Lint
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  rust-test:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
 
       - name: Test
-        run: cargo test --all --all-features
+        run: cargo test --workspace --all-features
+
+  rust-build:
+    name: Rust Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: cargo build --workspace --all-features
+
+  rust-docs:
+    name: Rust Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
 
       - name: Docs
         env:
@@ -57,9 +110,8 @@ jobs:
         run: cargo doc --workspace --all-features --no-deps
 
   msrv-check:
-    name: MSRV Check
+    name: Rust MSRV Check
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
