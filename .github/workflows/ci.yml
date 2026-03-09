@@ -26,7 +26,6 @@ jobs:
   rust-fmt:
     name: Rust Format Check
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +44,6 @@ jobs:
   rust-clippy:
     name: Rust Clippy
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,7 +62,6 @@ jobs:
   rust-test:
     name: Rust Tests
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -81,7 +78,6 @@ jobs:
   rust-build:
     name: Rust Build
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -98,7 +94,6 @@ jobs:
   rust-docs:
     name: Rust Docs
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -117,7 +112,6 @@ jobs:
   msrv-check:
     name: Rust MSRV Check
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('**/Cargo.toml') != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
