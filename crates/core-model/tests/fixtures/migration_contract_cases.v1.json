@@ -1,0 +1,32 @@
+[
+  {
+    "from": "1.0.0",
+    "to": "1.0.0",
+    "expected": "no_action"
+  },
+  {
+    "from": "1.2.0",
+    "to": "1.3.0",
+    "expected": "no_action"
+  },
+  {
+    "from": "1.5.0",
+    "to": "2.0.0",
+    "expected": "migrate_in_place"
+  },
+  {
+    "from": "1.0.0",
+    "to": "3.0.0",
+    "expected": "reindex_required"
+  },
+  {
+    "from": "2.1.0",
+    "to": "1.9.0",
+    "expected": "unsupported_future_version"
+  },
+  {
+    "from": "0.1.0",
+    "to": "0.2.0",
+    "expected": "reindex_required"
+  }
+]
