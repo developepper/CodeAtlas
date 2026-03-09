@@ -241,6 +241,17 @@ fn file_content_hash(content: &[u8]) -> String {
 /// (repo → files → symbols) happen inside a single SQLite transaction:
 /// either everything commits or nothing does.
 ///
+/// Stale data cleanup: files no longer present in the current **discovery**
+/// are deleted (cascading to their symbols). The discovery output — not the
+/// parse output — drives stale detection so that files which were discovered
+/// but failed parsing (e.g. transient adapter errors) are preserved rather
+/// than incorrectly purged. Symbols removed from a file since the last
+/// index are cleaned up before upserting the new set.
+///
+/// Repo-level aggregates (`file_count`, `symbol_count`, `language_counts`)
+/// are recomputed from actual database state after all upserts and deletes,
+/// ensuring consistency across re-indexes.
+///
 /// Any validation failure aborts the entire transaction (automatic rollback
 /// on drop) to prevent inconsistent state between aggregate counts and
 /// actual persisted records.
@@ -248,16 +259,14 @@ pub fn persist(
     ctx: &PipelineContext<'_>,
     store: &mut store::MetadataStore,
     blob_store: &store::BlobStore,
+    discovery: &DiscoveryOutput,
     parse_output: &ParseOutput,
 ) -> Result<(), PipelineError> {
     let now = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .map_err(|e| PipelineError::Internal(format!("timestamp format error: {e}")))?;
 
-    // -- Pass 1: collect per-file stats for repo + file records --
-
-    let mut language_counts: BTreeMap<String, u64> = BTreeMap::new();
-    let mut total_symbol_count: u64 = 0;
+    // -- Pass 1: collect per-file stats and validate symbol IDs upfront --
 
     struct FileStats {
         symbol_count: u64,
@@ -290,27 +299,25 @@ pub fn persist(
             symbol_count: sym_count,
             semantic_count: semantic,
         });
-
-        *language_counts.entry(parsed.language.clone()).or_insert(0) += 1;
-        total_symbol_count += sym_count;
     }
 
-    // -- Validate repo record before opening transaction --
+    // -- Validate a provisional repo record before opening transaction --
 
     let schema_version = current_index_schema_version();
-    let repo_record = RepoRecord {
+    let provisional_repo = RepoRecord {
         repo_id: ctx.repo_id.clone(),
         display_name: ctx.repo_id.clone(),
         source_root: ctx.source_root.to_string_lossy().to_string(),
         indexed_at: now.clone(),
         index_version: schema_version.to_string(),
-        language_counts,
-        file_count: parse_output.parsed_files.len() as u64,
-        symbol_count: total_symbol_count,
+        // Placeholder aggregates — will be recomputed from DB after writes.
+        language_counts: BTreeMap::new(),
+        file_count: 0,
+        symbol_count: 0,
         git_head: None,
     };
 
-    if let Err(e) = repo_record.validate() {
+    if let Err(e) = provisional_repo.validate() {
         return Err(PipelineError::Validation(format!(
             "repo record validation failed: {e}"
         )));
@@ -331,12 +338,42 @@ pub fn persist(
 
     let tx = store.transaction().map_err(PipelineError::Persist)?;
 
-    // Step 1: upsert repo record (no FK parent)
+    // Step 1: ensure repo record exists without cascade-deleting children.
+    // Uses INSERT OR IGNORE + UPDATE to avoid ON DELETE CASCADE that
+    // INSERT OR REPLACE would trigger on an existing repo.
     tx.repos()
-        .upsert(&repo_record)
+        .ensure_and_update(&provisional_repo)
         .map_err(PipelineError::Persist)?;
 
-    // Step 2: upsert file records (FK → repos)
+    // Step 2: remove stale files (cascade deletes their symbols).
+    // Use the discovery output (all files found on disk) rather than parse
+    // output (only successfully parsed files) so that adapter failures do
+    // not cause previously indexed metadata to be incorrectly purged.
+    let current_paths: Vec<&str> = discovery
+        .files
+        .iter()
+        .map(|f| {
+            f.relative_path.to_str().ok_or_else(|| {
+                PipelineError::Internal(format!(
+                    "non-UTF8 file path: {}",
+                    f.relative_path.display()
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let stale_deleted = tx
+        .files()
+        .delete_except(&ctx.repo_id, &current_paths)
+        .map_err(PipelineError::Persist)?;
+    if stale_deleted > 0 {
+        info!(
+            stale_files_removed = stale_deleted,
+            "cleaned up stale file records"
+        );
+    }
+
+    // Step 3: upsert file records and their symbols
     for (parsed, stats) in parse_output.parsed_files.iter().zip(file_stats.iter()) {
         let file_path_str = parsed.relative_path.to_string_lossy();
 
@@ -374,18 +411,21 @@ pub fn persist(
         tx.files()
             .upsert(&file_record)
             .map_err(PipelineError::Persist)?;
-    }
 
-    // Step 3: upsert symbol records (FK → files)
-    for parsed in &parse_output.parsed_files {
-        let file_path_str = parsed.relative_path.to_string_lossy();
+        // Remove stale symbols for this file before upserting new ones.
+        // This handles symbols that were removed or renamed since the
+        // last index without relying on ID stability.
+        tx.symbols()
+            .delete_for_file(&ctx.repo_id, &file_path_str)
+            .map_err(PipelineError::Persist)?;
+
         let default_confidence = match parsed.output.quality_level {
             QualityLevel::Semantic => 0.9,
             QualityLevel::Syntax => 0.7,
         };
 
         for sym in &parsed.output.symbols {
-            // Symbol ID was pre-validated in pass 1; safe to unwrap.
+            // Symbol ID was pre-validated in pass 1.
             let symbol_id = build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind)
                 .map_err(|e| {
                     PipelineError::Validation(format!(
@@ -435,12 +475,32 @@ pub fn persist(
         }
     }
 
+    // Step 4: recompute repo aggregates from actual DB state.
+    // Uses a targeted UPDATE (not INSERT OR REPLACE) to avoid triggering
+    // ON DELETE CASCADE which would wipe the file/symbol records we just wrote.
+    let file_count = tx
+        .files()
+        .count(&ctx.repo_id)
+        .map_err(PipelineError::Persist)?;
+    let symbol_count = tx
+        .symbols()
+        .count_for_repo(&ctx.repo_id)
+        .map_err(PipelineError::Persist)?;
+    let language_counts = tx
+        .files()
+        .aggregate_language_counts(&ctx.repo_id)
+        .map_err(PipelineError::Persist)?;
+
+    tx.repos()
+        .update_aggregates(&ctx.repo_id, file_count, symbol_count, &language_counts)
+        .map_err(PipelineError::Persist)?;
+
     // -- Commit the transaction atomically --
     tx.commit().map_err(PipelineError::Persist)?;
 
     info!(
-        files_persisted = parse_output.parsed_files.len(),
-        symbols_persisted = total_symbol_count,
+        files_persisted = file_count,
+        symbols_persisted = symbol_count,
         "persist stage complete"
     );
 

@@ -722,6 +722,338 @@ fn parse_stage_uses_context_default_policy() {
 }
 
 // ---------------------------------------------------------------------------
+// Re-index aggregate consistency
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reindex_removes_stale_files_and_recomputes_aggregates() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+
+    // Initial index: two Rust files.
+    std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("write main.rs");
+    std::fs::write(src.join("lib.rs"), "pub fn greet() {}\n").expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "aggregate-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // First run: both files indexed.
+    let r1 = run(&ctx, &mut db, &blob_store).expect("first run");
+    assert_eq!(r1.metrics.files_parsed, 2);
+
+    let repo = db
+        .repos()
+        .get("aggregate-repo")
+        .expect("query repo")
+        .expect("repo exists");
+    assert_eq!(repo.file_count, 2);
+    let first_symbol_count = repo.symbol_count;
+    assert!(first_symbol_count >= 2, "at least main + greet");
+
+    // Remove lib.rs and re-index.
+    std::fs::remove_file(src.join("lib.rs")).expect("remove lib.rs");
+    let r2 = run(&ctx, &mut db, &blob_store).expect("second run");
+    assert_eq!(r2.metrics.files_parsed, 1);
+
+    // Verify stale file was removed.
+    assert!(
+        db.files()
+            .get("aggregate-repo", "src/lib.rs")
+            .expect("query")
+            .is_none(),
+        "stale file src/lib.rs should have been removed"
+    );
+
+    // Verify stale symbols were removed.
+    let lib_symbols = db
+        .symbols()
+        .list_ids_for_file("aggregate-repo", "src/lib.rs")
+        .expect("query");
+    assert!(
+        lib_symbols.is_empty(),
+        "symbols for removed file should be gone"
+    );
+
+    // Verify repo aggregates were recomputed from DB state.
+    let repo = db
+        .repos()
+        .get("aggregate-repo")
+        .expect("query repo")
+        .expect("repo exists");
+    assert_eq!(repo.file_count, 1, "file_count should reflect only main.rs");
+    assert!(
+        repo.symbol_count < first_symbol_count,
+        "symbol_count should have decreased after removing lib.rs"
+    );
+    assert_eq!(
+        repo.language_counts.get("rust"),
+        Some(&1),
+        "language_counts should reflect 1 rust file"
+    );
+
+    // Remaining file should still be present and correct.
+    let main_file = db
+        .files()
+        .get("aggregate-repo", "src/main.rs")
+        .expect("query")
+        .expect("main.rs should still exist");
+    assert_eq!(main_file.language, "rust");
+}
+
+#[test]
+fn reindex_cleans_up_removed_symbols_within_file() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+
+    // Initial content: two functions.
+    std::fs::write(src.join("lib.rs"), "pub fn alpha() {}\npub fn beta() {}\n")
+        .expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "symbol-cleanup-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // First run.
+    run(&ctx, &mut db, &blob_store).expect("first run");
+    let syms = db
+        .symbols()
+        .list_ids_for_file("symbol-cleanup-repo", "src/lib.rs")
+        .expect("list symbols");
+    assert!(syms.len() >= 2, "expected at least alpha + beta");
+
+    // Remove beta, keep alpha.
+    std::fs::write(src.join("lib.rs"), "pub fn alpha() {}\n").expect("rewrite lib.rs");
+
+    // Second run.
+    run(&ctx, &mut db, &blob_store).expect("second run");
+    let syms = db
+        .symbols()
+        .list_ids_for_file("symbol-cleanup-repo", "src/lib.rs")
+        .expect("list symbols");
+
+    // Only alpha should remain.
+    assert_eq!(syms.len(), 1, "only alpha should remain, got: {syms:?}");
+    assert!(
+        syms[0].contains("alpha"),
+        "remaining symbol should be alpha: {}",
+        syms[0]
+    );
+
+    // Repo aggregate should reflect the reduced count.
+    let repo = db
+        .repos()
+        .get("symbol-cleanup-repo")
+        .expect("query repo")
+        .expect("repo exists");
+    assert_eq!(repo.file_count, 1);
+    assert_eq!(repo.symbol_count, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Adapter failure isolation
+// ---------------------------------------------------------------------------
+
+/// An adapter that fails only for files whose path contains a substring.
+struct PathSelectiveFailAdapter {
+    fail_substring: &'static str,
+}
+
+impl LanguageAdapter for PathSelectiveFailAdapter {
+    fn adapter_id(&self) -> &str {
+        "path-selective-fail"
+    }
+
+    fn language(&self) -> &str {
+        "rust"
+    }
+
+    fn capabilities(&self) -> &AdapterCapabilities {
+        const CAPS: AdapterCapabilities = AdapterCapabilities {
+            quality_level: QualityLevel::Syntax,
+            default_confidence: 0.7,
+            supports_type_refs: false,
+            supports_call_refs: false,
+            supports_container_refs: false,
+            supports_doc_extraction: false,
+        };
+        &CAPS
+    }
+
+    fn index_file(
+        &self,
+        _ctx: &IndexContext,
+        file: &SourceFile,
+    ) -> Result<AdapterOutput, AdapterError> {
+        if file
+            .relative_path
+            .to_string_lossy()
+            .contains(self.fail_substring)
+        {
+            return Err(AdapterError::Parse {
+                path: file.relative_path.clone(),
+                reason: "simulated selective failure".to_string(),
+            });
+        }
+        Ok(AdapterOutput {
+            symbols: vec![ExtractedSymbol {
+                name: "stub_fn".to_string(),
+                qualified_name: "stub_fn".to_string(),
+                kind: SymbolKind::Function,
+                span: SourceSpan {
+                    start_line: 1,
+                    end_line: 1,
+                    start_byte: 0,
+                    byte_length: 10,
+                },
+                signature: "fn stub_fn()".to_string(),
+                confidence_score: None,
+                docstring: None,
+                parent_qualified_name: None,
+            }],
+            source_adapter: "path-selective-fail".to_string(),
+            quality_level: QualityLevel::Syntax,
+        })
+    }
+}
+
+/// Router that uses PathSelectiveFailAdapter as the only adapter.
+struct SelectiveFailOnlyRouter {
+    adapter: PathSelectiveFailAdapter,
+}
+
+impl SelectiveFailOnlyRouter {
+    fn failing_on(substring: &'static str) -> Self {
+        Self {
+            adapter: PathSelectiveFailAdapter {
+                fail_substring: substring,
+            },
+        }
+    }
+}
+
+impl AdapterRouter for SelectiveFailOnlyRouter {
+    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
+        if language == "rust" {
+            vec![&self.adapter]
+        } else {
+            vec![]
+        }
+    }
+}
+
+#[test]
+fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+
+    std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("write main.rs");
+    std::fs::write(src.join("lib.rs"), "pub fn helper() {}\n").expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    // First run: use the tree-sitter router — both files index successfully.
+    let ts_router = TreeSitterRouter::new();
+    let ctx1 = PipelineContext {
+        repo_id: "fail-isolation-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &ts_router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    let r1 = run(&ctx1, &mut db, &blob_store).expect("first run");
+    assert_eq!(r1.metrics.files_parsed, 2);
+
+    // Verify both files are in the DB.
+    assert!(
+        db.files()
+            .get("fail-isolation-repo", "src/main.rs")
+            .unwrap()
+            .is_some(),
+        "main.rs should be indexed"
+    );
+    assert!(
+        db.files()
+            .get("fail-isolation-repo", "src/lib.rs")
+            .unwrap()
+            .is_some(),
+        "lib.rs should be indexed"
+    );
+    let lib_symbols_before = db
+        .symbols()
+        .list_ids_for_file("fail-isolation-repo", "src/lib.rs")
+        .unwrap();
+    assert!(!lib_symbols_before.is_empty(), "lib.rs should have symbols");
+
+    // Second run: use a router that fails on lib.rs.
+    let fail_router = SelectiveFailOnlyRouter::failing_on("lib.rs");
+    let ctx2 = PipelineContext {
+        repo_id: "fail-isolation-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &fail_router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    let r2 = run(&ctx2, &mut db, &blob_store).expect("second run");
+    // Only main.rs should parse; lib.rs fails.
+    assert_eq!(r2.metrics.files_parsed, 1);
+    assert!(r2.metrics.files_errored >= 1);
+
+    // lib.rs file record should still exist (not purged by stale cleanup).
+    assert!(
+        db.files()
+            .get("fail-isolation-repo", "src/lib.rs")
+            .unwrap()
+            .is_some(),
+        "lib.rs metadata should be preserved despite adapter failure"
+    );
+
+    // lib.rs symbols from the first run should still be present.
+    let lib_symbols_after = db
+        .symbols()
+        .list_ids_for_file("fail-isolation-repo", "src/lib.rs")
+        .unwrap();
+    assert_eq!(
+        lib_symbols_before, lib_symbols_after,
+        "lib.rs symbols should be unchanged after failed re-index"
+    );
+
+    // main.rs should still be present and updated.
+    assert!(
+        db.files()
+            .get("fail-isolation-repo", "src/main.rs")
+            .unwrap()
+            .is_some(),
+        "main.rs should still be indexed"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Error display coverage
 // ---------------------------------------------------------------------------
 

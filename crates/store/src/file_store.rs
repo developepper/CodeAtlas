@@ -93,6 +93,75 @@ impl<'a> FileStore<'a> {
             .collect::<Result<Vec<String>, _>>()?;
         Ok(paths)
     }
+
+    /// Deletes all file records for a repository whose paths are **not** in
+    /// `keep_paths`. Cascading foreign keys remove associated symbols.
+    ///
+    /// Returns the number of file records deleted.
+    pub fn delete_except(&self, repo_id: &str, keep_paths: &[&str]) -> Result<u64, StoreError> {
+        if keep_paths.is_empty() {
+            let changed = self
+                .conn
+                .execute("DELETE FROM files WHERE repo_id = ?1", params![repo_id])?;
+            return Ok(changed as u64);
+        }
+
+        // Build a parameterised IN-list. SQLite limits are generous (32766
+        // for recent versions), but this is fine for typical repos.
+        let placeholders: String = keep_paths
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let sql =
+            format!("DELETE FROM files WHERE repo_id = ?1 AND file_path NOT IN ({placeholders})");
+
+        let mut stmt = self.conn.prepare(&sql)?;
+
+        // Bind repo_id at index 1, then each keep_path starting at index 2.
+        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+            Vec::with_capacity(1 + keep_paths.len());
+        param_values.push(Box::new(repo_id.to_string()));
+        for path in keep_paths {
+            param_values.push(Box::new(path.to_string()));
+        }
+
+        let refs: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|p| p.as_ref()).collect();
+        let changed = stmt.execute(refs.as_slice())?;
+        Ok(changed as u64)
+    }
+
+    /// Returns the total number of file records for a repository.
+    pub fn count(&self, repo_id: &str) -> Result<u64, StoreError> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE repo_id = ?1",
+            params![repo_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Returns per-language file counts for a repository.
+    pub fn aggregate_language_counts(
+        &self,
+        repo_id: &str,
+    ) -> Result<std::collections::BTreeMap<String, u64>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT language, COUNT(*) FROM files WHERE repo_id = ?1 GROUP BY language ORDER BY language",
+        )?;
+        let mut counts = std::collections::BTreeMap::new();
+        let rows = stmt.query_map(params![repo_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (lang, count) = row?;
+            counts.insert(lang, count as u64);
+        }
+        Ok(counts)
+    }
 }
 
 /// Extension trait to make `query_row` return `Option` on no rows.
@@ -254,5 +323,93 @@ mod tests {
 
         let err = store.files().upsert(&file).unwrap_err();
         assert!(err.to_string().contains("validation"), "{err}");
+    }
+
+    #[test]
+    fn delete_except_removes_stale_files() {
+        let store = setup_store_with_repo();
+        let mut f1 = test_file();
+        f1.file_path = "src/main.rs".to_string();
+        let mut f2 = test_file();
+        f2.file_path = "src/lib.rs".to_string();
+        let mut f3 = test_file();
+        f3.file_path = "src/old.rs".to_string();
+
+        store.files().upsert(&f1).unwrap();
+        store.files().upsert(&f2).unwrap();
+        store.files().upsert(&f3).unwrap();
+
+        // Keep only main.rs and lib.rs — old.rs should be deleted.
+        let deleted = store
+            .files()
+            .delete_except("test-repo", &["src/main.rs", "src/lib.rs"])
+            .unwrap();
+        assert_eq!(deleted, 1);
+
+        let paths = store.files().list_paths("test-repo").unwrap();
+        assert_eq!(paths, vec!["src/lib.rs", "src/main.rs"]);
+    }
+
+    #[test]
+    fn delete_except_with_empty_keep_removes_all() {
+        let store = setup_store_with_repo();
+        store.files().upsert(&test_file()).unwrap();
+
+        let deleted = store.files().delete_except("test-repo", &[]).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(store.files().list_paths("test-repo").unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_except_returns_zero_when_all_kept() {
+        let store = setup_store_with_repo();
+        store.files().upsert(&test_file()).unwrap();
+
+        let deleted = store
+            .files()
+            .delete_except("test-repo", &["src/main.rs"])
+            .unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn count_returns_file_count() {
+        let store = setup_store_with_repo();
+        assert_eq!(store.files().count("test-repo").unwrap(), 0);
+
+        store.files().upsert(&test_file()).unwrap();
+        assert_eq!(store.files().count("test-repo").unwrap(), 1);
+
+        let mut f2 = test_file();
+        f2.file_path = "src/lib.rs".to_string();
+        store.files().upsert(&f2).unwrap();
+        assert_eq!(store.files().count("test-repo").unwrap(), 2);
+    }
+
+    #[test]
+    fn aggregate_language_counts_groups_by_language() {
+        let store = setup_store_with_repo();
+
+        let mut f1 = test_file();
+        f1.file_path = "src/main.rs".to_string();
+        f1.language = "rust".to_string();
+        let mut f2 = test_file();
+        f2.file_path = "src/lib.rs".to_string();
+        f2.language = "rust".to_string();
+        let mut f3 = test_file();
+        f3.file_path = "app.ts".to_string();
+        f3.language = "typescript".to_string();
+
+        store.files().upsert(&f1).unwrap();
+        store.files().upsert(&f2).unwrap();
+        store.files().upsert(&f3).unwrap();
+
+        let counts = store
+            .files()
+            .aggregate_language_counts("test-repo")
+            .unwrap();
+        assert_eq!(counts.get("rust"), Some(&2));
+        assert_eq!(counts.get("typescript"), Some(&1));
+        assert_eq!(counts.len(), 2);
     }
 }

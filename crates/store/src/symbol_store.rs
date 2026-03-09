@@ -169,6 +169,16 @@ impl<'a> SymbolStore<'a> {
         )?;
         Ok(changed as u64)
     }
+
+    /// Returns the total number of symbol records for a repository.
+    pub fn count_for_repo(&self, repo_id: &str) -> Result<u64, StoreError> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM symbols WHERE repo_id = ?1",
+            params![repo_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -461,5 +471,24 @@ mod tests {
 
         let err = store.symbols().upsert(&sym).unwrap_err();
         assert!(err.to_string().contains("validation"), "{err}");
+    }
+
+    #[test]
+    fn count_for_repo_returns_total_symbols() {
+        let store = setup_store();
+        assert_eq!(store.symbols().count_for_repo("test-repo").unwrap(), 0);
+
+        store.symbols().upsert(&test_symbol()).unwrap();
+        assert_eq!(store.symbols().count_for_repo("test-repo").unwrap(), 1);
+
+        let mut s2 = test_symbol();
+        s2.id = "src/main.rs::helper#function".to_string();
+        s2.name = "helper".to_string();
+        s2.qualified_name = "helper".to_string();
+        store.symbols().upsert(&s2).unwrap();
+        assert_eq!(store.symbols().count_for_repo("test-repo").unwrap(), 2);
+
+        // Different repo should not be counted.
+        assert_eq!(store.symbols().count_for_repo("other-repo").unwrap(), 0);
     }
 }

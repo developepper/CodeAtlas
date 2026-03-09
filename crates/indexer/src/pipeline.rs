@@ -52,7 +52,7 @@ pub fn run(
         .sum();
 
     // Stage 3: Persist (blobs first, then metadata in a transaction)
-    stage::persist(ctx, store, blob_store, &parse_output)?;
+    stage::persist(ctx, store, blob_store, &discovery, &parse_output)?;
 
     let metrics = IndexMetrics {
         files_discovered: discovery.metrics.files_discovered,

@@ -95,6 +95,84 @@ impl<'a> RepoStore<'a> {
         Ok(changed > 0)
     }
 
+    /// Ensures a repo record exists and updates its non-aggregate metadata.
+    ///
+    /// Uses `INSERT OR IGNORE` followed by `UPDATE` so that existing child
+    /// rows (files, symbols) are never cascade-deleted. On a fresh repo the
+    /// INSERT creates the row; on a re-index the IGNORE is a no-op and the
+    /// UPDATE refreshes the metadata fields.
+    pub fn ensure_and_update(&self, record: &RepoRecord) -> Result<(), StoreError> {
+        record
+            .validate()
+            .map_err(|e| StoreError::Validation(e.to_string()))?;
+
+        let language_counts_json = serde_json::to_string(&record.language_counts)
+            .map_err(|e| StoreError::Validation(e.to_string()))?;
+
+        // Create row if it doesn't exist yet.
+        self.conn.execute(
+            "INSERT OR IGNORE INTO repos
+                (repo_id, display_name, source_root, indexed_at, index_version,
+                 language_counts, file_count, symbol_count, git_head)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                record.repo_id,
+                record.display_name,
+                record.source_root,
+                record.indexed_at,
+                record.index_version,
+                language_counts_json,
+                record.file_count,
+                record.symbol_count,
+                record.git_head,
+            ],
+        )?;
+
+        // Update non-aggregate fields on the existing row.
+        self.conn.execute(
+            "UPDATE repos SET display_name = ?2, source_root = ?3,
+                 indexed_at = ?4, index_version = ?5, git_head = ?6
+             WHERE repo_id = ?1",
+            params![
+                record.repo_id,
+                record.display_name,
+                record.source_root,
+                record.indexed_at,
+                record.index_version,
+                record.git_head,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Updates only the aggregate fields (`file_count`, `symbol_count`,
+    /// `language_counts`) on an existing repo record. Unlike `upsert`, this
+    /// uses a plain `UPDATE` so it does not trigger `ON DELETE CASCADE`.
+    pub fn update_aggregates(
+        &self,
+        repo_id: &str,
+        file_count: u64,
+        symbol_count: u64,
+        language_counts: &std::collections::BTreeMap<String, u64>,
+    ) -> Result<(), StoreError> {
+        let language_counts_json = serde_json::to_string(language_counts)
+            .map_err(|e| StoreError::Validation(e.to_string()))?;
+
+        let changed = self.conn.execute(
+            "UPDATE repos SET file_count = ?2, symbol_count = ?3, language_counts = ?4
+             WHERE repo_id = ?1",
+            params![repo_id, file_count, symbol_count, language_counts_json],
+        )?;
+
+        if changed == 0 {
+            return Err(StoreError::Validation(format!(
+                "repo '{repo_id}' not found for aggregate update"
+            )));
+        }
+        Ok(())
+    }
+
     /// Lists all repository IDs.
     pub fn list_ids(&self) -> Result<Vec<String>, StoreError> {
         let mut stmt = self
@@ -234,5 +312,58 @@ mod tests {
 
         let err = store.repos().upsert(&repo).unwrap_err();
         assert!(err.to_string().contains("validation"), "{err}");
+    }
+
+    #[test]
+    fn update_aggregates_modifies_counts_without_cascade() {
+        let store = MetadataStore::open_in_memory().unwrap();
+        store.repos().upsert(&test_repo()).unwrap();
+
+        // Insert a file to verify cascade is NOT triggered.
+        store
+            .files()
+            .upsert(&core_model::FileRecord {
+                repo_id: "test-repo".to_string(),
+                file_path: "src/main.rs".to_string(),
+                language: "rust".to_string(),
+                file_hash: "sha256:abc".to_string(),
+                summary: "test".to_string(),
+                symbol_count: 5,
+                quality_mix: core_model::QualityMix {
+                    semantic_percent: 0.0,
+                    syntax_percent: 100.0,
+                },
+                updated_at: "2025-01-15T10:30:00Z".to_string(),
+            })
+            .unwrap();
+
+        let mut new_counts = BTreeMap::new();
+        new_counts.insert("rust".to_string(), 3);
+        store
+            .repos()
+            .update_aggregates("test-repo", 3, 42, &new_counts)
+            .unwrap();
+
+        let loaded = store.repos().get("test-repo").unwrap().unwrap();
+        assert_eq!(loaded.file_count, 3);
+        assert_eq!(loaded.symbol_count, 42);
+        assert_eq!(loaded.language_counts, new_counts);
+
+        // File should still exist (no cascade).
+        assert!(store
+            .files()
+            .get("test-repo", "src/main.rs")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn update_aggregates_fails_for_missing_repo() {
+        let store = MetadataStore::open_in_memory().unwrap();
+        let err = store
+            .repos()
+            .update_aggregates("nonexistent", 0, 0, &BTreeMap::new())
+            .unwrap_err();
+        assert!(err.to_string().contains("not found"), "{err}");
     }
 }
