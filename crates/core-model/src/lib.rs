@@ -6,6 +6,13 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+pub mod symbol_id;
+
+pub use symbol_id::{
+    build_symbol_id, disambiguate_symbol_id, normalize_file_path, normalize_qualified_name,
+    parse_symbol_id, validate_symbol_id, ParsedSymbolId,
+};
+
 pub type ValidationResult = Result<(), ValidationError>;
 
 pub trait Validate {
@@ -63,6 +70,33 @@ pub enum SymbolKind {
     Constant,
     #[serde(other)]
     Unknown,
+}
+
+impl SymbolKind {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::Class => "class",
+            Self::Method => "method",
+            Self::Type => "type",
+            Self::Constant => "constant",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    #[must_use]
+    pub fn from_id_token(value: &str) -> Option<Self> {
+        match value {
+            "function" => Some(Self::Function),
+            "class" => Some(Self::Class),
+            "method" => Some(Self::Method),
+            "type" => Some(Self::Type),
+            "constant" => Some(Self::Constant),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -135,11 +169,13 @@ impl Validate for SymbolRecord {
         require_non_empty(&self.content_hash, "content_hash")?;
         require_non_empty(&self.source_adapter, "source_adapter")?;
         require_non_empty(&self.indexed_at, "indexed_at")?;
+        validate_symbol_id(&self.id)?;
 
-        if self.kind == SymbolKind::Unknown {
+        let expected_id = build_symbol_id(&self.file_path, &self.qualified_name, self.kind)?;
+        if self.id != expected_id {
             return Err(ValidationError::InvalidField {
-                field: "kind",
-                reason: "must be a known symbol kind",
+                field: "id",
+                reason: "must match canonical {file}::{qualified_name}#{kind} format",
             });
         }
 
@@ -316,18 +352,23 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        FileRecord, QualityLevel, QualityMix, RepoRecord, SymbolKind, SymbolRecord, Validate,
+        build_symbol_id, disambiguate_symbol_id, normalize_file_path, parse_symbol_id,
+        validate_symbol_id, FileRecord, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+        SymbolRecord, Validate,
     };
 
     fn valid_symbol_record() -> SymbolRecord {
+        let file_path = "src/main.rs";
+        let qualified_name = "crate::run";
+        let kind = SymbolKind::Function;
         SymbolRecord {
-            id: "src/main.rs::run#index_fn".to_string(),
+            id: build_symbol_id(file_path, qualified_name, kind).expect("build canonical id"),
             repo_id: "repo-1".to_string(),
-            file_path: "src/main.rs".to_string(),
+            file_path: file_path.to_string(),
             language: "rust".to_string(),
-            kind: SymbolKind::Function,
+            kind,
             name: "run".to_string(),
-            qualified_name: "crate::run".to_string(),
+            qualified_name: qualified_name.to_string(),
             signature: "fn run()".to_string(),
             start_line: 10,
             end_line: 12,
@@ -507,7 +548,7 @@ mod tests {
     #[test]
     fn symbol_kind_unknown_deserializes_and_fails_validation() {
         let payload = json!({
-            "id": "src/main.rs::run#index_fn",
+            "id": "src/main.rs::crate::run#unknown",
             "repo_id": "repo-1",
             "file_path": "src/main.rs",
             "language": "rust",
@@ -537,6 +578,113 @@ mod tests {
         let err = record
             .validate()
             .expect_err("expected unknown kind to fail");
-        assert!(format!("{err}").contains("kind"));
+        assert!(format!("{err}").contains("id"));
+    }
+
+    #[test]
+    fn symbol_id_constructor_is_stable_for_unchanged_identity() {
+        let id_a = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
+            .expect("build id");
+        let id_b = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
+            .expect("build id");
+
+        assert_eq!(id_a, id_b);
+    }
+
+    #[test]
+    fn symbol_id_changes_on_symbol_rename() {
+        let original = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
+            .expect("build id");
+        let renamed = build_symbol_id(
+            "src/lib.rs",
+            "crate::service::execute",
+            SymbolKind::Function,
+        )
+        .expect("build id");
+
+        assert_ne!(original, renamed);
+    }
+
+    #[test]
+    fn symbol_id_changes_on_file_move() {
+        let original = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
+            .expect("build id");
+        let moved = build_symbol_id(
+            "src/engine/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
+
+        assert_ne!(original, moved);
+    }
+
+    #[test]
+    fn symbol_id_changes_on_kind_change() {
+        let function_id =
+            build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
+                .expect("build id");
+        let method_id = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Method)
+            .expect("build id");
+
+        assert_ne!(function_id, method_id);
+    }
+
+    #[test]
+    fn symbol_id_validation_rejects_malformed_values() {
+        for malformed in [
+            "",
+            "src/lib.rs#function",
+            "src/lib.rs::#function",
+            "::crate::run#function",
+            "src/lib.rs::crate::run",
+            "src/lib.rs::crate::run#",
+            "src/lib.rs::crate::run#invalid",
+            "src/lib.rs::crate::run#function@bad",
+            "src/lib.rs::crate::run#function@10:zero",
+            "src/lib.rs::crate::run#function@10:0",
+        ] {
+            assert!(
+                parse_symbol_id(malformed).is_err(),
+                "expected malformed id to fail: {malformed}"
+            );
+        }
+    }
+
+    #[test]
+    fn symbol_id_collision_disambiguation_is_deterministic() {
+        let base = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
+            .expect("build id");
+        let first = disambiguate_symbol_id(&base, 10, 20).expect("disambiguate");
+        let again = disambiguate_symbol_id(&base, 10, 20).expect("disambiguate");
+        let second = disambiguate_symbol_id(&base, 30, 20).expect("disambiguate");
+
+        assert_eq!(first, again);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn symbol_id_parser_accepts_disambiguated_ids() {
+        let base = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
+            .expect("build id");
+        let disambiguated = disambiguate_symbol_id(&base, 10, 20).expect("disambiguate");
+        let parsed = parse_symbol_id(&disambiguated).expect("parse disambiguated id");
+
+        assert_eq!(parsed.file_path, "src/lib.rs");
+        assert_eq!(parsed.qualified_name, "crate::service::run");
+        assert_eq!(parsed.kind, SymbolKind::Function);
+    }
+
+    #[test]
+    fn canonical_symbol_id_rejects_unknown_kind_token() {
+        let err = validate_symbol_id("src/lib.rs::crate::service::run#unknown")
+            .expect_err("unknown kind should fail canonical validation");
+        assert!(format!("{err}").contains("unknown"));
+    }
+
+    #[test]
+    fn file_path_normalization_removes_trailing_slashes() {
+        let normalized = normalize_file_path("src/lib.rs///").expect("normalize path");
+        assert_eq!(normalized, "src/lib.rs");
     }
 }
