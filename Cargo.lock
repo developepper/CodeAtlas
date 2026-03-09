@@ -235,6 +235,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "indexer"
+version = "0.1.0"
+dependencies = [
+ "adapter-api",
+ "core-model",
+ "repo-walker",
+ "store",
+ "tempfile",
+ "time",
+ "tracing",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
