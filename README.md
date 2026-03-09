@@ -37,10 +37,11 @@ What exists now:
 - Issue-driven execution plan with one-PR-per-issue policy.
 - Governance and contribution workflow docs.
 - GitHub Actions CI scaffold for PRs and pushes to `master`.
+- Rust workspace baseline (`Cargo.toml`, `rust-toolchain.toml`) and placeholder crate (`crates/workspace-placeholder`).
 
 What does not exist yet:
 
-- Rust crates and runtime implementation.
+- Production Rust crates for indexing, storage, query, and serving.
 - Production indexing/query engine behavior.
 - Released binaries or hosted deployment.
 
