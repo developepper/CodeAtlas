@@ -13,4 +13,7 @@ core-model.workspace = true
 store.workspace = true
 
 [dev-dependencies]
+adapter-api.workspace = true
+adapter-syntax-treesitter.workspace = true
+indexer.workspace = true
 tempfile.workspace = true

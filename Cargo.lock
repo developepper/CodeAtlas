@@ -423,7 +423,10 @@ dependencies = [
 name = "query-engine"
 version = "0.1.0"
 dependencies = [
+ "adapter-api",
+ "adapter-syntax-treesitter",
  "core-model",
+ "indexer",
  "store",
  "tempfile",
 ]

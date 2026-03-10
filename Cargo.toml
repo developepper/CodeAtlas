@@ -10,8 +10,10 @@ repository = "https://github.com/developepper/CodeAtlas"
 
 [workspace.dependencies]
 adapter-api = { path = "crates/adapter-api" }
+adapter-syntax-treesitter = { path = "crates/adapter-syntax-treesitter" }
 core-model = { path = "crates/core-model" }
 globset = "0.4.16"
+indexer = { path = "crates/indexer" }
 ignore = "0.4.24"
 query-engine = { path = "crates/query-engine" }
 serde = { version = "1.0.219", features = ["derive"] }

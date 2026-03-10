@@ -162,12 +162,35 @@ impl QueryService for StoreQueryService<'_> {
     fn search_text(&self, query: &TextQuery) -> Result<QueryResult<TextMatch>, QueryError> {
         validate_query_text(&query.pattern)?;
 
-        // Full text search will be implemented in #35.
+        let (hits, total_candidates) = self.store.symbols().search_text_fts(
+            &query.repo_id,
+            &query.pattern,
+            query.limit,
+            query.offset,
+        )?;
+
+        let mut items = Vec::with_capacity(hits.len());
+        for (id, rank) in &hits {
+            if let Some(record) = self.store.symbols().get(id)? {
+                // Normalize FTS5 rank (negative, lower = better) to a 0..1 score.
+                let score = 1.0 / (1.0 + rank.abs() as f32);
+                items.push(TextMatch {
+                    file_path: record.file_path.clone(),
+                    line_number: record.start_line,
+                    line_content: record.signature.clone(),
+                    symbol: Some(record),
+                    score,
+                });
+            }
+        }
+
+        let truncated = total_candidates > query.limit + query.offset;
+
         Ok(QueryResult {
-            items: vec![],
+            items,
             meta: QueryMeta {
-                total_candidates: 0,
-                truncated: false,
+                total_candidates,
+                truncated,
             },
         })
     }

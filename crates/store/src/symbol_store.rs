@@ -271,6 +271,57 @@ impl<'a> SymbolStore<'a> {
         Ok(rows)
     }
 
+    /// Searches symbols via FTS5 full-text index, filtered by repo.
+    ///
+    /// Returns `(symbol_id, fts_rank)` pairs ordered by relevance then ID for
+    /// deterministic tie-breaking. The caller joins with full symbol records.
+    ///
+    /// The raw query string is normalized to plain FTS5 terms (implicit AND)
+    /// before being passed to MATCH, stripping any FTS5 special syntax.
+    pub fn search_text_fts(
+        &self,
+        repo_id: &str,
+        query: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<(String, f64)>, usize), StoreError> {
+        let normalized = normalize_fts_query(query);
+        if normalized.is_empty() {
+            return Ok((Vec::new(), 0));
+        }
+
+        // Count total matches first.
+        let total: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM symbols_fts
+             JOIN symbols ON symbols.id = symbols_fts.id
+             WHERE symbols_fts MATCH ?1 AND symbols.repo_id = ?2",
+            params![&normalized, repo_id],
+            |row| row.get(0),
+        )?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT symbols_fts.id, rank
+             FROM symbols_fts
+             JOIN symbols ON symbols.id = symbols_fts.id
+             WHERE symbols_fts MATCH ?1 AND symbols.repo_id = ?2
+             ORDER BY rank, symbols_fts.id
+             LIMIT ?3 OFFSET ?4",
+        )?;
+
+        let rows = stmt
+            .query_map(
+                params![&normalized, repo_id, limit as i64, offset as i64],
+                |row| {
+                    let id: String = row.get(0)?;
+                    let rank: f64 = row.get(1)?;
+                    Ok((id, rank))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok((rows, total as usize))
+    }
+
     /// Returns the total number of symbol records for a repository.
     pub fn count_for_repo(&self, repo_id: &str) -> Result<u64, StoreError> {
         let count: i64 = self.conn.query_row(
@@ -306,6 +357,33 @@ fn parse_symbol_kind(s: &str) -> SymbolKind {
 
 fn json_read_err(col: usize, e: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(col, rusqlite::types::Type::Text, Box::new(e))
+}
+
+/// FTS5 reserved operator keywords that must be lowercased to be treated
+/// as plain search terms rather than query syntax.
+const FTS5_OPERATORS: &[&str] = &["AND", "OR", "NOT", "NEAR"];
+
+/// Normalizes raw user input into a safe FTS5 query string.
+///
+/// Strips special characters, lowercases FTS5 reserved operators so they are
+/// treated as plain terms, and joins with spaces (implicit AND in FTS5).
+/// Returns an empty string if no valid tokens remain.
+fn normalize_fts_query(raw: &str) -> String {
+    raw.split_whitespace()
+        .map(|token| {
+            let cleaned: String = token
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if FTS5_OPERATORS.contains(&cleaned.as_str()) {
+                cleaned.to_lowercase()
+            } else {
+                cleaned
+            }
+        })
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Extension trait to make `query_row` return `Option` on no rows.
@@ -572,6 +650,37 @@ mod tests {
 
         let err = store.symbols().upsert(&sym).unwrap_err();
         assert!(err.to_string().contains("validation"), "{err}");
+    }
+
+    #[test]
+    fn normalize_fts_strips_special_chars() {
+        assert_eq!(normalize_fts_query("\"exact phrase\""), "exact phrase");
+        assert_eq!(normalize_fts_query("foo*"), "foo");
+        assert_eq!(normalize_fts_query("col:name"), "colname");
+    }
+
+    #[test]
+    fn normalize_fts_lowercases_reserved_operators() {
+        assert_eq!(normalize_fts_query("foo AND bar"), "foo and bar");
+        assert_eq!(normalize_fts_query("foo OR bar"), "foo or bar");
+        assert_eq!(normalize_fts_query("NOT foo"), "not foo");
+        assert_eq!(normalize_fts_query("NEAR foo"), "near foo");
+        // Standalone operator becomes a plain lowercase term.
+        assert_eq!(normalize_fts_query("OR"), "or");
+        assert_eq!(normalize_fts_query("AND NOT"), "and not");
+    }
+
+    #[test]
+    fn normalize_fts_preserves_plain_tokens() {
+        assert_eq!(normalize_fts_query("parse_config"), "parse_config");
+        assert_eq!(normalize_fts_query("http server"), "http server");
+    }
+
+    #[test]
+    fn normalize_fts_empty_after_stripping() {
+        assert_eq!(normalize_fts_query("***"), "");
+        assert_eq!(normalize_fts_query("\"\""), "");
+        assert_eq!(normalize_fts_query("  "), "");
     }
 
     #[test]
