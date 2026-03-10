@@ -92,6 +92,12 @@ gates are green (`fmt`, `clippy -D warnings`, full workspace tests).
 - Ticket: Add compatibility policy docs (N-1 API, schema migration)
 - Manual: Release readiness checklist and go/no-go review
 
+## Post-V1 Direction
+
+Strategic roadmap themes after M10 live in:
+
+- `docs/planning/post-v1-roadmap.md`
+
 ## Manual Setup Issues to Create Immediately
 
 - Configure repository labels.

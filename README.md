@@ -85,6 +85,7 @@ Planning artifacts:
 
 - `docs/architecture/rust-code-intelligence-plan.md`
 - `docs/planning/issue-backlog.md`
+- `docs/planning/post-v1-roadmap.md`
 - `docs/workflow/github-process.md`
 - `docs/engineering-principles.md`
 

@@ -69,6 +69,9 @@ Key design decisions:
 10. Epic 9: Semantic Adapter Integration (at least two languages)
 11. Epic 10: Documentation, Benchmarks, and V1 Readiness Review
 
+Post-V1 direction:
+- `docs/planning/post-v1-roadmap.md`
+
 ## Non-Code Manual Work
 
 - ~~Configure branch protection on `master`.~~ (done)
