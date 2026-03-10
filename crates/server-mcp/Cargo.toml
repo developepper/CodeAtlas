@@ -12,4 +12,10 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+adapter-api.workspace = true
+adapter-syntax-treesitter.workspace = true
+indexer.workspace = true
 query-engine = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
+store.workspace = true
+tempfile.workspace = true
