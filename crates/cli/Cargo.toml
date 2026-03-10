@@ -1,0 +1,21 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "codeatlas"
+path = "src/main.rs"
+
+[dependencies]
+adapter-api.workspace = true
+adapter-syntax-treesitter.workspace = true
+core-model.workspace = true
+indexer.workspace = true
+query-engine.workspace = true
+store.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
