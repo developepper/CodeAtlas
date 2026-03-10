@@ -18,6 +18,8 @@ pub struct IndexMetrics {
     pub symbols_extracted: usize,
     /// Files skipped because their content hash matched the previous index.
     pub files_unchanged: usize,
+    /// Files removed from the index because they were deleted from disk.
+    pub files_deleted: usize,
 }
 
 /// Result of a successful pipeline run.
@@ -56,12 +58,14 @@ pub fn run(
     let change_set = change_detection::detect_changes(&discovery.files, &previous_hashes);
 
     let files_unchanged = change_set.unchanged_count;
+    let files_deleted = change_set.deleted_paths.len();
 
-    if files_unchanged > 0 {
+    if files_unchanged > 0 || files_deleted > 0 {
         info!(
             unchanged = files_unchanged,
             new = change_set.new_count,
             modified = change_set.modified_count,
+            deleted = files_deleted,
             "change detection complete"
         );
     }
@@ -110,6 +114,7 @@ pub fn run(
             .len(),
         symbols_extracted,
         files_unchanged,
+        files_deleted,
     };
 
     info!(
@@ -117,6 +122,7 @@ pub fn run(
         files_parsed = metrics.files_parsed,
         files_errored = metrics.files_errored,
         files_unchanged = metrics.files_unchanged,
+        files_deleted = metrics.files_deleted,
         symbols_extracted = metrics.symbols_extracted,
         "pipeline complete"
     );
