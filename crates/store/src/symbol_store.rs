@@ -170,6 +170,107 @@ impl<'a> SymbolStore<'a> {
         Ok(changed as u64)
     }
 
+    /// Retrieves candidate symbols for a repository, filtered by optional criteria.
+    ///
+    /// Results are returned in deterministic order (by `id`). Ranking is the
+    /// caller's responsibility.
+    pub fn search_candidates(
+        &self,
+        repo_id: &str,
+        kind: Option<SymbolKind>,
+        language: Option<&str>,
+        quality_level: Option<QualityLevel>,
+        file_path: Option<&str>,
+    ) -> Result<Vec<SymbolRecord>, StoreError> {
+        let mut sql = String::from(
+            "SELECT id, repo_id, file_path, language, kind, name, qualified_name,
+                    signature, start_line, end_line, start_byte, byte_length,
+                    content_hash, quality_level, confidence_score, source_adapter,
+                    indexed_at, docstring, summary, parent_symbol_id,
+                    keywords, decorators_or_attributes, semantic_refs
+             FROM symbols WHERE repo_id = ?1",
+        );
+
+        let mut param_index = 2u32;
+        let mut param_strings: Vec<String> = Vec::new();
+
+        if let Some(k) = kind {
+            sql.push_str(&format!(" AND kind = ?{param_index}"));
+            param_strings.push(k.as_str().to_string());
+            param_index += 1;
+        }
+        if let Some(lang) = language {
+            sql.push_str(&format!(" AND language = ?{param_index}"));
+            param_strings.push(lang.to_string());
+            param_index += 1;
+        }
+        if let Some(ql) = quality_level {
+            sql.push_str(&format!(" AND quality_level = ?{param_index}"));
+            param_strings.push(quality_level_str(ql).to_string());
+            param_index += 1;
+        }
+        if let Some(fp) = file_path {
+            sql.push_str(&format!(" AND file_path = ?{param_index}"));
+            param_strings.push(fp.to_string());
+        }
+
+        sql.push_str(" ORDER BY id");
+
+        let mut stmt = self.conn.prepare(&sql)?;
+
+        // Build parameter slice: repo_id + any dynamic filters.
+        let mut params_vec: Vec<&dyn rusqlite::types::ToSql> = Vec::new();
+        let repo_id_owned = repo_id.to_string();
+        params_vec.push(&repo_id_owned);
+        for p in &param_strings {
+            params_vec.push(p);
+        }
+
+        let rows = stmt
+            .query_map(params_vec.as_slice(), |row| {
+                let kind_str: String = row.get(4)?;
+                let quality_str: String = row.get(13)?;
+                let keywords_json: Option<String> = row.get(20)?;
+                let decorators_json: Option<String> = row.get(21)?;
+                let refs_json: Option<String> = row.get(22)?;
+
+                Ok(SymbolRecord {
+                    id: row.get(0)?,
+                    repo_id: row.get(1)?,
+                    file_path: row.get(2)?,
+                    language: row.get(3)?,
+                    kind: parse_symbol_kind(&kind_str),
+                    name: row.get(5)?,
+                    qualified_name: row.get(6)?,
+                    signature: row.get(7)?,
+                    start_line: row.get::<_, i32>(8)? as u32,
+                    end_line: row.get::<_, i32>(9)? as u32,
+                    start_byte: row.get::<_, i64>(10)? as u64,
+                    byte_length: row.get::<_, i64>(11)? as u64,
+                    content_hash: row.get(12)?,
+                    quality_level: parse_quality_level(&quality_str),
+                    confidence_score: row.get(14)?,
+                    source_adapter: row.get(15)?,
+                    indexed_at: row.get(16)?,
+                    docstring: row.get(17)?,
+                    summary: row.get(18)?,
+                    parent_symbol_id: row.get(19)?,
+                    keywords: keywords_json
+                        .map(|j| serde_json::from_str(&j).map_err(|e| json_read_err(20, e)))
+                        .transpose()?,
+                    decorators_or_attributes: decorators_json
+                        .map(|j| serde_json::from_str(&j).map_err(|e| json_read_err(21, e)))
+                        .transpose()?,
+                    semantic_refs: refs_json
+                        .map(|j| serde_json::from_str(&j).map_err(|e| json_read_err(22, e)))
+                        .transpose()?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(rows)
+    }
+
     /// Returns the total number of symbol records for a repository.
     pub fn count_for_repo(&self, repo_id: &str) -> Result<u64, StoreError> {
         let count: i64 = self.conn.query_row(

@@ -1,0 +1,174 @@
+//! [`QueryService`] implementation backed by [`MetadataStore`].
+
+use store::MetadataStore;
+
+use crate::ranking::{score_symbol, sort_scored};
+use crate::{
+    validate_query_text, FileContent, FileContentRequest, FileOutline, FileOutlineRequest,
+    FileTreeEntry, FileTreeRequest, QueryError, QueryMeta, QueryResult, QueryService, RepoOutline,
+    RepoOutlineRequest, ScoredSymbol, SymbolQuery, TextMatch, TextQuery,
+};
+use core_model::SymbolRecord;
+
+/// Production [`QueryService`] implementation backed by a [`MetadataStore`].
+pub struct StoreQueryService<'a> {
+    store: &'a MetadataStore,
+}
+
+impl<'a> StoreQueryService<'a> {
+    pub fn new(store: &'a MetadataStore) -> Self {
+        Self { store }
+    }
+}
+
+impl QueryService for StoreQueryService<'_> {
+    fn search_symbols(&self, query: &SymbolQuery) -> Result<QueryResult<ScoredSymbol>, QueryError> {
+        validate_query_text(&query.text)?;
+
+        let candidates = self.store.symbols().search_candidates(
+            &query.repo_id,
+            query.filters.kind,
+            query.filters.language.as_deref(),
+            query.filters.quality_level,
+            query.filters.file_path.as_deref(),
+        )?;
+
+        let mut scored: Vec<ScoredSymbol> = candidates
+            .into_iter()
+            .filter_map(|record| {
+                score_symbol(&query.text, &record).map(|score| ScoredSymbol { record, score })
+            })
+            .collect();
+
+        let total_candidates = scored.len();
+        sort_scored(&mut scored);
+
+        let truncated = total_candidates > query.limit;
+        let items: Vec<ScoredSymbol> = scored
+            .into_iter()
+            .skip(query.offset)
+            .take(query.limit)
+            .collect();
+
+        Ok(QueryResult {
+            items,
+            meta: QueryMeta {
+                total_candidates,
+                truncated,
+            },
+        })
+    }
+
+    fn get_symbol(&self, id: &str) -> Result<SymbolRecord, QueryError> {
+        self.store
+            .symbols()
+            .get(id)?
+            .ok_or_else(|| QueryError::NotFound { id: id.into() })
+    }
+
+    fn get_symbols(&self, ids: &[&str]) -> Result<Vec<SymbolRecord>, QueryError> {
+        let mut results = Vec::new();
+        for id in ids {
+            if let Some(record) = self.store.symbols().get(id)? {
+                results.push(record);
+            }
+        }
+        Ok(results)
+    }
+
+    fn get_file_outline(&self, request: &FileOutlineRequest) -> Result<FileOutline, QueryError> {
+        let file = self
+            .store
+            .files()
+            .get(&request.repo_id, &request.file_path)?
+            .ok_or_else(|| QueryError::NotFound {
+                id: request.file_path.clone(),
+            })?;
+
+        let symbol_ids = self
+            .store
+            .symbols()
+            .list_ids_for_file(&request.repo_id, &request.file_path)?;
+
+        let mut symbols = Vec::with_capacity(symbol_ids.len());
+        for id in &symbol_ids {
+            if let Some(record) = self.store.symbols().get(id)? {
+                symbols.push(record);
+            }
+        }
+
+        Ok(FileOutline { file, symbols })
+    }
+
+    fn get_file_content(&self, request: &FileContentRequest) -> Result<FileContent, QueryError> {
+        let file = self
+            .store
+            .files()
+            .get(&request.repo_id, &request.file_path)?
+            .ok_or_else(|| QueryError::NotFound {
+                id: request.file_path.clone(),
+            })?;
+
+        // File content retrieval is delegated to BlobStore in production.
+        // For now, return a placeholder indicating content is not yet wired.
+        Ok(FileContent {
+            file,
+            content: String::new(),
+        })
+    }
+
+    fn get_file_tree(&self, request: &FileTreeRequest) -> Result<Vec<FileTreeEntry>, QueryError> {
+        let paths = self.store.files().list_paths(&request.repo_id)?;
+
+        let mut entries = Vec::new();
+        for path in paths {
+            if let Some(ref prefix) = request.path_prefix {
+                if !path.starts_with(prefix) {
+                    continue;
+                }
+            }
+            if let Some(file) = self.store.files().get(&request.repo_id, &path)? {
+                entries.push(FileTreeEntry {
+                    path: file.file_path,
+                    language: file.language,
+                    symbol_count: file.symbol_count,
+                });
+            }
+        }
+
+        Ok(entries)
+    }
+
+    fn get_repo_outline(&self, request: &RepoOutlineRequest) -> Result<RepoOutline, QueryError> {
+        let repo =
+            self.store
+                .repos()
+                .get(&request.repo_id)?
+                .ok_or_else(|| QueryError::NotFound {
+                    id: request.repo_id.clone(),
+                })?;
+
+        let file_entries = self.get_file_tree(&FileTreeRequest {
+            repo_id: request.repo_id.clone(),
+            path_prefix: None,
+        })?;
+
+        Ok(RepoOutline {
+            repo,
+            files: file_entries,
+        })
+    }
+
+    fn search_text(&self, query: &TextQuery) -> Result<QueryResult<TextMatch>, QueryError> {
+        validate_query_text(&query.pattern)?;
+
+        // Full text search will be implemented in #35.
+        Ok(QueryResult {
+            items: vec![],
+            meta: QueryMeta {
+                total_candidates: 0,
+                truncated: false,
+            },
+        })
+    }
+}
