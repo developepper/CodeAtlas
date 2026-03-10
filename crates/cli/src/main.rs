@@ -18,6 +18,9 @@ fn main() {
         "index" => commands::index::run(&args[2..]),
         "search-symbols" => commands::search_symbols::run(&args[2..]),
         "get-symbol" => commands::get_symbol::run(&args[2..]),
+        "file-outline" => commands::file_outline::run(&args[2..]),
+        "file-tree" => commands::file_tree::run(&args[2..]),
+        "repo-outline" => commands::repo_outline::run(&args[2..]),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
@@ -42,5 +45,8 @@ fn print_usage() {
     eprintln!("  index             Index a repository");
     eprintln!("  search-symbols    Search for symbols by name");
     eprintln!("  get-symbol        Get a symbol by ID");
+    eprintln!("  file-outline      List symbols in a file");
+    eprintln!("  file-tree         List files in a repository");
+    eprintln!("  repo-outline      Show repository structure overview");
     eprintln!("  help              Show this help message");
 }
