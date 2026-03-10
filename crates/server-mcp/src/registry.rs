@@ -71,15 +71,9 @@ impl<'a> ToolRegistry<'a> {
 
         match result {
             Ok(output) => {
-                let truncated = output
-                    .payload
-                    .get("truncated")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-
                 let meta = McpMeta {
                     timing_ms,
-                    truncated,
+                    truncated: output.truncated,
                     quality_stats: output.quality_stats,
                     ..McpMeta::default()
                 };
