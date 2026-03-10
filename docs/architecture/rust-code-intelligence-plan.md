@@ -28,6 +28,9 @@ crates/
   adapter-syntax-treesitter/ Tree-sitter based syntax extraction (Rust support)
   store/                    MetadataStore (SQLite), BlobStore (content-addressed filesystem)
   indexer/                  Pipeline orchestration: discovery → parse → enrich → persist
+  query-engine/             Ranked symbol/text retrieval and structure queries
+  server-mcp/               MCP tool registry and response/error contracts
+  cli/                      Local command surface for indexing and query workflows
   workspace-placeholder/    Cargo workspace anchor
 ```
 
@@ -52,9 +55,9 @@ Key design decisions:
 3. ~~Epic 2: Ingestion and Discovery Pipeline~~ (complete)
 4. ~~Epic 3: Adapter API and Tree-sitter Syntax Baseline~~ (complete)
 5. ~~Epic 4: Storage and Atomic Index Commit Path~~ (complete)
-6. **Epic 5: Query Engine and Deterministic Ranking** (next)
-7. Epic 6: MCP Server Interface and Tool Contracts
-8. Epic 7: Incremental Indexing and Reliability Hardening
+6. ~~Epic 5: Query Engine and Deterministic Ranking~~ (complete)
+7. ~~Epic 6: MCP Server Interface and Tool Contracts~~ (complete)
+8. **Epic 7: Incremental Indexing and Reliability Hardening** (next)
 9. Epic 8: Security, Observability, and Performance Guardrails
 10. Epic 9: Semantic Adapter Integration (at least two languages)
 11. Epic 10: Documentation, Benchmarks, and V1 Readiness Review

@@ -2,13 +2,10 @@
 
 This backlog is designed for one-PR-per-issue execution.
 
-Progress (updated 2026-03-09): Milestones M0–M4 are complete. The full
-indexing pipeline is operational — discovery, adapter routing, tree-sitter
-parsing, content-addressed blob storage, metadata persistence with atomic
-commits, aggregate recomputation, stale data cleanup, and enrichment (file
-summaries, symbol summaries, keyword extraction). 259 tests pass across 6
-crates. **M5 Query is the next working milestone** — all dependencies are
-satisfied. Critical path: #61 → #32 → #33 → #34 → #35.
+Progress (updated 2026-03-10): Milestones M0-M6 are complete. The platform now
+includes indexing pipeline, query engine, MCP serving contracts, and local CLI
+commands. Workspace quality gates are green (`fmt`, `clippy -D warnings`, full
+workspace tests).
 
 ## Epic 0: Repository Governance and CI Foundation (complete)
 
@@ -48,22 +45,24 @@ satisfied. Critical path: #61 → #32 → #33 → #34 → #35.
 - ~~Ticket: Implement staging-to-swap atomic index commit~~ (#30)
 - ~~Ticket: Add repository/file/symbol aggregate updates~~ (#31)
 
-## Epic 5: Query Engine (next)
+## Epic 5: Query Engine (complete)
 
-- Ticket: Create query-engine crate scaffold and public query trait (#61, p0)
-- Ticket: Implement `search_symbols` with deterministic ranking/ties (#32, p0)
-- Ticket: Implement `get_symbol` and `get_symbols` (#33, p0)
-- Ticket: Implement file and repository outline queries (#34, p1)
-- Ticket: Implement `search_text` fallback (#35, p1)
+- ~~Ticket: Create query-engine crate scaffold and public query trait~~ (#61, p0)
+- ~~Ticket: Implement `search_symbols` with deterministic ranking/ties~~ (#32, p0)
+- ~~Ticket: Implement `get_symbol` and `get_symbols`~~ (#33, p0)
+- ~~Ticket: Implement file and repository outline queries~~ (#34, p1)
+- ~~Ticket: Implement `search_text` fallback~~ (#35, p1)
 
-## Epic 6: MCP Server
+## Epic 6: MCP Server (complete)
 
-- Ticket: Create `server-mcp` crate and tool registration
-- Ticket: Implement request/response envelope with `_meta`
-- Ticket: Implement structured error model (code/message/retryable)
-- Ticket: Add end-to-end MCP integration tests
+- ~~Ticket: Create `server-mcp` crate and tool registration~~ (#36, p0)
+- ~~Ticket: Implement request/response envelope with `_meta`~~ (#37, p1)
+- ~~Ticket: Implement structured error model (code/message/retryable)~~ (#38, p1)
+- ~~Ticket: Add end-to-end MCP integration tests~~ (#39, p1)
+- ~~Ticket: Create CLI crate for local indexing and query commands~~ (#62, p1)
+- ~~Ticket: Add CLI outline commands (`file-outline`, `file-tree`, `repo-outline`)~~ (#70, p2)
 
-## Epic 7: Incremental Indexing and Reliability
+## Epic 7: Incremental Indexing and Reliability (next)
 
 - Ticket: File hash map and changed-file detection
 - Ticket: Incremental reindex and deleted-file cleanup

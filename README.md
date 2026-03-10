@@ -29,7 +29,11 @@ Primary interface target:
 
 ## Current Status
 
-Milestones M0 (governance/CI), M1 (core model), M2 (discovery), and M3 (adapters) are complete. M4 (storage) is in progress.
+Milestones M0-M6 are complete:
+
+- M0-M4: governance, core model, discovery/adapters, storage, and indexing pipeline.
+- M5: query engine and deterministic ranking.
+- M6: MCP server contracts and local CLI interface.
 
 ### Workspace crates
 
@@ -40,6 +44,10 @@ Milestones M0 (governance/CI), M1 (core model), M2 (discovery), and M3 (adapters
 | `adapter-api` | `LanguageAdapter` and `AdapterRouter` traits, routing policy, contract test harness | Complete |
 | `adapter-syntax-treesitter` | Tree-sitter-based syntax extraction (Rust supported, table-driven for extensibility) | Complete |
 | `store` | SQLite metadata persistence with versioned migrations, typed CRUD for repos/files/symbols | Complete |
+| `indexer` | End-to-end indexing pipeline (discovery -> parse -> enrich -> persist) | Complete |
+| `query-engine` | Symbol/text search, symbol lookup, file/repo outline retrieval | Complete |
+| `server-mcp` | MCP tool registry, structured response/error envelopes, integration + E2E tests | Complete |
+| `cli` | Local commands for indexing, search/get symbol, file/repo outline navigation | Complete |
 
 ### Infrastructure
 
@@ -52,10 +60,10 @@ Milestones M0 (governance/CI), M1 (core model), M2 (discovery), and M3 (adapters
 
 ### What does not exist yet
 
-- Indexer pipeline orchestration (next: #60).
-- Content-addressed blob storage and atomic index commit.
-- Query engine, MCP server, and CLI interfaces.
-- Incremental indexing, semantic adapters, and production deployment.
+- Incremental indexing and watcher/git-diff accelerated modes.
+- Semantic adapter implementations beyond syntax baseline.
+- Hosted/server API surface (HTTP/gRPC), auth, quotas, and multi-tenant controls.
+- Production observability dashboards and performance/SLO regression automation.
 
 ## Design Principles
 
