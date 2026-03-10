@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/adapter-api", "crates/adapter-syntax-treesitter", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/store", "crates/workspace-placeholder"]
+members = ["crates/adapter-api", "crates/adapter-syntax-treesitter", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/server-mcp", "crates/store", "crates/workspace-placeholder"]
 resolver = "2"
 
 [workspace.package]
