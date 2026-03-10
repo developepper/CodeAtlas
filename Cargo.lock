@@ -120,6 +120,7 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "query-engine",
+ "serde_json",
  "store",
  "tempfile",
  "tracing",
