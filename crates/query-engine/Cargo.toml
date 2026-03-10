@@ -16,7 +16,12 @@ tracing.workspace = true
 [dev-dependencies]
 adapter-api.workspace = true
 adapter-syntax-treesitter.workspace = true
+criterion.workspace = true
 indexer.workspace = true
 query-engine = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 tracing-subscriber.workspace = true
+
+[[bench]]
+name = "queries"
+harness = false
