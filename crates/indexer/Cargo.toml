@@ -17,3 +17,4 @@ tracing.workspace = true
 adapter-syntax-treesitter = { path = "../adapter-syntax-treesitter" }
 query-engine = { path = "../query-engine" }
 tempfile.workspace = true
+tracing-subscriber.workspace = true

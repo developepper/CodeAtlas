@@ -26,4 +26,8 @@ tracing = "0.1.41"
 rusqlite = { version = "0.35", features = ["bundled"] }
 store = { path = "crates/store" }
 sha2 = "0.10"
-tracing-subscriber = { version = "0.3.19", features = ["json"] }
+tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter"] }
+opentelemetry = "0.27"
+opentelemetry_sdk = "0.27"
+opentelemetry-stdout = "0.27"
+tracing-opentelemetry = "0.28"

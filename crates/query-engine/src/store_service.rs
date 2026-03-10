@@ -1,6 +1,7 @@
 //! [`QueryService`] implementation backed by [`MetadataStore`].
 
 use store::MetadataStore;
+use tracing::info_span;
 
 use crate::ranking::{score_symbol, sort_scored};
 use crate::{
@@ -23,6 +24,14 @@ impl<'a> StoreQueryService<'a> {
 
 impl QueryService for StoreQueryService<'_> {
     fn search_symbols(&self, query: &SymbolQuery) -> Result<QueryResult<ScoredSymbol>, QueryError> {
+        let span = info_span!(
+            "query_search_symbols",
+            repo_id = %query.repo_id,
+            query_text = %query.text,
+            limit = query.limit,
+        );
+        let _guard = span.enter();
+
         validate_query_text(&query.text)?;
 
         let candidates = self.store.symbols().search_candidates(
@@ -60,6 +69,9 @@ impl QueryService for StoreQueryService<'_> {
     }
 
     fn get_symbol(&self, id: &str) -> Result<SymbolRecord, QueryError> {
+        let span = info_span!("query_get_symbol", symbol_id = %id);
+        let _guard = span.enter();
+
         self.store
             .symbols()
             .get(id)?
@@ -67,6 +79,9 @@ impl QueryService for StoreQueryService<'_> {
     }
 
     fn get_symbols(&self, ids: &[&str]) -> Result<Vec<SymbolRecord>, QueryError> {
+        let span = info_span!("query_get_symbols", count = ids.len());
+        let _guard = span.enter();
+
         let mut results = Vec::new();
         for id in ids {
             if let Some(record) = self.store.symbols().get(id)? {
@@ -77,6 +92,13 @@ impl QueryService for StoreQueryService<'_> {
     }
 
     fn get_file_outline(&self, request: &FileOutlineRequest) -> Result<FileOutline, QueryError> {
+        let span = info_span!(
+            "query_get_file_outline",
+            repo_id = %request.repo_id,
+            file_path = %request.file_path,
+        );
+        let _guard = span.enter();
+
         let file = self
             .store
             .files()
@@ -101,6 +123,13 @@ impl QueryService for StoreQueryService<'_> {
     }
 
     fn get_file_content(&self, request: &FileContentRequest) -> Result<FileContent, QueryError> {
+        let span = info_span!(
+            "query_get_file_content",
+            repo_id = %request.repo_id,
+            file_path = %request.file_path,
+        );
+        let _guard = span.enter();
+
         let file = self
             .store
             .files()
@@ -118,6 +147,12 @@ impl QueryService for StoreQueryService<'_> {
     }
 
     fn get_file_tree(&self, request: &FileTreeRequest) -> Result<Vec<FileTreeEntry>, QueryError> {
+        let span = info_span!(
+            "query_get_file_tree",
+            repo_id = %request.repo_id,
+        );
+        let _guard = span.enter();
+
         let paths = self.store.files().list_paths(&request.repo_id)?;
 
         let mut entries = Vec::new();
@@ -140,6 +175,12 @@ impl QueryService for StoreQueryService<'_> {
     }
 
     fn get_repo_outline(&self, request: &RepoOutlineRequest) -> Result<RepoOutline, QueryError> {
+        let span = info_span!(
+            "query_get_repo_outline",
+            repo_id = %request.repo_id,
+        );
+        let _guard = span.enter();
+
         let repo =
             self.store
                 .repos()
@@ -160,6 +201,14 @@ impl QueryService for StoreQueryService<'_> {
     }
 
     fn search_text(&self, query: &TextQuery) -> Result<QueryResult<TextMatch>, QueryError> {
+        let span = info_span!(
+            "query_search_text",
+            repo_id = %query.repo_id,
+            pattern = %query.pattern,
+            limit = query.limit,
+        );
+        let _guard = span.enter();
+
         validate_query_text(&query.pattern)?;
 
         let (hits, total_candidates) = self.store.symbols().search_text_fts(

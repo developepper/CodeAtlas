@@ -15,7 +15,7 @@ use core_model::{
 use repo_walker::{detect_language, walk_repository, WalkerOptions};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, info_span, warn};
 
 use crate::context::PipelineContext;
 use crate::enrich;
@@ -46,6 +46,9 @@ pub struct PreparedFile {
 /// Runs discovery: walks the repository, detects languages, and loads file
 /// content. Files with no detected language are skipped.
 pub fn discover(ctx: &PipelineContext<'_>) -> Result<DiscoveryOutput, PipelineError> {
+    let span = info_span!("stage_discover", repo_id = %ctx.repo_id);
+    let _guard = span.enter();
+
     let walker_opts = WalkerOptions {
         correlation_id: ctx.correlation_id.clone(),
         ..WalkerOptions::default()
@@ -132,6 +135,13 @@ pub struct ParseOutput {
 /// Individual file failures are recorded in `file_errors`; the pipeline
 /// continues with the remaining files.
 pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOutput {
+    let span = info_span!(
+        "stage_parse",
+        repo_id = %ctx.repo_id,
+        files_to_parse = discovery.files.len(),
+    );
+    let _guard = span.enter();
+
     let idx_ctx = ctx.index_context();
     let mut parsed_files = Vec::new();
     let mut file_errors = Vec::new();
@@ -263,6 +273,13 @@ pub fn persist(
     discovery: &DiscoveryOutput,
     parse_output: &ParseOutput,
 ) -> Result<(), PipelineError> {
+    let span = info_span!(
+        "stage_persist",
+        repo_id = %ctx.repo_id,
+        files_to_persist = parse_output.parsed_files.len(),
+    );
+    let _guard = span.enter();
+
     let now = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .map_err(|e| PipelineError::Internal(format!("timestamp format error: {e}")))?;
