@@ -2,6 +2,11 @@ use std::fmt;
 
 use core_model::{FileRecord, QualityLevel, RepoRecord, SymbolKind, SymbolRecord};
 
+pub mod ranking;
+pub mod store_service;
+
+pub use store_service::StoreQueryService;
+
 // ── Error ──────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
