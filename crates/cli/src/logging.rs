@@ -20,6 +20,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
 
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tracing::field::{Field, Visit};
 use tracing::Subscriber;
 use tracing_subscriber::field::RecordFields;
@@ -332,15 +334,9 @@ where
 
 /// Returns the current UTC time as an RFC 3339 string.
 fn timestamp_now() -> String {
-    // Use a simple seconds-since-epoch representation that doesn't
-    // require pulling in chrono or time formatting in the hot path.
-    let now = std::time::SystemTime::now();
-    let dur = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = dur.as_secs();
-    let millis = dur.subsec_millis();
-    format!("{secs}.{millis:03}")
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -369,5 +365,12 @@ mod tests {
             !SENSITIVE_FIELDS.is_empty(),
             "redaction policy must define at least one sensitive field"
         );
+    }
+
+    #[test]
+    fn timestamp_now_returns_rfc3339() {
+        let timestamp = timestamp_now();
+        let parsed = OffsetDateTime::parse(&timestamp, &Rfc3339);
+        assert!(parsed.is_ok(), "timestamp should be RFC3339: {timestamp}");
     }
 }

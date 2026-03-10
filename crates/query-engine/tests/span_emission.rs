@@ -1,12 +1,14 @@
 //! Tests that tracing spans are emitted for query-engine operations and
 //! that query spans properly nest under a caller-provided parent span.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use query_engine::{
     FileOutlineRequest, FileTreeRequest, QueryFilters, QueryService, RepoOutlineRequest,
     StoreQueryService, SymbolQuery, TextQuery,
 };
+use tracing::field::{Field, Visit};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 
@@ -18,6 +20,34 @@ use tracing_subscriber::registry::LookupSpan;
 struct SpanInfo {
     name: String,
     parent_name: Option<String>,
+    fields: BTreeMap<String, String>,
+}
+
+#[derive(Default)]
+struct FieldCapture {
+    fields: BTreeMap<String, String>,
+}
+
+impl Visit for FieldCapture {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.fields
+            .insert(field.name().to_string(), format!("{value:?}"));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
+    }
 }
 
 struct SpanTreeCapture {
@@ -35,6 +65,8 @@ where
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
         let name = attrs.metadata().name().to_string();
+        let mut fields = FieldCapture::default();
+        attrs.record(&mut fields);
 
         let parent_name = if let Some(parent_id) = attrs.parent() {
             ctx.span(parent_id).map(|s| s.name().to_string())
@@ -44,10 +76,11 @@ where
             None
         };
 
-        self.spans
-            .lock()
-            .unwrap()
-            .push(SpanInfo { name, parent_name });
+        self.spans.lock().unwrap().push(SpanInfo {
+            name,
+            parent_name,
+            fields: fields.fields,
+        });
     }
 }
 
@@ -193,5 +226,71 @@ fn each_query_call_gets_independent_span() {
         3,
         "expected 3 independent query_get_symbol spans, got {}",
         get_symbol_spans.len()
+    );
+}
+
+/// Verifies that sensitive query payloads are not attached to span attributes,
+/// so OTEL exporters cannot leak raw query content.
+#[test]
+fn query_spans_do_not_capture_raw_query_text() {
+    let captured = Arc::new(Mutex::new(Vec::<SpanInfo>::new()));
+    let layer = SpanTreeCapture {
+        spans: Arc::clone(&captured),
+    };
+    let subscriber = tracing_subscriber::registry().with(layer);
+
+    let db = store::MetadataStore::open_in_memory().unwrap();
+    let svc = StoreQueryService::new(&db);
+
+    tracing::subscriber::with_default(subscriber, || {
+        let _ = svc.search_symbols(&SymbolQuery {
+            repo_id: "r".into(),
+            text: "password_hash".into(),
+            filters: QueryFilters::default(),
+            limit: 10,
+            offset: 0,
+        });
+        let _ = svc.search_text(&TextQuery {
+            repo_id: "r".into(),
+            pattern: "api_key.*".into(),
+            filters: QueryFilters::default(),
+            limit: 10,
+            offset: 0,
+        });
+    });
+
+    let spans = captured.lock().unwrap();
+    let search_symbols_span = spans
+        .iter()
+        .find(|s| s.name == "query_search_symbols")
+        .expect("missing query_search_symbols span");
+    assert_eq!(
+        search_symbols_span.fields.get("query_text_redacted"),
+        Some(&"true".to_string())
+    );
+    assert_eq!(
+        search_symbols_span.fields.get("query_length"),
+        Some(&"13".to_string())
+    );
+    assert!(
+        !search_symbols_span.fields.contains_key("query_text"),
+        "raw query text should not be attached to tracing spans"
+    );
+
+    let search_text_span = spans
+        .iter()
+        .find(|s| s.name == "query_search_text")
+        .expect("missing query_search_text span");
+    assert_eq!(
+        search_text_span.fields.get("pattern_redacted"),
+        Some(&"true".to_string())
+    );
+    assert_eq!(
+        search_text_span.fields.get("pattern_length"),
+        Some(&"9".to_string())
+    );
+    assert!(
+        !search_text_span.fields.contains_key("pattern"),
+        "raw search pattern should not be attached to tracing spans"
     );
 }

@@ -27,7 +27,8 @@ impl QueryService for StoreQueryService<'_> {
         let span = info_span!(
             "query_search_symbols",
             repo_id = %query.repo_id,
-            query_text = %query.text,
+            query_text_redacted = true,
+            query_length = query.text.len() as u64,
             limit = query.limit,
         );
         let _guard = span.enter();
@@ -204,7 +205,8 @@ impl QueryService for StoreQueryService<'_> {
         let span = info_span!(
             "query_search_text",
             repo_id = %query.repo_id,
-            pattern = %query.pattern,
+            pattern_redacted = true,
+            pattern_length = query.pattern.len() as u64,
             limit = query.limit,
         );
         let _guard = span.enter();
