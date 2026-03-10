@@ -4,6 +4,7 @@
 //! feature to exercise all tool handlers end-to-end.
 
 use query_engine::test_support::StubQueryService;
+use query_engine::QueryError;
 use serde_json::json;
 
 use server_mcp::types::{ErrorCode, Status};
@@ -440,5 +441,125 @@ fn get_file_outline_symbols_carry_source_adapter() {
             sym["source_adapter"].is_string(),
             "outline symbols should carry source_adapter"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Retryable error contract
+// ---------------------------------------------------------------------------
+
+/// A QueryService that always returns a store error, simulating a database
+/// failure so we can verify the retryable error path.
+struct FailingQueryService;
+
+impl query_engine::QueryService for FailingQueryService {
+    fn search_symbols(
+        &self,
+        _: &query_engine::SymbolQuery,
+    ) -> Result<query_engine::QueryResult<query_engine::ScoredSymbol>, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn get_symbol(&self, _: &str) -> Result<core_model::SymbolRecord, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn get_symbols(&self, _: &[&str]) -> Result<Vec<core_model::SymbolRecord>, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn get_file_outline(
+        &self,
+        _: &query_engine::FileOutlineRequest,
+    ) -> Result<query_engine::FileOutline, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn get_file_content(
+        &self,
+        _: &query_engine::FileContentRequest,
+    ) -> Result<query_engine::FileContent, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn get_file_tree(
+        &self,
+        _: &query_engine::FileTreeRequest,
+    ) -> Result<Vec<query_engine::FileTreeEntry>, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn get_repo_outline(
+        &self,
+        _: &query_engine::RepoOutlineRequest,
+    ) -> Result<query_engine::RepoOutline, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn search_text(
+        &self,
+        _: &query_engine::TextQuery,
+    ) -> Result<query_engine::QueryResult<query_engine::TextMatch>, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+}
+
+#[test]
+fn store_error_is_retryable() {
+    let svc = FailingQueryService;
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call(
+        "search_symbols",
+        json!({ "repo_id": "repo-1", "query": "test" }),
+    );
+    assert_eq!(resp.status, Status::Error);
+    let err = resp.error.unwrap();
+    assert_eq!(err.code, ErrorCode::StoreError);
+    assert!(err.retryable, "store errors should be retryable");
+}
+
+#[test]
+fn store_error_across_tools_is_retryable() {
+    let svc = FailingQueryService;
+    let reg = ToolRegistry::new(&svc);
+
+    let tools_and_params = [
+        ("get_symbol", json!({ "id": "x" })),
+        ("get_file_tree", json!({ "repo_id": "r" })),
+        (
+            "get_file_outline",
+            json!({ "repo_id": "r", "file_path": "f" }),
+        ),
+        ("get_repo_outline", json!({ "repo_id": "r" })),
+        ("search_text", json!({ "repo_id": "r", "pattern": "test" })),
+    ];
+
+    for (tool, params) in &tools_and_params {
+        let resp = reg.call(tool, params.clone());
+        assert_eq!(resp.status, Status::Error, "{tool} should return error");
+        let err = resp.error.unwrap();
+        assert_eq!(
+            err.code,
+            ErrorCode::StoreError,
+            "{tool} should map to StoreError"
+        );
+        assert!(err.retryable, "{tool} store error should be retryable");
     }
 }

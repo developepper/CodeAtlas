@@ -84,11 +84,12 @@ pub enum ErrorCode {
 
 /// Output returned by tool handlers to the registry.
 ///
-/// Carries both the serialized JSON payload and the computed quality mix
-/// from the actual records returned, so the registry can populate `_meta`
-/// with accurate `quality_stats`.
+/// Carries the serialized JSON payload, whether the result set was truncated,
+/// and the computed quality mix from the actual records returned, so the
+/// registry can populate `_meta` with accurate fields.
 pub struct ToolOutput {
     pub payload: serde_json::Value,
+    pub truncated: bool,
     pub quality_stats: QualityStats,
 }
 

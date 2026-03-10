@@ -188,6 +188,7 @@ pub fn search_symbols(svc: &dyn QueryService, params: serde_json::Value) -> Tool
             "total_candidates": result.meta.total_candidates,
             "truncated": result.meta.truncated,
         }),
+        truncated: result.meta.truncated,
         quality_stats,
     })
 }
@@ -200,6 +201,7 @@ pub fn get_symbol(svc: &dyn QueryService, params: serde_json::Value) -> ToolResu
     let quality_stats = compute_quality_stats(&[&record]);
     Ok(ToolOutput {
         payload: serialize_symbol(&record)?,
+        truncated: false,
         quality_stats,
     })
 }
@@ -221,6 +223,7 @@ pub fn get_symbols(svc: &dyn QueryService, params: serde_json::Value) -> ToolRes
 
     Ok(ToolOutput {
         payload: json!({ "items": items }),
+        truncated: false,
         quality_stats,
     })
 }
@@ -251,6 +254,7 @@ pub fn get_file_outline(svc: &dyn QueryService, params: serde_json::Value) -> To
             },
             "symbols": symbols,
         }),
+        truncated: false,
         quality_stats,
     })
 }
@@ -273,6 +277,7 @@ pub fn get_file_content(svc: &dyn QueryService, params: serde_json::Value) -> To
             },
             "content": content.content,
         }),
+        truncated: false,
         quality_stats: QualityStats::default(),
     })
 }
@@ -299,6 +304,7 @@ pub fn get_file_tree(svc: &dyn QueryService, params: serde_json::Value) -> ToolR
 
     Ok(ToolOutput {
         payload: json!({ "entries": items }),
+        truncated: false,
         quality_stats: QualityStats::default(),
     })
 }
@@ -332,6 +338,7 @@ pub fn get_repo_outline(svc: &dyn QueryService, params: serde_json::Value) -> To
             },
             "files": files,
         }),
+        truncated: false,
         quality_stats: QualityStats::default(),
     })
 }
@@ -384,6 +391,7 @@ pub fn search_text(svc: &dyn QueryService, params: serde_json::Value) -> ToolRes
             "total_candidates": result.meta.total_candidates,
             "truncated": result.meta.truncated,
         }),
+        truncated: result.meta.truncated,
         quality_stats,
     })
 }
