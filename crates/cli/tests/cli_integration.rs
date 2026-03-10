@@ -272,6 +272,227 @@ fn get_symbol_fails_on_unknown_id() {
 }
 
 // ---------------------------------------------------------------------------
+// Shared helper: index a test repo and return (repo_dir, db_dir, repo_id)
+// ---------------------------------------------------------------------------
+
+fn indexed_test_repo() -> (TempDir, TempDir, String) {
+    let repo_dir = setup_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let index_output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+    assert!(index_output.status.success(), "index should succeed");
+
+    let repo_id = repo_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    (repo_dir, db_dir, repo_id)
+}
+
+// ---------------------------------------------------------------------------
+// file-outline command tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn file_outline_shows_symbols() {
+    let (_repo_dir, db_dir, repo_id) = indexed_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-outline",
+            "src/lib.rs",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-outline");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "file-outline should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("file: src/lib.rs"));
+    assert!(stdout.contains("name: greet"));
+    assert!(stdout.contains("kind: function"));
+}
+
+#[test]
+fn file_outline_not_found() {
+    let (_repo_dir, db_dir, repo_id) = indexed_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-outline",
+            "nonexistent.rs",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-outline");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not found"));
+}
+
+#[test]
+fn file_outline_fails_without_required_args() {
+    let output = Command::new(codeatlas_bin())
+        .args(["file-outline"])
+        .output()
+        .expect("file-outline");
+
+    assert!(!output.status.success());
+}
+
+// ---------------------------------------------------------------------------
+// file-tree command tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn file_tree_lists_files() {
+    let (_repo_dir, db_dir, repo_id) = indexed_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-tree",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-tree");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "file-tree should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("entries:"));
+    assert!(stdout.contains("src/lib.rs"));
+    assert!(stdout.contains("src/main.rs"));
+}
+
+#[test]
+fn file_tree_with_prefix_filter() {
+    let (_repo_dir, db_dir, repo_id) = indexed_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-tree",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+            "--prefix",
+            "src/lib",
+        ])
+        .output()
+        .expect("file-tree");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("src/lib.rs"));
+    assert!(!stdout.contains("src/main.rs"));
+}
+
+#[test]
+fn file_tree_fails_without_required_args() {
+    let output = Command::new(codeatlas_bin())
+        .args(["file-tree"])
+        .output()
+        .expect("file-tree");
+
+    assert!(!output.status.success());
+}
+
+// ---------------------------------------------------------------------------
+// repo-outline command tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn repo_outline_shows_structure() {
+    let (_repo_dir, db_dir, repo_id) = indexed_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo-outline",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("repo-outline");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "repo-outline should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains(&format!("repo_id: {repo_id}")));
+    assert!(stdout.contains("file_count:"));
+    assert!(stdout.contains("symbol_count:"));
+    assert!(stdout.contains("files:"));
+}
+
+#[test]
+fn repo_outline_not_found() {
+    let (_repo_dir, db_dir, _repo_id) = indexed_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo-outline",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            "nonexistent-repo",
+        ])
+        .output()
+        .expect("repo-outline");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not found"));
+}
+
+#[test]
+fn repo_outline_fails_without_required_args() {
+    let output = Command::new(codeatlas_bin())
+        .args(["repo-outline"])
+        .output()
+        .expect("repo-outline");
+
+    assert!(!output.status.success());
+}
+
+// ---------------------------------------------------------------------------
 // Help / unknown command
 // ---------------------------------------------------------------------------
 
