@@ -767,6 +767,7 @@ fn reindex_removes_stale_files_and_recomputes_aggregates() {
     // main.rs is unchanged, so incremental indexing skips it.
     assert_eq!(r2.metrics.files_parsed, 0);
     assert_eq!(r2.metrics.files_unchanged, 1);
+    assert_eq!(r2.metrics.files_deleted, 1);
 
     // Verify stale file was removed.
     assert!(
@@ -1304,11 +1305,13 @@ fn incremental_noop_run_skips_all_files() {
     let r1 = run(&ctx, &mut db, &blob_store).expect("first run");
     assert_eq!(r1.metrics.files_parsed, 1);
     assert_eq!(r1.metrics.files_unchanged, 0);
+    assert_eq!(r1.metrics.files_deleted, 0);
 
     // Second run: no changes — should be a no-op.
     let r2 = run(&ctx, &mut db, &blob_store).expect("second run");
     assert_eq!(r2.metrics.files_parsed, 0, "no files should be re-parsed");
     assert_eq!(r2.metrics.files_unchanged, 1);
+    assert_eq!(r2.metrics.files_deleted, 0);
     assert_eq!(r2.metrics.symbols_extracted, 0);
 
     // Metadata should still be intact from the first run.
@@ -1406,6 +1409,7 @@ fn incremental_detects_new_file() {
     let r2 = run(&ctx, &mut db, &blob_store).expect("second run");
     assert_eq!(r2.metrics.files_parsed, 1, "only new file should be parsed");
     assert_eq!(r2.metrics.files_unchanged, 1, "main.rs unchanged");
+    assert_eq!(r2.metrics.files_deleted, 0);
 
     // Both files should be in the store.
     let repo = db
@@ -1477,4 +1481,332 @@ fn incremental_hash_map_persists_across_runs() {
         hash_map, hash_map2,
         "hash map should be stable across no-op runs"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Incremental reindex: deleted-file cleanup and lifecycle
+// ---------------------------------------------------------------------------
+
+#[test]
+fn incremental_deleted_file_removes_symbols_and_updates_aggregates() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write main.rs");
+    std::fs::write(
+        repo_dir.path().join("lib.rs"),
+        "pub fn alpha() {}\npub fn beta() {}\n",
+    )
+    .expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "del-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // Run 1: index both files.
+    let r1 = run(&ctx, &mut db, &blob_store).expect("run 1");
+    assert_eq!(r1.metrics.files_parsed, 2);
+    assert_eq!(r1.metrics.files_deleted, 0);
+
+    let repo = db.repos().get("del-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 2);
+    let initial_symbol_count = repo.symbol_count;
+    assert!(initial_symbol_count >= 3, "main + alpha + beta");
+
+    // Verify lib.rs symbols exist.
+    let lib_syms = db
+        .symbols()
+        .list_ids_for_file("del-repo", "lib.rs")
+        .unwrap();
+    assert!(lib_syms.len() >= 2, "alpha + beta");
+
+    // Delete lib.rs from disk.
+    std::fs::remove_file(repo_dir.path().join("lib.rs")).expect("remove lib.rs");
+
+    // Run 2: lib.rs deleted, main.rs unchanged.
+    let r2 = run(&ctx, &mut db, &blob_store).expect("run 2");
+    assert_eq!(r2.metrics.files_parsed, 0, "main.rs unchanged");
+    assert_eq!(r2.metrics.files_unchanged, 1);
+    assert_eq!(r2.metrics.files_deleted, 1);
+
+    // lib.rs file record should be gone.
+    assert!(
+        db.files().get("del-repo", "lib.rs").unwrap().is_none(),
+        "deleted file record should be removed"
+    );
+
+    // lib.rs symbols should be gone (cascade delete).
+    let lib_syms_after = db
+        .symbols()
+        .list_ids_for_file("del-repo", "lib.rs")
+        .unwrap();
+    assert!(
+        lib_syms_after.is_empty(),
+        "symbols for deleted file should be removed"
+    );
+
+    // Hash map should no longer contain lib.rs.
+    let hash_map = db.files().list_hash_map("del-repo").unwrap();
+    assert!(!hash_map.contains_key("lib.rs"));
+    assert!(hash_map.contains_key("main.rs"));
+
+    // Aggregates should reflect the deletion.
+    let repo = db.repos().get("del-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 1);
+    assert!(
+        repo.symbol_count < initial_symbol_count,
+        "symbol count should decrease"
+    );
+    assert_eq!(repo.language_counts.get("rust"), Some(&1));
+}
+
+#[test]
+fn incremental_full_lifecycle_add_modify_delete() {
+    // This test exercises the complete incremental lifecycle over 5 runs:
+    // Run 1: Initial index (2 files)
+    // Run 2: No-op (nothing changed)
+    // Run 3: Add new file + modify existing file
+    // Run 4: Delete one file
+    // Run 5: No-op after deletion
+
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write main.rs");
+    std::fs::write(repo_dir.path().join("lib.rs"), "pub fn greet() {}\n").expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "lifecycle-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // --- Run 1: Initial index ---
+    let r1 = run(&ctx, &mut db, &blob_store).expect("run 1");
+    assert_eq!(r1.metrics.files_parsed, 2);
+    assert_eq!(r1.metrics.files_unchanged, 0);
+    assert_eq!(r1.metrics.files_deleted, 0);
+
+    let repo = db.repos().get("lifecycle-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 2);
+    let run1_symbol_count = repo.symbol_count;
+
+    // --- Run 2: No-op ---
+    let r2 = run(&ctx, &mut db, &blob_store).expect("run 2");
+    assert_eq!(r2.metrics.files_parsed, 0);
+    assert_eq!(r2.metrics.files_unchanged, 2);
+    assert_eq!(r2.metrics.files_deleted, 0);
+    assert_eq!(r2.metrics.symbols_extracted, 0);
+
+    // Aggregates unchanged.
+    let repo = db.repos().get("lifecycle-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 2);
+    assert_eq!(repo.symbol_count, run1_symbol_count);
+
+    // --- Run 3: Add utils.rs + modify lib.rs ---
+    std::fs::write(repo_dir.path().join("utils.rs"), "pub fn helper() {}\n")
+        .expect("write utils.rs");
+    std::fs::write(
+        repo_dir.path().join("lib.rs"),
+        "pub fn greet() {}\npub fn farewell() {}\n",
+    )
+    .expect("rewrite lib.rs");
+
+    let r3 = run(&ctx, &mut db, &blob_store).expect("run 3");
+    assert_eq!(
+        r3.metrics.files_parsed, 2,
+        "utils.rs (new) + lib.rs (modified)"
+    );
+    assert_eq!(r3.metrics.files_unchanged, 1, "main.rs unchanged");
+    assert_eq!(r3.metrics.files_deleted, 0);
+
+    let repo = db.repos().get("lifecycle-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 3);
+    assert!(
+        repo.symbol_count > run1_symbol_count,
+        "more symbols after adding utils.rs and modifying lib.rs"
+    );
+    let run3_symbol_count = repo.symbol_count;
+
+    // Verify utils.rs was indexed.
+    assert!(
+        db.files()
+            .get("lifecycle-repo", "utils.rs")
+            .unwrap()
+            .is_some(),
+        "new file should be indexed"
+    );
+
+    // Verify lib.rs now has farewell.
+    let lib_syms = db
+        .symbols()
+        .list_ids_for_file("lifecycle-repo", "lib.rs")
+        .unwrap();
+    assert!(
+        lib_syms.len() >= 2,
+        "lib.rs should have greet + farewell, got {}",
+        lib_syms.len()
+    );
+
+    // --- Run 4: Delete utils.rs ---
+    std::fs::remove_file(repo_dir.path().join("utils.rs")).expect("remove utils.rs");
+
+    let r4 = run(&ctx, &mut db, &blob_store).expect("run 4");
+    assert_eq!(r4.metrics.files_parsed, 0, "no changed files");
+    assert_eq!(r4.metrics.files_unchanged, 2, "main.rs + lib.rs");
+    assert_eq!(r4.metrics.files_deleted, 1, "utils.rs deleted");
+
+    let repo = db.repos().get("lifecycle-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 2);
+    assert!(
+        repo.symbol_count < run3_symbol_count,
+        "fewer symbols after deleting utils.rs"
+    );
+
+    // utils.rs gone from store.
+    assert!(
+        db.files()
+            .get("lifecycle-repo", "utils.rs")
+            .unwrap()
+            .is_none(),
+        "deleted file should be removed"
+    );
+    assert!(
+        db.symbols()
+            .list_ids_for_file("lifecycle-repo", "utils.rs")
+            .unwrap()
+            .is_empty(),
+        "symbols for deleted file should be removed"
+    );
+
+    // --- Run 5: No-op after deletion ---
+    let r5 = run(&ctx, &mut db, &blob_store).expect("run 5");
+    assert_eq!(r5.metrics.files_parsed, 0);
+    assert_eq!(r5.metrics.files_unchanged, 2);
+    assert_eq!(r5.metrics.files_deleted, 0);
+
+    // Final state is stable.
+    let repo = db.repos().get("lifecycle-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 2);
+    let hash_map = db.files().list_hash_map("lifecycle-repo").unwrap();
+    assert_eq!(hash_map.len(), 2);
+    assert!(hash_map.contains_key("main.rs"));
+    assert!(hash_map.contains_key("lib.rs"));
+    assert!(!hash_map.contains_key("utils.rs"));
+}
+
+#[test]
+fn incremental_delete_all_files_leaves_empty_repo() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write main.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "empty-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // Run 1: index.
+    run(&ctx, &mut db, &blob_store).expect("run 1");
+    assert_eq!(db.repos().get("empty-repo").unwrap().unwrap().file_count, 1);
+
+    // Remove the only file.
+    std::fs::remove_file(repo_dir.path().join("main.rs")).expect("remove main.rs");
+
+    // Run 2: all files deleted.
+    let r2 = run(&ctx, &mut db, &blob_store).expect("run 2");
+    assert_eq!(r2.metrics.files_deleted, 1);
+    assert_eq!(r2.metrics.files_parsed, 0);
+    assert_eq!(r2.metrics.files_unchanged, 0);
+
+    let repo = db.repos().get("empty-repo").unwrap().unwrap();
+    assert_eq!(repo.file_count, 0);
+    assert_eq!(repo.symbol_count, 0);
+    assert!(repo.language_counts.is_empty());
+
+    let hash_map = db.files().list_hash_map("empty-repo").unwrap();
+    assert!(hash_map.is_empty());
+}
+
+#[test]
+fn incremental_multiple_deletes_across_runs() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("a.rs"), "pub fn a() {}\n").expect("write a.rs");
+    std::fs::write(repo_dir.path().join("b.rs"), "pub fn b() {}\n").expect("write b.rs");
+    std::fs::write(repo_dir.path().join("c.rs"), "pub fn c() {}\n").expect("write c.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "multi-del-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // Run 1: index all 3.
+    let r1 = run(&ctx, &mut db, &blob_store).expect("run 1");
+    assert_eq!(r1.metrics.files_parsed, 3);
+
+    // Delete a.rs.
+    std::fs::remove_file(repo_dir.path().join("a.rs")).expect("remove a.rs");
+    let r2 = run(&ctx, &mut db, &blob_store).expect("run 2");
+    assert_eq!(r2.metrics.files_deleted, 1);
+    assert_eq!(
+        db.repos()
+            .get("multi-del-repo")
+            .unwrap()
+            .unwrap()
+            .file_count,
+        2
+    );
+
+    // Delete b.rs.
+    std::fs::remove_file(repo_dir.path().join("b.rs")).expect("remove b.rs");
+    let r3 = run(&ctx, &mut db, &blob_store).expect("run 3");
+    assert_eq!(r3.metrics.files_deleted, 1);
+    assert_eq!(
+        db.repos()
+            .get("multi-del-repo")
+            .unwrap()
+            .unwrap()
+            .file_count,
+        1
+    );
+
+    // c.rs should still be present and correct.
+    let c_file = db
+        .files()
+        .get("multi-del-repo", "c.rs")
+        .unwrap()
+        .expect("c.rs should exist");
+    assert_eq!(c_file.language, "rust");
+    let c_syms = db
+        .symbols()
+        .list_ids_for_file("multi-del-repo", "c.rs")
+        .unwrap();
+    assert!(!c_syms.is_empty(), "c.rs should have symbols");
 }
