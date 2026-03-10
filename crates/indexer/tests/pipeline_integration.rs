@@ -187,6 +187,7 @@ fn pipeline_end_to_end_smoke_test() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: Some("test-correlation-001".to_string()),
+        use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
@@ -300,6 +301,7 @@ pub fn greet(config: &Config) -> String {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
@@ -378,6 +380,7 @@ fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
@@ -495,6 +498,7 @@ fn adapter_fallback_continues_past_failing_adapter() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
@@ -558,6 +562,7 @@ fn adapter_error_carries_adapter_id_provenance() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
@@ -599,6 +604,7 @@ fn discovery_stage_finds_files() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let output = stage::discover(&ctx).expect("discovery should succeed");
@@ -616,6 +622,7 @@ fn discovery_stage_rejects_invalid_root() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let err = stage::discover(&ctx).expect_err("should fail on invalid root");
@@ -639,6 +646,7 @@ fn discovery_detects_extensionless_script_via_content() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let output = stage::discover(&ctx).expect("discovery should succeed");
@@ -671,6 +679,7 @@ fn parse_stage_handles_no_adapter() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let discovery = stage::discover(&ctx).expect("discovery ok");
@@ -704,6 +713,7 @@ fn parse_stage_uses_context_default_policy() {
         router: &router,
         default_policy: AdapterPolicy::SemanticPreferred,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let discovery = stage::discover(&ctx).expect("discovery ok");
@@ -746,6 +756,7 @@ fn reindex_removes_stale_files_and_recomputes_aggregates() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // First run: both files indexed.
@@ -835,6 +846,7 @@ fn reindex_cleans_up_removed_symbols_within_file() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // First run.
@@ -915,6 +927,7 @@ pub fn greet(config: &Config) -> String {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
@@ -1018,6 +1031,7 @@ fn enrichment_is_deterministic_across_runs() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     run(&ctx, &mut db1, &blob_store).expect("run 1");
@@ -1174,6 +1188,7 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
         router: &ts_router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let r1 = run(&ctx1, &mut db, &blob_store).expect("first run");
@@ -1208,6 +1223,7 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
         router: &fail_router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let r2 = run(&ctx2, &mut db, &blob_store).expect("second run");
@@ -1299,6 +1315,7 @@ fn incremental_noop_run_skips_all_files() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // First run: full index.
@@ -1348,6 +1365,7 @@ fn incremental_detects_modified_file_and_reindexes() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // First run.
@@ -1397,6 +1415,7 @@ fn incremental_detects_new_file() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // First run.
@@ -1449,6 +1468,7 @@ fn incremental_hash_map_persists_across_runs() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // First run populates the hash map.
@@ -1508,6 +1528,7 @@ fn incremental_deleted_file_removes_symbols_and_updates_aggregates() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // Run 1: index both files.
@@ -1591,6 +1612,7 @@ fn incremental_full_lifecycle_add_modify_delete() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // --- Run 1: Initial index ---
@@ -1723,6 +1745,7 @@ fn incremental_delete_all_files_leaves_empty_repo() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // Run 1: index.
@@ -1765,6 +1788,7 @@ fn incremental_multiple_deletes_across_runs() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // Run 1: index all 3.
@@ -1809,4 +1833,271 @@ fn incremental_multiple_deletes_across_runs() {
         .list_ids_for_file("multi-del-repo", "c.rs")
         .unwrap();
     assert!(!c_syms.is_empty(), "c.rs should have symbols");
+}
+
+// ---------------------------------------------------------------------------
+// Git-diff accelerated mode integration tests
+// ---------------------------------------------------------------------------
+
+fn init_git_repo(dir: &std::path::Path) {
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("git init");
+
+    std::process::Command::new("git")
+        .args(["config", "user.email", "test@test.com"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("git config email");
+
+    std::process::Command::new("git")
+        .args(["config", "user.name", "Test"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("git config name");
+}
+
+fn git_add_commit(dir: &std::path::Path, message: &str) {
+    std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("git add");
+
+    std::process::Command::new("git")
+        .args(["commit", "-m", message, "--allow-empty"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("git commit");
+}
+
+/// Git-diff mode produces the same final DB state as hash-based mode after
+/// initial index + modify + delete lifecycle.
+#[test]
+fn git_diff_parity_with_hash_based_detection() {
+    let router = TreeSitterRouter::new();
+
+    // --- Run A: hash-based mode ---
+    let repo_a = TempDir::new().expect("repo_a dir");
+    let blob_a = TempDir::new().expect("blob_a dir");
+    let blob_store_a = setup_blob_store(&blob_a);
+    let mut db_a = store::MetadataStore::open_in_memory().expect("db_a");
+
+    // Initial index.
+    std::fs::write(repo_a.path().join("a.rs"), "pub fn a() {}\n").unwrap();
+    std::fs::write(repo_a.path().join("b.rs"), "pub fn b() {}\n").unwrap();
+
+    let ctx_a = PipelineContext {
+        repo_id: "parity-repo".to_string(),
+        source_root: repo_a.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+        use_git_diff: false,
+    };
+    run(&ctx_a, &mut db_a, &blob_store_a).expect("hash run 1");
+
+    // Modify a.rs, delete b.rs, add c.rs.
+    std::fs::write(repo_a.path().join("a.rs"), "pub fn a_v2() {}\n").unwrap();
+    std::fs::remove_file(repo_a.path().join("b.rs")).unwrap();
+    std::fs::write(repo_a.path().join("c.rs"), "pub fn c() {}\n").unwrap();
+    let r_a = run(&ctx_a, &mut db_a, &blob_store_a).expect("hash run 2");
+
+    // --- Run B: git-diff mode ---
+    let repo_b = TempDir::new().expect("repo_b dir");
+    let blob_b = TempDir::new().expect("blob_b dir");
+    let blob_store_b = setup_blob_store(&blob_b);
+    let mut db_b = store::MetadataStore::open_in_memory().expect("db_b");
+
+    init_git_repo(repo_b.path());
+    std::fs::write(repo_b.path().join("a.rs"), "pub fn a() {}\n").unwrap();
+    std::fs::write(repo_b.path().join("b.rs"), "pub fn b() {}\n").unwrap();
+    git_add_commit(repo_b.path(), "initial");
+
+    let ctx_b = PipelineContext {
+        repo_id: "parity-repo".to_string(),
+        source_root: repo_b.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+        use_git_diff: true,
+    };
+    run(&ctx_b, &mut db_b, &blob_store_b).expect("git run 1");
+
+    // Modify a.rs, delete b.rs, add c.rs — commit so git-diff can see changes.
+    std::fs::write(repo_b.path().join("a.rs"), "pub fn a_v2() {}\n").unwrap();
+    std::fs::remove_file(repo_b.path().join("b.rs")).unwrap();
+    std::fs::write(repo_b.path().join("c.rs"), "pub fn c() {}\n").unwrap();
+    git_add_commit(repo_b.path(), "modify and delete");
+    let r_b = run(&ctx_b, &mut db_b, &blob_store_b).expect("git run 2");
+
+    // Compare metrics.
+    assert_eq!(
+        r_a.metrics.files_parsed, r_b.metrics.files_parsed,
+        "files_parsed mismatch"
+    );
+    assert_eq!(
+        r_a.metrics.files_deleted, r_b.metrics.files_deleted,
+        "files_deleted mismatch"
+    );
+    assert_eq!(
+        r_a.metrics.symbols_extracted, r_b.metrics.symbols_extracted,
+        "symbols_extracted mismatch"
+    );
+
+    // Compare final DB state: same files and symbols.
+    let files_a = db_a.files().list_hash_map("parity-repo").unwrap();
+    let files_b = db_b.files().list_hash_map("parity-repo").unwrap();
+    assert_eq!(files_a, files_b, "file hash maps should be identical");
+
+    // Compare symbols per file.
+    for path in files_a.keys() {
+        let syms_a = db_a
+            .symbols()
+            .list_ids_for_file("parity-repo", path)
+            .unwrap();
+        let syms_b = db_b
+            .symbols()
+            .list_ids_for_file("parity-repo", path)
+            .unwrap();
+        assert_eq!(syms_a, syms_b, "symbol IDs for {path} should be identical");
+    }
+}
+
+/// Git-diff mode detects uncommitted working-tree changes (same HEAD).
+#[test]
+fn git_diff_detects_uncommitted_changes() {
+    let router = TreeSitterRouter::new();
+    let repo_dir = TempDir::new().expect("repo dir");
+    let blob_dir = TempDir::new().expect("blob dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let mut db = store::MetadataStore::open_in_memory().expect("db");
+
+    init_git_repo(repo_dir.path());
+    std::fs::write(repo_dir.path().join("a.rs"), "pub fn a() {}\n").unwrap();
+    git_add_commit(repo_dir.path(), "initial");
+
+    let ctx = PipelineContext {
+        repo_id: "dirty-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+        use_git_diff: true,
+    };
+
+    // Initial index — a.rs is new.
+    let r1 = run(&ctx, &mut db, &blob_store).expect("run 1");
+    assert_eq!(r1.metrics.files_parsed, 1);
+
+    // Modify a.rs WITHOUT committing.
+    std::fs::write(repo_dir.path().join("a.rs"), "pub fn a_modified() {}\n").unwrap();
+
+    // Second run — HEAD is the same but file is dirty; must reindex.
+    let r2 = run(&ctx, &mut db, &blob_store).expect("run 2");
+    assert_eq!(r2.metrics.files_parsed, 1, "dirty file must be re-parsed");
+    assert_eq!(
+        r2.metrics.files_unchanged, 0,
+        "dirty file must not be skipped"
+    );
+
+    // Verify the updated symbol is in the DB.
+    let syms = db
+        .symbols()
+        .list_ids_for_file("dirty-repo", "a.rs")
+        .unwrap();
+    assert!(
+        !syms.is_empty(),
+        "a.rs should have symbols after dirty reindex"
+    );
+}
+
+/// Git-diff mode persists git_head and uses it for subsequent runs.
+#[test]
+fn git_diff_persists_and_uses_git_head() {
+    let router = TreeSitterRouter::new();
+    let repo_dir = TempDir::new().expect("repo dir");
+    let blob_dir = TempDir::new().expect("blob dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let mut db = store::MetadataStore::open_in_memory().expect("db");
+
+    init_git_repo(repo_dir.path());
+    std::fs::write(repo_dir.path().join("a.rs"), "pub fn a() {}\n").unwrap();
+    git_add_commit(repo_dir.path(), "initial");
+
+    let ctx = PipelineContext {
+        repo_id: "head-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+        use_git_diff: true,
+    };
+
+    run(&ctx, &mut db, &blob_store).expect("run 1");
+
+    // Verify git_head was persisted.
+    let repo_record = db.repos().get("head-repo").unwrap().unwrap();
+    assert!(
+        repo_record.git_head.is_some(),
+        "git_head should be persisted"
+    );
+    let head1 = repo_record.git_head.unwrap();
+    assert_eq!(head1.len(), 40, "should be full SHA");
+
+    // Make a new commit and reindex.
+    std::fs::write(repo_dir.path().join("b.rs"), "pub fn b() {}\n").unwrap();
+    git_add_commit(repo_dir.path(), "add b");
+
+    let r2 = run(&ctx, &mut db, &blob_store).expect("run 2");
+    assert_eq!(
+        r2.metrics.files_parsed, 1,
+        "only new file b.rs should be parsed"
+    );
+    assert_eq!(r2.metrics.files_unchanged, 1, "a.rs should be unchanged");
+
+    // Verify git_head was updated.
+    let repo_record2 = db.repos().get("head-repo").unwrap().unwrap();
+    let head2 = repo_record2.git_head.unwrap();
+    assert_ne!(head1, head2, "git_head should have been updated");
+}
+
+/// Git-diff mode with no previous head falls back to hash-based (first run).
+#[test]
+fn git_diff_first_run_indexes_all_files() {
+    let router = TreeSitterRouter::new();
+    let repo_dir = TempDir::new().expect("repo dir");
+    let blob_dir = TempDir::new().expect("blob dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let mut db = store::MetadataStore::open_in_memory().expect("db");
+
+    init_git_repo(repo_dir.path());
+    std::fs::write(repo_dir.path().join("a.rs"), "pub fn a() {}\n").unwrap();
+    std::fs::write(repo_dir.path().join("b.rs"), "pub fn b() {}\n").unwrap();
+    git_add_commit(repo_dir.path(), "initial");
+
+    let ctx = PipelineContext {
+        repo_id: "first-run-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+        use_git_diff: true,
+    };
+
+    let r = run(&ctx, &mut db, &blob_store).expect("run 1");
+    assert_eq!(
+        r.metrics.files_parsed, 2,
+        "all files should be parsed on first run"
+    );
+    assert_eq!(r.metrics.files_unchanged, 0);
 }

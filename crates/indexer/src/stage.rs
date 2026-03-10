@@ -315,7 +315,11 @@ pub fn persist(
         language_counts: BTreeMap::new(),
         file_count: 0,
         symbol_count: 0,
-        git_head: None,
+        git_head: if ctx.use_git_diff {
+            crate::git::current_head(ctx.source_root())
+        } else {
+            None
+        },
     };
 
     if let Err(e) = provisional_repo.validate() {

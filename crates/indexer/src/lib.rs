@@ -12,6 +12,7 @@ use std::path::PathBuf;
 pub mod change_detection;
 pub mod context;
 pub mod enrich;
+pub mod git;
 pub mod pipeline;
 pub mod stage;
 

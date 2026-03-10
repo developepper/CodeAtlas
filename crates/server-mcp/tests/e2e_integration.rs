@@ -77,6 +77,7 @@ fn indexed_store() -> (store::MetadataStore, TempDir) {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     let result = indexer::run(&ctx, &mut db, &blob_store).expect("indexing should succeed");
