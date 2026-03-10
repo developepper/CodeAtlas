@@ -9,10 +9,10 @@ use rusqlite::Connection;
 use crate::StoreError;
 
 /// Current schema version (latest migration number).
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// All migrations in order. Each entry is `(version, up_sql, down_sql)`.
-const MIGRATIONS: &[(u32, &str, &str)] = &[(1, V1_UP, V1_DOWN)];
+const MIGRATIONS: &[(u32, &str, &str)] = &[(1, V1_UP, V1_DOWN), (2, V2_UP, V2_DOWN)];
 
 // ---------------------------------------------------------------------------
 // V1: baseline schema
@@ -88,6 +88,52 @@ DROP INDEX IF EXISTS idx_symbols_repo_file;
 DROP TABLE IF EXISTS symbols;
 DROP TABLE IF EXISTS files;
 DROP TABLE IF EXISTS repos;
+"#;
+
+// ---------------------------------------------------------------------------
+// V2: FTS5 full-text search index on symbols
+// ---------------------------------------------------------------------------
+
+const V2_UP: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
+    id UNINDEXED,
+    name,
+    qualified_name,
+    signature,
+    docstring,
+    summary,
+    keywords,
+    content='symbols',
+    content_rowid='rowid'
+);
+
+-- Populate from existing data.
+INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');
+
+-- Keep FTS in sync on insert/update/delete.
+CREATE TRIGGER IF NOT EXISTS symbols_ai AFTER INSERT ON symbols BEGIN
+    INSERT INTO symbols_fts(rowid, id, name, qualified_name, signature, docstring, summary, keywords)
+    VALUES (new.rowid, new.id, new.name, new.qualified_name, new.signature, new.docstring, new.summary, new.keywords);
+END;
+
+CREATE TRIGGER IF NOT EXISTS symbols_ad AFTER DELETE ON symbols BEGIN
+    INSERT INTO symbols_fts(symbols_fts, rowid, id, name, qualified_name, signature, docstring, summary, keywords)
+    VALUES ('delete', old.rowid, old.id, old.name, old.qualified_name, old.signature, old.docstring, old.summary, old.keywords);
+END;
+
+CREATE TRIGGER IF NOT EXISTS symbols_au AFTER UPDATE ON symbols BEGIN
+    INSERT INTO symbols_fts(symbols_fts, rowid, id, name, qualified_name, signature, docstring, summary, keywords)
+    VALUES ('delete', old.rowid, old.id, old.name, old.qualified_name, old.signature, old.docstring, old.summary, old.keywords);
+    INSERT INTO symbols_fts(rowid, id, name, qualified_name, signature, docstring, summary, keywords)
+    VALUES (new.rowid, new.id, new.name, new.qualified_name, new.signature, new.docstring, new.summary, new.keywords);
+END;
+"#;
+
+const V2_DOWN: &str = r#"
+DROP TRIGGER IF EXISTS symbols_au;
+DROP TRIGGER IF EXISTS symbols_ad;
+DROP TRIGGER IF EXISTS symbols_ai;
+DROP TABLE IF EXISTS symbols_fts;
 "#;
 
 // ---------------------------------------------------------------------------
