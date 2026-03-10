@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use query_engine::QueryService;
 use serde_json::Value;
+use tracing::info_span;
 
 use crate::tools;
 use crate::types::{McpError, McpMeta, McpResponse};
@@ -44,6 +45,9 @@ impl<'a> ToolRegistry<'a> {
     /// structured error. Unknown tool names produce an error response.
     /// Every response includes `_meta` with timing, truncation, and quality stats.
     pub fn call(&self, tool_name: &str, params: Value) -> McpResponse {
+        let span = info_span!("mcp_tool_call", tool = %tool_name);
+        let _guard = span.enter();
+
         let start = Instant::now();
 
         let result = match tool_name {

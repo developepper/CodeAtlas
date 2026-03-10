@@ -11,9 +11,12 @@ test-support = []
 [dependencies]
 core-model.workspace = true
 store.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 adapter-api.workspace = true
 adapter-syntax-treesitter.workspace = true
 indexer.workspace = true
+query-engine = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
+tracing-subscriber.workspace = true

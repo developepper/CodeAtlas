@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use tracing::info;
+use tracing::{info, info_span};
 
 use crate::change_detection;
 use crate::context::PipelineContext;
@@ -42,7 +42,15 @@ pub fn run(
     store: &mut store::MetadataStore,
     blob_store: &store::BlobStore,
 ) -> Result<IndexResult, PipelineError> {
-    info!(repo_id = %ctx.repo_id, "pipeline started");
+    let correlation_id = ctx.correlation_id.as_deref().unwrap_or("");
+    let span = info_span!(
+        "index_pipeline",
+        repo_id = %ctx.repo_id,
+        correlation_id = %correlation_id,
+    );
+    let _guard = span.enter();
+
+    info!("pipeline started");
 
     // Stage 1: Discovery
     let discovery: DiscoveryOutput = stage::discover(ctx)?;
