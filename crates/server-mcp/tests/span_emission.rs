@@ -42,7 +42,10 @@ where
             None
         };
 
-        self.spans.lock().unwrap().push(SpanInfo { name, parent_name });
+        self.spans
+            .lock()
+            .unwrap()
+            .push(SpanInfo { name, parent_name });
     }
 }
 
@@ -126,17 +129,11 @@ fn mcp_tool_span_parents_query_spans() {
             "search_symbols",
             serde_json::json!({"repo_id": "repo-1", "text": "alpha"}),
         );
-        let _ = registry.call(
-            "get_file_tree",
-            serde_json::json!({"repo_id": "repo-1"}),
-        );
+        let _ = registry.call("get_file_tree", serde_json::json!({"repo_id": "repo-1"}));
     });
 
     let spans = captured.lock().unwrap();
-    let tool_spans: Vec<_> = spans
-        .iter()
-        .filter(|s| s.name == "mcp_tool_call")
-        .collect();
+    let tool_spans: Vec<_> = spans.iter().filter(|s| s.name == "mcp_tool_call").collect();
 
     assert_eq!(
         tool_spans.len(),

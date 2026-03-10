@@ -164,9 +164,7 @@ where
         attrs.record(&mut visitor);
 
         let mut state = self.state.lock().unwrap();
-        state
-            .id_to_name
-            .insert(id.into_u64(), name.clone());
+        state.id_to_name.insert(id.into_u64(), name.clone());
         state.spans.push(SpanInfo {
             name,
             parent_name,
