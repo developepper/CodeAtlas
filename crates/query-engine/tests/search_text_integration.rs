@@ -589,6 +589,7 @@ struct HttpServer {
             router: &router,
             default_policy: AdapterPolicy::SyntaxOnly,
             correlation_id: None,
+            use_git_diff: false,
         };
         let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
         assert!(result.metrics.symbols_extracted >= 2);

@@ -20,6 +20,10 @@ pub struct PipelineContext<'a> {
     pub default_policy: AdapterPolicy,
     /// Optional correlation ID for structured log tracing.
     pub correlation_id: Option<String>,
+    /// When `true`, use git-diff to accelerate change detection on
+    /// git-backed repositories. Falls back to hash-based detection
+    /// when the repository is not a git repo or git is unavailable.
+    pub use_git_diff: bool,
 }
 
 impl<'a> PipelineContext<'a> {

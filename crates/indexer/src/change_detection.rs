@@ -87,6 +87,82 @@ pub fn detect_changes(
     }
 }
 
+/// Git-diff accelerated change detection.
+///
+/// Uses `git diff --name-only` between the previously stored HEAD and the
+/// current HEAD to identify committed changes, **plus** `git diff` against
+/// HEAD for uncommitted working-tree changes (staged and unstaged). This
+/// ensures that files edited without committing are still detected.
+///
+/// Returns `None` if git-diff is unavailable (not a git repo, missing
+/// commits, etc.), signaling the caller to fall back to hash-based detection.
+pub fn detect_changes_git(
+    files: &[PreparedFile],
+    previous_hashes: &HashMap<String, String>,
+    source_root: &std::path::Path,
+    previous_head: &str,
+    current_head: &str,
+) -> Option<ChangeSet> {
+    // Always collect uncommitted working-tree changes so edits that have
+    // not been committed are never silently skipped.
+    let dirty = crate::git::dirty_files(source_root)?;
+
+    let committed_changes = if previous_head == current_head {
+        // Same commit — no committed changes between the two.
+        HashSet::new()
+    } else {
+        crate::git::diff_files(source_root, previous_head, current_head)?
+    };
+
+    // Union of committed inter-commit changes and uncommitted dirty files.
+    let git_changed: HashSet<&str> = committed_changes
+        .iter()
+        .map(|s| s.as_str())
+        .chain(dirty.iter().map(|s| s.as_str()))
+        .collect();
+
+    let discovered_set: HashSet<String> = files
+        .iter()
+        .map(|f| f.relative_path.to_string_lossy().into_owned())
+        .collect();
+
+    let mut changed_indices = Vec::new();
+    let mut unchanged_count = 0usize;
+    let mut new_count = 0usize;
+    let mut modified_count = 0usize;
+
+    for (i, file) in files.iter().enumerate() {
+        let path = file.relative_path.to_string_lossy();
+
+        if !previous_hashes.contains_key(path.as_ref()) {
+            // New file.
+            new_count += 1;
+            changed_indices.push(i);
+        } else if git_changed.contains(path.as_ref()) {
+            // Git says this file changed (committed or uncommitted).
+            modified_count += 1;
+            changed_indices.push(i);
+        } else {
+            unchanged_count += 1;
+        }
+    }
+
+    let mut deleted_paths: Vec<String> = previous_hashes
+        .keys()
+        .filter(|p| !discovered_set.contains(p.as_str()))
+        .cloned()
+        .collect();
+    deleted_paths.sort();
+
+    Some(ChangeSet {
+        changed_indices,
+        unchanged_count,
+        new_count,
+        modified_count,
+        deleted_paths,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

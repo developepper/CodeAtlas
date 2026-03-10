@@ -55,7 +55,41 @@ pub fn run(
         .list_hash_map(&ctx.repo_id)
         .map_err(PipelineError::Persist)?;
 
-    let change_set = change_detection::detect_changes(&discovery.files, &previous_hashes);
+    let change_set = if ctx.use_git_diff {
+        // Try git-diff accelerated detection; fall back to hash-based on failure.
+        let previous_head = store
+            .repos()
+            .get(&ctx.repo_id)
+            .map_err(PipelineError::Persist)?
+            .and_then(|r| r.git_head);
+
+        match (previous_head, crate::git::current_head(ctx.source_root())) {
+            (Some(prev), Some(curr)) => {
+                info!(
+                    previous_head = %prev,
+                    current_head = %curr,
+                    "attempting git-diff accelerated change detection"
+                );
+                change_detection::detect_changes_git(
+                    &discovery.files,
+                    &previous_hashes,
+                    ctx.source_root(),
+                    &prev,
+                    &curr,
+                )
+                .unwrap_or_else(|| {
+                    info!("git-diff failed, falling back to hash-based detection");
+                    change_detection::detect_changes(&discovery.files, &previous_hashes)
+                })
+            }
+            _ => {
+                info!("git-diff not available (no previous head or not a git repo), using hash-based detection");
+                change_detection::detect_changes(&discovery.files, &previous_hashes)
+            }
+        }
+    } else {
+        change_detection::detect_changes(&discovery.files, &previous_hashes)
+    };
 
     let files_unchanged = change_set.unchanged_count;
     let files_deleted = change_set.deleted_paths.len();

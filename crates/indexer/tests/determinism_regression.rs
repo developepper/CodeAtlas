@@ -208,6 +208,7 @@ fn full_index_produces_identical_state_across_independent_runs() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
     run(&ctx, &mut db1, &blob_store).expect("run 1");
 
@@ -279,6 +280,7 @@ fn reindex_same_content_is_idempotent() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // Run 1: full index.
@@ -326,6 +328,7 @@ fn symbol_ids_stable_when_identity_unchanged() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // Run 1.
@@ -381,6 +384,7 @@ fn file_hashes_stable_for_unchanged_files() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     run(&ctx, &mut db, &blob_store).expect("run 1");
@@ -435,6 +439,7 @@ fn incremental_and_full_reindex_produce_equivalent_state() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
     run(&ctx, &mut db_incremental, &blob_store).expect("incremental: run 1");
 
@@ -507,6 +512,7 @@ fn store_ordering_is_deterministic() {
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     run(&ctx, &mut db, &blob_store).expect("run");
@@ -559,6 +565,7 @@ pub fn run_delta() {}
         router: &router,
         default_policy: AdapterPolicy::SyntaxOnly,
         correlation_id: None,
+        use_git_diff: false,
     };
 
     // Run 1.
@@ -624,6 +631,7 @@ fn lifecycle_determinism_across_independent_runs() {
             router: &router,
             default_policy: AdapterPolicy::SyntaxOnly,
             correlation_id: None,
+            use_git_diff: false,
         };
 
         // Step 1: Initial files.
