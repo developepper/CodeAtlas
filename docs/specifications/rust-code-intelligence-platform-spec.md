@@ -1,7 +1,7 @@
 # Rust Polyglot Code Intelligence Platform - Complete Build Specification
 
-Status: Draft for implementation planning  
-Project codename: `TBD` (working label: `AdaptIndex`)  
+Status: Active baseline specification (implementation in progress)  
+Project codename: `CodeAtlas`  
 Primary implementation language: Rust  
 Primary interface: MCP server + optional HTTP/gRPC API
 
