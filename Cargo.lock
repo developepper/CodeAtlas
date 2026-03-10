@@ -302,6 +302,7 @@ dependencies = [
  "adapter-api",
  "adapter-syntax-treesitter",
  "core-model",
+ "query-engine",
  "repo-walker",
  "store",
  "tempfile",
