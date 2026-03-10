@@ -9,45 +9,66 @@ use tracing_subscriber::EnvFilter;
 
 mod commands;
 mod error;
+pub mod logging;
 mod router;
 
 /// Initialises the tracing subscriber stack.
 ///
-/// The base layer is a `tracing-subscriber` `fmt` layer filtered by the
-/// `CODEATLAS_LOG` (or `RUST_LOG`) environment variable, defaulting to
+/// **Log format** is controlled by `CODEATLAS_LOG_FORMAT`:
+/// - `json` (default) — structured JSON lines with redaction (spec §13.2).
+/// - `compact` — human-readable compact output for local development.
+///
+/// **Log level** respects `CODEATLAS_LOG` or `RUST_LOG`, defaulting to
 /// `info`.
 ///
-/// When `OTEL_EXPORTER_OTLP_ENDPOINT` is set **or** `CODEATLAS_OTEL=1`,
-/// an OpenTelemetry span-export layer is added that writes trace spans to
-/// stdout in OTLP-JSON format. Replace the stdout exporter with a
-/// network exporter (e.g. `opentelemetry-otlp`) for production use.
+/// **OpenTelemetry** span export is enabled when `CODEATLAS_OTEL=1` or
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 fn init_tracing() {
     let env_filter = EnvFilter::try_from_env("CODEATLAS_LOG")
         .or_else(|_| EnvFilter::try_from_default_env())
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let fmt_layer = tracing_subscriber::fmt::layer().compact();
+    let use_json = std::env::var("CODEATLAS_LOG_FORMAT")
+        .map(|v| v != "compact")
+        .unwrap_or(true);
 
     let otel_enabled = std::env::var("CODEATLAS_OTEL").is_ok_and(|v| v == "1")
         || std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok();
 
-    if otel_enabled {
-        let exporter = opentelemetry_stdout::SpanExporter::default();
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
-            .with_simple_exporter(exporter)
-            .build();
-        let otel_layer = tracing_opentelemetry::layer().with_tracer(provider.tracer("codeatlas"));
-
-        tracing_subscriber::registry()
+    if use_json {
+        let json_layer = logging::RedactingJsonLayer::new(std::io::stderr);
+        let base = tracing_subscriber::registry()
             .with(env_filter)
-            .with(fmt_layer)
-            .with(otel_layer)
-            .init();
+            .with(json_layer);
+        if otel_enabled {
+            let exporter = opentelemetry_stdout::SpanExporter::default();
+            let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+                .with_simple_exporter(exporter)
+                .build();
+            let otel_layer =
+                tracing_opentelemetry::layer().with_tracer(provider.tracer("codeatlas"));
+            base.with(otel_layer).init();
+        } else {
+            base.init();
+        }
     } else {
-        tracing_subscriber::registry()
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .compact()
+            .fmt_fields(logging::RedactingFieldFormatter);
+        let base = tracing_subscriber::registry()
             .with(env_filter)
-            .with(fmt_layer)
-            .init();
+            .with(fmt_layer);
+        if otel_enabled {
+            let exporter = opentelemetry_stdout::SpanExporter::default();
+            let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+                .with_simple_exporter(exporter)
+                .build();
+            let otel_layer =
+                tracing_opentelemetry::layer().with_tracer(provider.tracer("codeatlas"));
+            base.with(otel_layer).init();
+        } else {
+            base.init();
+        }
     }
 }
 
