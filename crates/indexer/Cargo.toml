@@ -15,4 +15,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 adapter-syntax-treesitter = { path = "../adapter-syntax-treesitter" }
+query-engine = { path = "../query-engine" }
 tempfile.workspace = true
