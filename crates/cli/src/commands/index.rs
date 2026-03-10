@@ -45,8 +45,9 @@ fn parse_args(args: &[String]) -> Result<IndexOpts, CliError> {
         i += 1;
     }
 
-    let source_root = source_root
-        .ok_or_else(|| CliError::Usage("usage: codeatlas index <path> [--db <path>]".into()))?;
+    let source_root = source_root.ok_or_else(|| {
+        CliError::Usage("usage: codeatlas index <path> [--db <path>] [--git-diff]".into())
+    })?;
 
     Ok(IndexOpts {
         source_root,

@@ -47,6 +47,10 @@ Key design decisions:
 - Repo upsert uses INSERT OR IGNORE + UPDATE to avoid ON DELETE CASCADE
 - Aggregates (file_count, symbol_count, language_counts) recomputed from DB state
 - Per-file symbol cleanup before upsert handles renamed/removed symbols
+- Incremental indexing uses persisted file hashes, deleted-file cleanup, and
+  optional git-diff acceleration via persisted `git_head` plus dirty working-tree detection
+- Determinism is guarded by regression coverage for stable IDs, ordering, and
+  incremental vs fresh-index equivalence
 
 ## Milestone/Epic Breakdown
 
@@ -57,7 +61,7 @@ Key design decisions:
 5. ~~Epic 4: Storage and Atomic Index Commit Path~~ (complete)
 6. ~~Epic 5: Query Engine and Deterministic Ranking~~ (complete)
 7. ~~Epic 6: MCP Server Interface and Tool Contracts~~ (complete)
-8. **Epic 7: Incremental Indexing and Reliability Hardening** (next)
+8. ~~Epic 7: Incremental Indexing and Reliability Hardening~~ (complete)
 9. Epic 8: Security, Observability, and Performance Guardrails
 10. Epic 9: Semantic Adapter Integration (at least two languages)
 11. Epic 10: Documentation, Benchmarks, and V1 Readiness Review

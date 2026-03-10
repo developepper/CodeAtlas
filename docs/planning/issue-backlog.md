@@ -2,10 +2,11 @@
 
 This backlog is designed for one-PR-per-issue execution.
 
-Progress (updated 2026-03-10): Milestones M0-M6 are complete. The platform now
+Progress (updated 2026-03-10): Milestones M0-M7 are complete. The platform now
 includes indexing pipeline, query engine, MCP serving contracts, and local CLI
-commands. Workspace quality gates are green (`fmt`, `clippy -D warnings`, full
-workspace tests).
+commands, plus incremental indexing with git-diff acceleration and determinism
+regression coverage. Workspace quality gates are green (`fmt`, `clippy -D warnings`,
+full workspace tests).
 
 ## Epic 0: Repository Governance and CI Foundation (complete)
 
@@ -62,12 +63,12 @@ workspace tests).
 - ~~Ticket: Create CLI crate for local indexing and query commands~~ (#62, p1)
 - ~~Ticket: Add CLI outline commands (`file-outline`, `file-tree`, `repo-outline`)~~ (#70, p2)
 
-## Epic 7: Incremental Indexing and Reliability (next)
+## Epic 7: Incremental Indexing and Reliability (complete)
 
-- Ticket: File hash map and changed-file detection
-- Ticket: Incremental reindex and deleted-file cleanup
-- Ticket: Optional git-diff accelerated mode
-- Ticket: Determinism and idempotency regression tests
+- ~~Ticket: File hash map and changed-file detection~~ (#40)
+- ~~Ticket: Incremental reindex and deleted-file cleanup~~ (#41)
+- ~~Ticket: Optional git-diff accelerated mode~~ (#42)
+- ~~Ticket: Determinism and idempotency regression tests~~ (#43)
 
 ## Epic 8: Security, Observability, Performance
 

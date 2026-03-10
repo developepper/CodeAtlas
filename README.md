@@ -29,11 +29,12 @@ Primary interface target:
 
 ## Current Status
 
-Milestones M0-M6 are complete:
+Milestones M0-M7 are complete:
 
 - M0-M4: governance, core model, discovery/adapters, storage, and indexing pipeline.
 - M5: query engine and deterministic ranking.
 - M6: MCP server contracts and local CLI interface.
+- M7: incremental indexing, git-diff acceleration, and determinism regression coverage.
 
 ### Workspace crates
 
@@ -60,7 +61,7 @@ Milestones M0-M6 are complete:
 
 ### What does not exist yet
 
-- Incremental indexing and watcher/git-diff accelerated modes.
+- Watcher/local file-system triggered update mode.
 - Semantic adapter implementations beyond syntax baseline.
 - Hosted/server API surface (HTTP/gRPC), auth, quotas, and multi-tenant controls.
 - Production observability dashboards and performance/SLO regression automation.
