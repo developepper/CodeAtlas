@@ -764,7 +764,9 @@ fn reindex_removes_stale_files_and_recomputes_aggregates() {
     // Remove lib.rs and re-index.
     std::fs::remove_file(src.join("lib.rs")).expect("remove lib.rs");
     let r2 = run(&ctx, &mut db, &blob_store).expect("second run");
-    assert_eq!(r2.metrics.files_parsed, 1);
+    // main.rs is unchanged, so incremental indexing skips it.
+    assert_eq!(r2.metrics.files_parsed, 0);
+    assert_eq!(r2.metrics.files_unchanged, 1);
 
     // Verify stale file was removed.
     assert!(
@@ -1208,9 +1210,10 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
     };
 
     let r2 = run(&ctx2, &mut db, &blob_store).expect("second run");
-    // Only main.rs should parse; lib.rs fails.
-    assert_eq!(r2.metrics.files_parsed, 1);
-    assert!(r2.metrics.files_errored >= 1);
+    // Both files are unchanged from the first run, so incremental indexing
+    // skips them entirely — the failing adapter is never invoked.
+    assert_eq!(r2.metrics.files_parsed, 0);
+    assert_eq!(r2.metrics.files_unchanged, 2);
 
     // lib.rs file record should still exist (not purged by stale cleanup).
     assert!(
@@ -1273,4 +1276,205 @@ fn pipeline_error_display_covers_all_variants() {
 
     let internal = PipelineError::Internal("oops".to_string());
     assert!(internal.to_string().contains("internal error"));
+}
+
+// ---------------------------------------------------------------------------
+// Incremental indexing: file hash map and changed-file detection
+// ---------------------------------------------------------------------------
+
+#[test]
+fn incremental_noop_run_skips_all_files() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write main.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "incr-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // First run: full index.
+    let r1 = run(&ctx, &mut db, &blob_store).expect("first run");
+    assert_eq!(r1.metrics.files_parsed, 1);
+    assert_eq!(r1.metrics.files_unchanged, 0);
+
+    // Second run: no changes — should be a no-op.
+    let r2 = run(&ctx, &mut db, &blob_store).expect("second run");
+    assert_eq!(r2.metrics.files_parsed, 0, "no files should be re-parsed");
+    assert_eq!(r2.metrics.files_unchanged, 1);
+    assert_eq!(r2.metrics.symbols_extracted, 0);
+
+    // Metadata should still be intact from the first run.
+    let repo = db
+        .repos()
+        .get("incr-repo")
+        .expect("query repo")
+        .expect("repo record");
+    assert_eq!(repo.file_count, 1);
+    assert!(repo.symbol_count >= 1);
+
+    let file = db
+        .files()
+        .get("incr-repo", "main.rs")
+        .expect("query file")
+        .expect("file record");
+    assert_eq!(file.language, "rust");
+    assert!(file.symbol_count >= 1);
+}
+
+#[test]
+fn incremental_detects_modified_file_and_reindexes() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("lib.rs"), "pub fn alpha() {}\n").expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "incr-mod-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // First run.
+    run(&ctx, &mut db, &blob_store).expect("first run");
+    let syms_before = db
+        .symbols()
+        .list_ids_for_file("incr-mod-repo", "lib.rs")
+        .expect("list symbols");
+    assert_eq!(syms_before.len(), 1);
+
+    // Modify the file: add a second function.
+    std::fs::write(
+        repo_dir.path().join("lib.rs"),
+        "pub fn alpha() {}\npub fn beta() {}\n",
+    )
+    .expect("rewrite lib.rs");
+
+    // Second run: should detect the change and re-index.
+    let r2 = run(&ctx, &mut db, &blob_store).expect("second run");
+    assert_eq!(
+        r2.metrics.files_parsed, 1,
+        "modified file should be re-parsed"
+    );
+    assert_eq!(r2.metrics.files_unchanged, 0);
+
+    // Verify the new symbol was added.
+    let syms_after = db
+        .symbols()
+        .list_ids_for_file("incr-mod-repo", "lib.rs")
+        .expect("list symbols");
+    assert_eq!(syms_after.len(), 2, "should now have alpha + beta");
+}
+
+#[test]
+fn incremental_detects_new_file() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write main.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "incr-new-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // First run.
+    run(&ctx, &mut db, &blob_store).expect("first run");
+
+    // Add a new file.
+    std::fs::write(repo_dir.path().join("lib.rs"), "pub fn helper() {}\n").expect("write lib.rs");
+
+    // Second run: main.rs unchanged, lib.rs new.
+    let r2 = run(&ctx, &mut db, &blob_store).expect("second run");
+    assert_eq!(r2.metrics.files_parsed, 1, "only new file should be parsed");
+    assert_eq!(r2.metrics.files_unchanged, 1, "main.rs unchanged");
+
+    // Both files should be in the store.
+    let repo = db
+        .repos()
+        .get("incr-new-repo")
+        .expect("query repo")
+        .expect("repo record");
+    assert_eq!(repo.file_count, 2);
+
+    assert!(
+        db.files().get("incr-new-repo", "lib.rs").unwrap().is_some(),
+        "new file should be indexed"
+    );
+    assert!(
+        db.files()
+            .get("incr-new-repo", "main.rs")
+            .unwrap()
+            .is_some(),
+        "unchanged file should still be present"
+    );
+}
+
+#[test]
+fn incremental_hash_map_persists_across_runs() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write main.rs");
+    std::fs::write(repo_dir.path().join("lib.rs"), "pub fn foo() {}\n").expect("write lib.rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "hash-persist-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        default_policy: AdapterPolicy::SyntaxOnly,
+        correlation_id: None,
+    };
+
+    // First run populates the hash map.
+    run(&ctx, &mut db, &blob_store).expect("first run");
+
+    let hash_map = db
+        .files()
+        .list_hash_map("hash-persist-repo")
+        .expect("list hash map");
+    assert_eq!(
+        hash_map.len(),
+        2,
+        "hash map should have entries for both files"
+    );
+    assert!(hash_map.contains_key("main.rs"));
+    assert!(hash_map.contains_key("lib.rs"));
+
+    // Verify hashes match content_hash of actual file content.
+    let main_content = std::fs::read(repo_dir.path().join("main.rs")).unwrap();
+    let expected_hash = store::content_hash(&main_content);
+    assert_eq!(hash_map["main.rs"], expected_hash);
+
+    // Third run with no changes should still find the same hash map.
+    run(&ctx, &mut db, &blob_store).expect("second run");
+    let hash_map2 = db
+        .files()
+        .list_hash_map("hash-persist-repo")
+        .expect("list hash map");
+    assert_eq!(
+        hash_map, hash_map2,
+        "hash map should be stable across no-op runs"
+    );
 }

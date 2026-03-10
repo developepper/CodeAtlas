@@ -9,11 +9,13 @@
 
 use std::path::PathBuf;
 
+pub mod change_detection;
 pub mod context;
 pub mod enrich;
 pub mod pipeline;
 pub mod stage;
 
+pub use change_detection::{detect_changes, ChangeSet};
 pub use context::PipelineContext;
 pub use pipeline::{run, IndexMetrics, IndexResult};
 pub use stage::{DiscoveryOutput, FileError, ParseOutput, ParsedFile, PreparedFile};

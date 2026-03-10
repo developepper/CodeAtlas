@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use tracing::info;
 
+use crate::change_detection;
 use crate::context::PipelineContext;
 use crate::stage::{self, DiscoveryOutput, FileError, ParseOutput};
 use crate::PipelineError;
@@ -15,6 +16,8 @@ pub struct IndexMetrics {
     pub files_parsed: usize,
     pub files_errored: usize,
     pub symbols_extracted: usize,
+    /// Files skipped because their content hash matched the previous index.
+    pub files_unchanged: usize,
 }
 
 /// Result of a successful pipeline run.
@@ -42,8 +45,48 @@ pub fn run(
     // Stage 1: Discovery
     let discovery: DiscoveryOutput = stage::discover(ctx)?;
 
-    // Stage 2: Parse
-    let parse_output: ParseOutput = stage::parse(ctx, &discovery);
+    // Stage 1.5: Change detection — load previous file hashes and classify
+    // discovered files as new, modified, or unchanged. Only changed/new
+    // files are sent to the parse stage; unchanged files are skipped.
+    let previous_hashes = store
+        .files()
+        .list_hash_map(&ctx.repo_id)
+        .map_err(PipelineError::Persist)?;
+
+    let change_set = change_detection::detect_changes(&discovery.files, &previous_hashes);
+
+    let files_unchanged = change_set.unchanged_count;
+
+    if files_unchanged > 0 {
+        info!(
+            unchanged = files_unchanged,
+            new = change_set.new_count,
+            modified = change_set.modified_count,
+            "change detection complete"
+        );
+    }
+
+    // Build a filtered discovery output containing only changed/new files.
+    // The full discovery output is still passed to persist for stale cleanup.
+    let changed_discovery = DiscoveryOutput {
+        files: change_set
+            .changed_indices
+            .iter()
+            .map(|&i| {
+                let f = &discovery.files[i];
+                stage::PreparedFile {
+                    relative_path: f.relative_path.clone(),
+                    absolute_path: f.absolute_path.clone(),
+                    language: f.language.clone(),
+                    content: f.content.clone(),
+                }
+            })
+            .collect(),
+        metrics: discovery.metrics.clone(),
+    };
+
+    // Stage 2: Parse (only changed/new files)
+    let parse_output: ParseOutput = stage::parse(ctx, &changed_discovery);
 
     let symbols_extracted: usize = parse_output
         .parsed_files
@@ -52,6 +95,8 @@ pub fn run(
         .sum();
 
     // Stage 3: Persist (blobs first, then metadata in a transaction)
+    // Pass the full discovery for stale file cleanup, but only parsed
+    // changed/new files for upserts.
     stage::persist(ctx, store, blob_store, &discovery, &parse_output)?;
 
     let metrics = IndexMetrics {
@@ -64,12 +109,14 @@ pub fn run(
             .collect::<HashSet<_>>()
             .len(),
         symbols_extracted,
+        files_unchanged,
     };
 
     info!(
         files_discovered = metrics.files_discovered,
         files_parsed = metrics.files_parsed,
         files_errored = metrics.files_errored,
+        files_unchanged = metrics.files_unchanged,
         symbols_extracted = metrics.symbols_extracted,
         "pipeline complete"
     );

@@ -134,6 +134,29 @@ impl<'a> FileStore<'a> {
         Ok(changed as u64)
     }
 
+    /// Returns a map of `file_path -> file_hash` for all files in a repository.
+    ///
+    /// This is the persistent file hash map used for incremental indexing:
+    /// compare current content hashes against this map to detect changed,
+    /// new, and unchanged files without re-parsing.
+    pub fn list_hash_map(
+        &self,
+        repo_id: &str,
+    ) -> Result<std::collections::HashMap<String, String>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path, file_hash FROM files WHERE repo_id = ?1 ORDER BY file_path",
+        )?;
+        let rows = stmt.query_map(params![repo_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (path, hash) = row?;
+            map.insert(path, hash);
+        }
+        Ok(map)
+    }
+
     /// Returns the total number of file records for a repository.
     pub fn count(&self, repo_id: &str) -> Result<u64, StoreError> {
         let count: i64 = self.conn.query_row(
@@ -384,6 +407,39 @@ mod tests {
         f2.file_path = "src/lib.rs".to_string();
         store.files().upsert(&f2).unwrap();
         assert_eq!(store.files().count("test-repo").unwrap(), 2);
+    }
+
+    #[test]
+    fn list_hash_map_returns_path_to_hash_mapping() {
+        let store = setup_store_with_repo();
+        let mut f1 = test_file();
+        f1.file_path = "src/main.rs".to_string();
+        f1.file_hash = "sha256:aaa".to_string();
+        let mut f2 = test_file();
+        f2.file_path = "src/lib.rs".to_string();
+        f2.file_hash = "sha256:bbb".to_string();
+
+        store.files().upsert(&f1).unwrap();
+        store.files().upsert(&f2).unwrap();
+
+        let map = store.files().list_hash_map("test-repo").unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get("src/main.rs").unwrap(), "sha256:aaa");
+        assert_eq!(map.get("src/lib.rs").unwrap(), "sha256:bbb");
+    }
+
+    #[test]
+    fn list_hash_map_returns_empty_for_no_files() {
+        let store = setup_store_with_repo();
+        let map = store.files().list_hash_map("test-repo").unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn list_hash_map_returns_empty_for_unknown_repo() {
+        let store = setup_store_with_repo();
+        let map = store.files().list_hash_map("unknown-repo").unwrap();
+        assert!(map.is_empty());
     }
 
     #[test]
