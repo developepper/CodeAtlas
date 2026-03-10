@@ -1,0 +1,15 @@
+[package]
+name = "server-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+core-model.workspace = true
+query-engine.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+query-engine = { workspace = true, features = ["test-support"] }
