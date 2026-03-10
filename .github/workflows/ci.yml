@@ -109,6 +109,28 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --all-features --no-deps
 
+  rust-bench:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run performance threshold tests
+        run: |
+          cargo test -p repo-walker --test perf_thresholds -- --nocapture
+          cargo test -p indexer --test perf_thresholds -- --nocapture
+          cargo test -p query-engine --test perf_thresholds -- --nocapture
+
+      - name: Run criterion benchmarks
+        run: cargo bench --workspace
+
   msrv-check:
     name: Rust MSRV Check
     runs-on: ubuntu-latest
