@@ -29,12 +29,13 @@ Primary interface target:
 
 ## Current Status
 
-Milestones M0-M7 are complete:
+Milestones M0-M8 are complete:
 
 - M0-M4: governance, core model, discovery/adapters, storage, and indexing pipeline.
 - M5: query engine and deterministic ranking.
 - M6: MCP server contracts and local CLI interface.
 - M7: incremental indexing, git-diff acceleration, and determinism regression coverage.
+- M8: OpenTelemetry tracing, structured logging with redaction, security regression suites, and benchmark threshold enforcement.
 
 ### Workspace crates
 
@@ -58,13 +59,17 @@ Milestones M0-M7 are complete:
 - GitHub Actions CI quality gates for PRs and pushes to `master` (fmt, clippy, tests, build, docs, MSRV check).
 - Serde compatibility fixtures and snapshot tests for schema forward-compatibility.
 - Adapter contract test harness for preventing adapter drift across implementations.
+- OpenTelemetry span instrumentation across indexing, query, and MCP request flows.
+- Structured CLI logging with sensitive-field redaction for local and machine-readable output.
+- Security regression coverage for malicious inputs, traversal/symlink escape, malformed files, and resource limits.
+- Benchmark and threshold coverage in CI for discovery, indexing, and query latency regressions.
 
 ### What does not exist yet
 
 - Watcher/local file-system triggered update mode.
 - Semantic adapter implementations beyond syntax baseline.
 - Hosted/server API surface (HTTP/gRPC), auth, quotas, and multi-tenant controls.
-- Production observability dashboards and performance/SLO regression automation.
+- Production observability dashboards and hosted telemetry/export integrations beyond the local CLI baseline.
 
 ## Design Principles
 
