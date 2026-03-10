@@ -51,6 +51,9 @@ Key design decisions:
   optional git-diff acceleration via persisted `git_head` plus dirty working-tree detection
 - Determinism is guarded by regression coverage for stable IDs, ordering, and
   incremental vs fresh-index equivalence
+- Milestone 8 adds tracing spans across indexing/query/MCP flows, structured
+  CLI logging with redaction, security regression suites, and CI-enforced
+  performance thresholds plus Criterion benchmarks
 
 ## Milestone/Epic Breakdown
 
@@ -62,7 +65,7 @@ Key design decisions:
 6. ~~Epic 5: Query Engine and Deterministic Ranking~~ (complete)
 7. ~~Epic 6: MCP Server Interface and Tool Contracts~~ (complete)
 8. ~~Epic 7: Incremental Indexing and Reliability Hardening~~ (complete)
-9. Epic 8: Security, Observability, and Performance Guardrails
+9. ~~Epic 8: Security, Observability, and Performance Guardrails~~ (complete)
 10. Epic 9: Semantic Adapter Integration (at least two languages)
 11. Epic 10: Documentation, Benchmarks, and V1 Readiness Review
 

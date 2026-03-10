@@ -2,11 +2,12 @@
 
 This backlog is designed for one-PR-per-issue execution.
 
-Progress (updated 2026-03-10): Milestones M0-M7 are complete. The platform now
-includes indexing pipeline, query engine, MCP serving contracts, and local CLI
-commands, plus incremental indexing with git-diff acceleration and determinism
-regression coverage. Workspace quality gates are green (`fmt`, `clippy -D warnings`,
-full workspace tests).
+Progress (updated 2026-03-10): Milestones M0-M8 are complete. The platform now
+includes indexing pipeline, query engine, MCP serving contracts, local CLI
+commands, incremental indexing with git-diff acceleration and determinism
+regression coverage, plus tracing, redacted structured logging, security
+regression coverage, and performance threshold enforcement. Workspace quality
+gates are green (`fmt`, `clippy -D warnings`, full workspace tests).
 
 ## Epic 0: Repository Governance and CI Foundation (complete)
 
@@ -70,12 +71,12 @@ full workspace tests).
 - ~~Ticket: Optional git-diff accelerated mode~~ (#42)
 - ~~Ticket: Determinism and idempotency regression tests~~ (#43)
 
-## Epic 8: Security, Observability, Performance
+## Epic 8: Security, Observability, Performance (complete)
 
-- Ticket: Add OpenTelemetry spans for indexing/query pipeline
-- Ticket: Add structured logs and redaction policy
-- Ticket: Add security tests for malicious inputs and limits
-- Ticket: Add performance benchmark job and threshold checks
+- ~~Ticket: Add OpenTelemetry spans for indexing/query pipeline~~ (#44)
+- ~~Ticket: Add structured logs and redaction policy~~ (#45)
+- ~~Ticket: Add security tests for malicious inputs and limits~~ (#46)
+- ~~Ticket: Add performance benchmark job and threshold checks~~ (#47)
 
 ## Epic 9: Semantic Adapters
 
