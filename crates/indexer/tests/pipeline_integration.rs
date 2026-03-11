@@ -185,7 +185,7 @@ fn pipeline_end_to_end_smoke_test() {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("test-correlation-001".to_string()),
         use_git_diff: false,
     };
@@ -299,7 +299,7 @@ pub fn greet(config: &Config) -> String {
         repo_id: "treesitter-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -378,7 +378,7 @@ fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
         repo_id: "mixed-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -496,7 +496,7 @@ fn adapter_fallback_continues_past_failing_adapter() {
         repo_id: "fallback-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -560,7 +560,7 @@ fn adapter_error_carries_adapter_id_provenance() {
         repo_id: "fail-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -602,7 +602,7 @@ fn discovery_stage_finds_files() {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -620,7 +620,7 @@ fn discovery_stage_rejects_invalid_root() {
         repo_id: "test-repo".to_string(),
         source_root: PathBuf::from("/nonexistent/path"),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -644,7 +644,7 @@ fn discovery_detects_extensionless_script_via_content() {
         repo_id: "test-repo".to_string(),
         source_root: dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -677,7 +677,7 @@ fn parse_stage_handles_no_adapter() {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -711,7 +711,7 @@ fn parse_stage_uses_context_default_policy() {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SemanticPreferred,
+        policy_override: Some(AdapterPolicy::SemanticPreferred),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -754,7 +754,7 @@ fn reindex_removes_stale_files_and_recomputes_aggregates() {
         repo_id: "aggregate-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -844,7 +844,7 @@ fn reindex_cleans_up_removed_symbols_within_file() {
         repo_id: "symbol-cleanup-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -925,7 +925,7 @@ pub fn greet(config: &Config) -> String {
         repo_id: "enrich-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1029,7 +1029,7 @@ fn enrichment_is_deterministic_across_runs() {
         repo_id: "det-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1186,7 +1186,7 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
         repo_id: "fail-isolation-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &ts_router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1221,7 +1221,7 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
         repo_id: "fail-isolation-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &fail_router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1313,7 +1313,7 @@ fn incremental_noop_run_skips_all_files() {
         repo_id: "incr-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1363,7 +1363,7 @@ fn incremental_detects_modified_file_and_reindexes() {
         repo_id: "incr-mod-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1413,7 +1413,7 @@ fn incremental_detects_new_file() {
         repo_id: "incr-new-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1466,7 +1466,7 @@ fn incremental_hash_map_persists_across_runs() {
         repo_id: "hash-persist-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1526,7 +1526,7 @@ fn incremental_deleted_file_removes_symbols_and_updates_aggregates() {
         repo_id: "del-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1610,7 +1610,7 @@ fn incremental_full_lifecycle_add_modify_delete() {
         repo_id: "lifecycle-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1743,7 +1743,7 @@ fn incremental_delete_all_files_leaves_empty_repo() {
         repo_id: "empty-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1786,7 +1786,7 @@ fn incremental_multiple_deletes_across_runs() {
         repo_id: "multi-del-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1900,7 +1900,7 @@ fn git_diff_parity_with_hash_based_detection() {
         repo_id: "parity-repo".to_string(),
         source_root: repo_a.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1927,7 +1927,7 @@ fn git_diff_parity_with_hash_based_detection() {
         repo_id: "parity-repo".to_string(),
         source_root: repo_b.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: true,
     };
@@ -1990,7 +1990,7 @@ fn git_diff_detects_uncommitted_changes() {
         repo_id: "dirty-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: true,
     };
@@ -2038,7 +2038,7 @@ fn git_diff_persists_and_uses_git_head() {
         repo_id: "head-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: true,
     };
@@ -2089,7 +2089,7 @@ fn git_diff_first_run_indexes_all_files() {
         repo_id: "first-run-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: true,
     };

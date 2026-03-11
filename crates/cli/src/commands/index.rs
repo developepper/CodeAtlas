@@ -2,11 +2,10 @@
 
 use std::path::PathBuf;
 
-use adapter_api::AdapterPolicy;
 use indexer::PipelineContext;
 
 use crate::error::CliError;
-use crate::router::TreeSitterRouter;
+use crate::router;
 
 struct IndexOpts {
     source_root: PathBuf,
@@ -80,13 +79,13 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
 
     let mut db = store::MetadataStore::open(&db_path)?;
     let blob_store = store::BlobStore::open(&blob_path)?;
-    let router = TreeSitterRouter::new();
+    let adapter_router = router::build_router(&source_root);
 
     let ctx = PipelineContext {
         repo_id,
         source_root,
-        router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        router: &adapter_router,
+        policy_override: None,
         correlation_id: None,
         use_git_diff: opts.git_diff,
     };

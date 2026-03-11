@@ -15,9 +15,10 @@ pub struct PipelineContext<'a> {
     pub source_root: PathBuf,
     /// Adapter router for selecting language adapters.
     pub router: &'a dyn AdapterRouter,
-    /// Default adapter selection policy applied when no per-language override
-    /// is configured.
-    pub default_policy: AdapterPolicy,
+    /// Optional adapter selection policy override. When `Some`, all files
+    /// use this policy regardless of language. When `None`, each file uses
+    /// the per-language default from [`adapter_api::router::default_policy`].
+    pub policy_override: Option<AdapterPolicy>,
     /// Optional correlation ID for structured log tracing.
     pub correlation_id: Option<String>,
     /// When `true`, use git-diff to accelerate change detection on

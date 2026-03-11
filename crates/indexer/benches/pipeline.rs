@@ -98,7 +98,7 @@ fn bench_pipeline_throughput(c: &mut Criterion) {
                         repo_id: "bench-repo".to_string(),
                         source_root: repo_dir.path().to_path_buf(),
                         router: &router,
-                        default_policy: AdapterPolicy::SyntaxOnly,
+                        policy_override: Some(AdapterPolicy::SyntaxOnly),
                         correlation_id: None,
                         use_git_diff: false,
                     };
@@ -128,7 +128,7 @@ fn bench_incremental_reindex(c: &mut Criterion) {
         repo_id: "bench-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -140,7 +140,7 @@ fn bench_incremental_reindex(c: &mut Criterion) {
                 repo_id: "bench-repo".to_string(),
                 source_root: repo_dir.path().to_path_buf(),
                 router: &router,
-                default_policy: AdapterPolicy::SyntaxOnly,
+                policy_override: Some(AdapterPolicy::SyntaxOnly),
                 correlation_id: None,
                 use_git_diff: false,
             };

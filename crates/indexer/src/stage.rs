@@ -147,7 +147,9 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
     let mut file_errors = Vec::new();
 
     for file in &discovery.files {
-        let policy = ctx.default_policy;
+        let policy = ctx
+            .policy_override
+            .unwrap_or_else(|| adapter_api::router::default_policy(&file.language));
         let adapters = ctx.router.select(&file.language, policy);
 
         if adapters.is_empty() {

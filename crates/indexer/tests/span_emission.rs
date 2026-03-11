@@ -196,7 +196,7 @@ fn run_pipeline_with_capture(correlation_id: Option<String>) -> Vec<SpanInfo> {
         repo_id: "test-repo".into(),
         source_root: dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id,
         use_git_diff: false,
     };
