@@ -105,6 +105,10 @@ pub struct ParsedFile {
     pub relative_path: PathBuf,
     pub language: String,
     pub output: AdapterOutput,
+    /// Per-symbol provenance, parallel to `output.symbols`. Each entry
+    /// records the `quality_level`, `source_adapter`, and `default_confidence`
+    /// of the adapter that produced the corresponding symbol.
+    pub symbol_provenance: Vec<crate::merge::SymbolProvenance>,
     pub content_hash: String,
     /// Raw file content, carried through for blob storage.
     pub content: Vec<u8>,
@@ -130,10 +134,17 @@ pub struct ParseOutput {
 }
 
 /// Runs the parse stage: for each prepared file, selects adapters via the
-/// router and invokes them. Uses the first adapter that succeeds.
+/// router and invokes them. When multiple adapters succeed, their outputs
+/// are merged using confidence-aware deduplication (spec §8.2):
+///
+/// - Symbols are deduplicated by `(qualified_name, kind)`.
+/// - Higher-confidence records win conflicts.
+/// - Provenance (`source_adapter`, `quality_level`) is preserved.
 ///
 /// Individual file failures are recorded in `file_errors`; the pipeline
-/// continues with the remaining files.
+/// continues with the remaining files. If one adapter fails but another
+/// succeeds for the same file, the successful result is used and the
+/// failure is recorded as a non-fatal error.
 pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOutput {
     let span = info_span!(
         "stage_parse",
@@ -173,24 +184,17 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
             language: file.language.clone(),
         };
 
-        // Try adapters in priority order; use the first that succeeds.
-        // Non-fatal errors are recorded but do not prevent lower-priority
-        // adapters from being tried.
-        let mut succeeded = false;
+        // Run all adapters and collect successful outputs for merging.
+        // Non-fatal errors are recorded but do not prevent other adapters
+        // from being tried.
+        let mut successful_outputs: Vec<(AdapterOutput, f32)> = Vec::new();
         let mut per_file_errors: Vec<FileError> = Vec::new();
+
         for adapter in &adapters {
             match adapter.index_file(&idx_ctx, &source_file) {
                 Ok(output) => {
-                    let content_hash = file_content_hash(&file.content);
-                    parsed_files.push(ParsedFile {
-                        relative_path: file.relative_path.clone(),
-                        language: file.language.clone(),
-                        output,
-                        content_hash,
-                        content: file.content.clone(),
-                    });
-                    succeeded = true;
-                    break;
+                    let default_confidence = adapter.capabilities().default_confidence;
+                    successful_outputs.push((output, default_confidence));
                 }
                 Err(AdapterError::Unsupported { .. }) => continue,
                 Err(e) => {
@@ -198,28 +202,48 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
                         path = %file.relative_path.display(),
                         adapter = adapter.adapter_id(),
                         error = %e,
-                        "adapter failed, trying next"
+                        "adapter failed, trying remaining adapters"
                     );
                     per_file_errors.push(FileError {
                         path: file.relative_path.clone(),
                         adapter_id: Some(adapter.adapter_id().to_string()),
                         error: e.to_string(),
                     });
-                    continue;
                 }
             }
         }
 
-        if !succeeded {
-            if per_file_errors.is_empty() {
-                file_errors.push(FileError {
-                    path: file.relative_path.clone(),
-                    adapter_id: None,
-                    error: "all adapters returned unsupported".to_string(),
-                });
-            } else {
-                file_errors.append(&mut per_file_errors);
+        if let Some(merged) = crate::merge::merge_outputs(successful_outputs) {
+            if merged.duplicates_resolved > 0 {
+                debug!(
+                    path = %file.relative_path.display(),
+                    duplicates_resolved = merged.duplicates_resolved,
+                    "merged adapter outputs"
+                );
             }
+
+            let content_hash = file_content_hash(&file.content);
+            parsed_files.push(ParsedFile {
+                relative_path: file.relative_path.clone(),
+                language: file.language.clone(),
+                symbol_provenance: merged.symbol_provenance,
+                output: merged.output,
+                content_hash,
+                content: file.content.clone(),
+            });
+
+            // Adapter-level failures are already logged via warn! tracing.
+            // Do not append them to file_errors when the file was
+            // successfully parsed — file_errors drives the files_errored
+            // metric and should only contain files with no usable output.
+        } else if per_file_errors.is_empty() {
+            file_errors.push(FileError {
+                path: file.relative_path.clone(),
+                adapter_id: None,
+                error: "all adapters returned unsupported".to_string(),
+            });
+        } else {
+            file_errors.append(&mut per_file_errors);
         }
     }
 
@@ -309,11 +333,11 @@ pub fn persist(
             })?;
         }
 
-        let semantic = if parsed.output.quality_level == QualityLevel::Semantic {
-            sym_count
-        } else {
-            0
-        };
+        let semantic = parsed
+            .symbol_provenance
+            .iter()
+            .filter(|p| p.quality_level == QualityLevel::Semantic)
+            .count() as u64;
 
         file_stats.push(FileStats {
             symbol_count: sym_count,
@@ -443,12 +467,15 @@ pub fn persist(
             .delete_for_file(&ctx.repo_id, &file_path_str)
             .map_err(PipelineError::Persist)?;
 
-        let default_confidence = match parsed.output.quality_level {
-            QualityLevel::Semantic => 0.9,
-            QualityLevel::Syntax => 0.7,
-        };
+        for (sym_idx, sym) in parsed.output.symbols.iter().enumerate() {
+            // Use per-symbol provenance for quality_level, source_adapter,
+            // and default_confidence. This is critical for merged outputs
+            // where symbols may originate from different adapters.
+            let provenance = &parsed.symbol_provenance[sym_idx];
+            let confidence = sym
+                .confidence_score
+                .unwrap_or(provenance.default_confidence);
 
-        for sym in &parsed.output.symbols {
             // Symbol ID was pre-validated in pass 1.
             let symbol_id = build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind)
                 .map_err(|e| {
@@ -457,8 +484,6 @@ pub fn persist(
                         sym.name, file_path_str
                     ))
                 })?;
-
-            let confidence = sym.confidence_score.unwrap_or(default_confidence);
 
             let keywords = enrich::extract_keywords(sym);
             let record = SymbolRecord {
@@ -475,9 +500,9 @@ pub fn persist(
                 start_byte: sym.span.start_byte,
                 byte_length: sym.span.byte_length,
                 content_hash: parsed.content_hash.clone(),
-                quality_level: parsed.output.quality_level,
+                quality_level: provenance.quality_level,
                 confidence_score: confidence,
-                source_adapter: parsed.output.source_adapter.clone(),
+                source_adapter: provenance.source_adapter.clone(),
                 indexed_at: now.clone(),
                 docstring: sym.docstring.clone(),
                 summary: Some(enrich::symbol_summary(sym)),

@@ -509,10 +509,13 @@ fn adapter_fallback_continues_past_failing_adapter() {
         "fallback adapter should have succeeded"
     );
 
-    // No file errors — the failing adapter's error should not prevent success.
+    // No file errors — the failing adapter's error is logged via tracing
+    // but not surfaced in file_errors, since the file was successfully
+    // parsed by another adapter. file_errors only contains files with no
+    // usable output, keeping files_errored metrics accurate.
     assert!(
         result.file_errors.is_empty(),
-        "file should have been parsed by fallback adapter, got errors: {:?}",
+        "successfully parsed file should not appear in file_errors, got: {:?}",
         result.file_errors
     );
 
