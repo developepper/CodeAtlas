@@ -20,7 +20,7 @@ use tracing::{debug, info, warn};
 /// 1. Tree-sitter syntax adapters for all supported languages.
 /// 2. TypeScript semantic adapter if `tsserver` can be located and started.
 ///
-/// The returned router is ready for use with [`DefaultRouter::select`] and
+/// The returned router is ready for use with [`adapter_api::AdapterRouter::select`] and
 /// [`adapter_api::router::default_policy`].
 pub fn build_router(source_root: &Path) -> DefaultRouter {
     let mut router = DefaultRouter::new();
