@@ -267,6 +267,57 @@ done
 exit 1
 "#;
 
+// ---------------------------------------------------------------------------
+// File-write helpers — avoid ETXTBSY in CI
+//
+// On Linux CI (especially Docker containers using overlayfs or tmpfs), the
+// kernel may return ETXTBSY when exec'ing a file whose write descriptor was
+// only just closed. These helpers ensure:
+// 1. Data and metadata are flushed with sync_all before the fd is closed.
+// 2. Executable mode is set atomically at creation time (no separate chmod).
+// 3. The parent directory is synced to flush directory entries.
+// ---------------------------------------------------------------------------
+
+/// Writes `content` to `path`, syncs, and closes the fd.
+fn sync_write(path: &std::path::Path, content: &[u8]) {
+    use std::io::Write;
+    let mut f = fs::File::create(path).unwrap_or_else(|e| panic!("create {}: {e}", path.display()));
+    f.write_all(content)
+        .unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    f.sync_all()
+        .unwrap_or_else(|e| panic!("sync {}: {e}", path.display()));
+}
+
+/// Writes `content` to `path` with mode 0o755 set at creation time, syncs,
+/// and closes the fd. Avoids a separate `set_permissions` call.
+#[cfg(unix)]
+fn sync_write_executable(path: &std::path::Path, content: &[u8]) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o755)
+        .open(path)
+        .unwrap_or_else(|e| panic!("create {}: {e}", path.display()));
+    f.write_all(content)
+        .unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    f.sync_all()
+        .unwrap_or_else(|e| panic!("sync {}: {e}", path.display()));
+}
+
+#[cfg(not(unix))]
+fn sync_write_executable(path: &std::path::Path, content: &[u8]) {
+    sync_write(path, content);
+}
+
+/// Syncs a directory to flush directory entry metadata.
+fn sync_dir(path: &std::path::Path) {
+    let d = fs::File::open(path).unwrap_or_else(|e| panic!("open dir {}: {e}", path.display()));
+    let _ = d.sync_all(); // best-effort; not all filesystems support dir sync
+}
+
 /// Helper: creates a temp directory with a Kotlin fixture file and mock bridge.
 struct FixtureProject {
     _tempdir: TempDir,
@@ -283,32 +334,26 @@ impl FixtureProject {
         // Write fixture source file.
         let src_dir = root.join("src");
         fs::create_dir_all(&src_dir).expect("create src dir");
-        fs::write(src_dir.join("Config.kt"), KOTLIN_FIXTURE).expect("write fixture");
+        sync_write(&src_dir.join("Config.kt"), KOTLIN_FIXTURE.as_bytes());
+        sync_dir(&src_dir);
 
         // Write mock bridge script.
         let bridge_script = root.join("mock_bridge.py");
-        fs::write(&bridge_script, MOCK_BRIDGE_SCRIPT).expect("write mock bridge");
+        sync_write(&bridge_script, MOCK_BRIDGE_SCRIPT.as_bytes());
 
-        // Write fake java wrapper.
-        // Use explicit open → write → sync → close to ensure the kernel
-        // sees the file as fully written before we exec it. Without the
-        // sync + explicit drop, the kernel may return ETXTBSY on exec
-        // (especially in CI containers using overlayfs/tmpfs).
+        // Write fake java wrapper with executable mode set atomically at
+        // creation time. Using OpenOptions::mode avoids a separate
+        // set_permissions call which could re-introduce a write reference
+        // on some filesystems. sync_all + explicit drop ensures the
+        // kernel's i_writecount is decremented before any exec attempt.
         let fake_java = root.join("fake_java.sh");
-        {
-            use std::io::Write;
-            let mut f = fs::File::create(&fake_java).expect("create fake java");
-            f.write_all(FAKE_JAVA_WRAPPER.as_bytes())
-                .expect("write fake java");
-            f.sync_all().expect("sync fake java");
-            // f is dropped here, closing the fd before chmod + exec.
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&fake_java, fs::Permissions::from_mode(0o755))
-                .expect("make fake_java executable");
-        }
+        sync_write_executable(&fake_java, FAKE_JAVA_WRAPPER.as_bytes());
+
+        // Sync the parent directory to flush directory entries. On some
+        // CI filesystems (overlayfs/tmpfs in containers), directory
+        // metadata may lag behind file data, and exec can race with
+        // the directory entry becoming visible.
+        sync_dir(&root);
 
         Self {
             _tempdir: tempdir,
