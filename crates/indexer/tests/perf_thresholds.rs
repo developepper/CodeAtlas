@@ -83,7 +83,7 @@ fn full_pipeline_small_repo_under_threshold() {
         repo_id: "perf-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -118,7 +118,7 @@ fn incremental_reindex_no_changes_under_threshold() {
         repo_id: "perf-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -160,7 +160,7 @@ fn pipeline_50_files_under_threshold() {
         repo_id: "perf-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };

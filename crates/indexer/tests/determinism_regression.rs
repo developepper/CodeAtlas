@@ -206,7 +206,7 @@ fn full_index_produces_identical_state_across_independent_runs() {
         repo_id: "det-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -278,7 +278,7 @@ fn reindex_same_content_is_idempotent() {
         repo_id: "idem-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -326,7 +326,7 @@ fn symbol_ids_stable_when_identity_unchanged() {
         repo_id: "id-stable-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -382,7 +382,7 @@ fn file_hashes_stable_for_unchanged_files() {
         repo_id: "hash-stable-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -437,7 +437,7 @@ fn incremental_and_full_reindex_produce_equivalent_state() {
         repo_id: "equiv-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -510,7 +510,7 @@ fn store_ordering_is_deterministic() {
         repo_id: "order-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -563,7 +563,7 @@ pub fn run_delta() {}
         repo_id: "tie-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -629,7 +629,7 @@ fn lifecycle_determinism_across_independent_runs() {
             repo_id: "lc-repo".to_string(),
             source_root: repo_dir.path().to_path_buf(),
             router: &router,
-            default_policy: AdapterPolicy::SyntaxOnly,
+            policy_override: Some(AdapterPolicy::SyntaxOnly),
             correlation_id: None,
             use_git_diff: false,
         };

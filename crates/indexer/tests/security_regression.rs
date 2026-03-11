@@ -156,7 +156,7 @@ fn garbage_rust_source_does_not_panic() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-garbage".to_string()),
         use_git_diff: false,
     };
@@ -189,7 +189,7 @@ fn empty_rust_file_does_not_panic() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-empty".to_string()),
         use_git_diff: false,
     };
@@ -222,7 +222,7 @@ fn extremely_long_line_does_not_crash() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-longline".to_string()),
         use_git_diff: false,
     };
@@ -256,7 +256,7 @@ fn deeply_nested_syntax_does_not_stack_overflow() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-nested".to_string()),
         use_git_diff: false,
     };
@@ -299,7 +299,7 @@ fn pipeline_continues_past_parse_errors() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-mixed".to_string()),
         use_git_diff: false,
     };
@@ -338,7 +338,7 @@ fn repo_with_no_parseable_files_succeeds() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-noparseable".to_string()),
         use_git_diff: false,
     };
@@ -378,7 +378,7 @@ fn invalid_utf8_content_does_not_crash() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-utf8".to_string()),
         use_git_diff: false,
     };
@@ -416,7 +416,7 @@ fn many_parse_errors_complete_in_bounded_time() {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
         router: &router,
-        default_policy: AdapterPolicy::SyntaxOnly,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
         correlation_id: Some("sec-manyerr".to_string()),
         use_git_diff: false,
     };

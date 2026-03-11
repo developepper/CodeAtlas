@@ -26,8 +26,6 @@
 //!    ```
 
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -249,11 +247,32 @@ if __name__ == "__main__":
     main()
 "#;
 
+/// A thin shell wrapper that acts as a fake `java` binary.
+///
+/// It strips the `-jar` flag and runs the remaining argument (the bridge
+/// script) with `python3`. This lets `build_command()` produce
+/// `fake_java -jar mock_bridge.py` which becomes `python3 mock_bridge.py`.
+///
+/// Using a wrapper avoids ETXTBSY errors on Linux — the kernel only
+/// returns that error when exec'ing a file that is still being written,
+/// and here we exec `/bin/sh` (the wrapper) which delegates to `python3`.
+const FAKE_JAVA_WRAPPER: &str = r#"#!/bin/sh
+# Fake java: find the argument after -jar and run it with python3.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -jar) shift; exec python3 "$1" ;;
+        *) shift ;;
+    esac
+done
+exit 1
+"#;
+
 /// Helper: creates a temp directory with a Kotlin fixture file and mock bridge.
 struct FixtureProject {
     _tempdir: TempDir,
     root: PathBuf,
     bridge_script: PathBuf,
+    fake_java: PathBuf,
 }
 
 impl FixtureProject {
@@ -269,14 +288,22 @@ impl FixtureProject {
         // Write mock bridge script.
         let bridge_script = root.join("mock_bridge.py");
         fs::write(&bridge_script, MOCK_BRIDGE_SCRIPT).expect("write mock bridge");
+
+        // Write fake java wrapper.
+        let fake_java = root.join("fake_java.sh");
+        fs::write(&fake_java, FAKE_JAVA_WRAPPER).expect("write fake java");
         #[cfg(unix)]
-        fs::set_permissions(&bridge_script, fs::Permissions::from_mode(0o755))
-            .expect("make bridge executable");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&fake_java, fs::Permissions::from_mode(0o755))
+                .expect("make fake_java executable");
+        }
 
         Self {
             _tempdir: tempdir,
             root,
             bridge_script,
+            fake_java,
         }
     }
 
@@ -302,15 +329,16 @@ impl FixtureProject {
     /// Creates a `KotlinAnalysisProcess` using the mock bridge script.
     ///
     /// The mock bridge is a Python script that speaks the same Content-Length
-    /// framed JSON protocol as the real JVM bridge. `java_path` is set to
-    /// the Python interpreter and `bridge_jar_path` to the script path,
-    /// so the spawned command is `python3 -jar mock_bridge.py` — but the
-    /// script ignores the `-jar` flag.
+    /// framed JSON protocol as the real JVM bridge. `java_path` is set to a
+    /// thin shell wrapper (`fake_java.sh`) that strips `-jar` and runs the
+    /// bridge script with `python3`.
+    ///
+    /// Using a wrapper (rather than exec'ing the Python script directly)
+    /// avoids ETXTBSY errors on Linux when parallel tests write and execute
+    /// the script simultaneously.
     fn make_mock_process(&self) -> KotlinAnalysisProcess {
         let config = KotlinAnalysisConfig::new(
-            self.bridge_script.clone(),
-            // The script is invoked as: mock_bridge.py -jar mock_bridge.py
-            // It ignores all arguments.
+            self.fake_java.clone(),
             self.bridge_script.clone(),
             self.root.clone(),
         )
