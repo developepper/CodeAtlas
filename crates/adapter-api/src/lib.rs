@@ -9,6 +9,9 @@ pub mod router;
 #[cfg(feature = "test-harness")]
 pub mod contract;
 
+#[cfg(feature = "test-harness")]
+pub mod regression;
+
 // ---------------------------------------------------------------------------
 // Adapter selection policy
 // ---------------------------------------------------------------------------
