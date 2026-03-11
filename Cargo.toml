@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/adapter-api", "crates/adapter-semantic-typescript", "crates/adapter-syntax-treesitter", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/server-mcp", "crates/store", "crates/workspace-placeholder"]
+members = ["crates/adapter-api", "crates/adapter-semantic-kotlin", "crates/adapter-semantic-typescript", "crates/adapter-syntax-treesitter", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/server-mcp", "crates/store", "crates/workspace-placeholder"]
 resolver = "2"
 
 [workspace.package]
@@ -10,6 +10,7 @@ repository = "https://github.com/developepper/CodeAtlas"
 
 [workspace.dependencies]
 adapter-api = { path = "crates/adapter-api" }
+adapter-semantic-kotlin = { path = "crates/adapter-semantic-kotlin" }
 adapter-semantic-typescript = { path = "crates/adapter-semantic-typescript" }
 adapter-syntax-treesitter = { path = "crates/adapter-syntax-treesitter" }
 core-model = { path = "crates/core-model" }
