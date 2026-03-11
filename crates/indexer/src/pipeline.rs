@@ -6,6 +6,7 @@ use tracing::{info, info_span};
 
 use crate::change_detection;
 use crate::context::PipelineContext;
+use crate::metrics::{self, SemanticCoverageMetrics};
 use crate::stage::{self, DiscoveryOutput, FileError, ParseOutput};
 use crate::PipelineError;
 
@@ -20,6 +21,8 @@ pub struct IndexMetrics {
     pub files_unchanged: usize,
     /// Files removed from the index because they were deleted from disk.
     pub files_deleted: usize,
+    /// Semantic coverage metrics computed from parse output.
+    pub coverage: SemanticCoverageMetrics,
 }
 
 /// Result of a successful pipeline run.
@@ -140,6 +143,9 @@ pub fn run(
         .map(|f| f.output.symbols.len())
         .sum();
 
+    // Compute semantic coverage metrics from parse output.
+    let coverage = metrics::compute_coverage(&parse_output);
+
     // Stage 3: Persist (blobs first, then metadata in a transaction)
     // Pass the full discovery for stale file cleanup, but only parsed
     // changed/new files for upserts.
@@ -157,6 +163,7 @@ pub fn run(
         symbols_extracted,
         files_unchanged,
         files_deleted,
+        coverage,
     };
 
     info!(
@@ -166,6 +173,16 @@ pub fn run(
         files_unchanged = metrics.files_unchanged,
         files_deleted = metrics.files_deleted,
         symbols_extracted = metrics.symbols_extracted,
+        semantic_symbols = metrics.coverage.semantic_symbols,
+        syntax_symbols = metrics.coverage.syntax_symbols,
+        semantic_coverage_percent = metrics.coverage.semantic_coverage_percent,
+        avg_confidence = metrics.coverage.avg_confidence,
+        duplicates_resolved = metrics.coverage.duplicates_resolved,
+        files_with_semantic = metrics.coverage.files_with_semantic,
+        win_rate = metrics.coverage.win_rate,
+        wins = metrics.coverage.wins,
+        losses = metrics.coverage.losses,
+        ties = metrics.coverage.ties,
         "pipeline complete"
     );
 

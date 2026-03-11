@@ -98,6 +98,43 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     println!("files_deleted: {}", result.metrics.files_deleted);
     println!("files_errored: {}", result.metrics.files_errored);
     println!("symbols_extracted: {}", result.metrics.symbols_extracted);
+    println!(
+        "semantic_coverage: {:.1}% ({} semantic, {} syntax)",
+        result.metrics.coverage.semantic_coverage_percent,
+        result.metrics.coverage.semantic_symbols,
+        result.metrics.coverage.syntax_symbols,
+    );
+    println!(
+        "avg_confidence: {:.3}",
+        result.metrics.coverage.avg_confidence
+    );
+    println!(
+        "files_with_semantic: {}/{}",
+        result.metrics.coverage.files_with_semantic, result.metrics.coverage.total_files,
+    );
+    let c = &result.metrics.coverage;
+    let overlap_total = c.wins + c.losses + c.ties;
+    if overlap_total > 0 {
+        println!(
+            "win_rate: {:.1}% ({} wins, {} losses, {} ties)",
+            c.win_rate * 100.0,
+            c.wins,
+            c.losses,
+            c.ties,
+        );
+    }
+    if result.metrics.coverage.duplicates_resolved > 0 {
+        println!(
+            "duplicates_resolved: {}",
+            result.metrics.coverage.duplicates_resolved
+        );
+    }
+    if !result.metrics.coverage.adapter_symbol_counts.is_empty() {
+        println!("adapter_breakdown:");
+        for (adapter, count) in &result.metrics.coverage.adapter_symbol_counts {
+            println!("  {adapter}: {count}");
+        }
+    }
 
     if !result.file_errors.is_empty() {
         eprintln!();
