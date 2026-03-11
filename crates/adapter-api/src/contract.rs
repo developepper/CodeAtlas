@@ -78,6 +78,24 @@ impl ContractFixture {
             ],
         }
     }
+
+    /// A baseline Kotlin fixture covering common symbol kinds.
+    #[must_use]
+    pub fn kotlin_baseline() -> Self {
+        Self {
+            language: "kotlin".to_string(),
+            source_code: KOTLIN_FIXTURE.as_bytes().to_vec(),
+            relative_path: PathBuf::from("src/Config.kt"),
+            expected_min_symbols: 5,
+            expected_symbol_names: vec![
+                "Config".to_string(),
+                "create".to_string(),
+                "process".to_string(),
+                "Mode".to_string(),
+                "MAX_SIZE".to_string(),
+            ],
+        }
+    }
 }
 
 /// Baseline Rust source fixture used by contract tests.
@@ -137,6 +155,34 @@ enum Mode {
 }
 
 const MAX_SIZE: number = 1024;
+"#;
+
+/// Baseline Kotlin source fixture used by contract tests.
+const KOTLIN_FIXTURE: &str = r#"/** Configuration for processing. */
+data class Config(
+    val name: String,
+    val limit: Int
+)
+
+/** Creates a new config with defaults. */
+fun create(name: String): Config {
+    return Config(name, 100)
+}
+
+class Processor {
+    /** Processes the config. */
+    fun process(config: Config): Boolean {
+        return config.limit > 0
+    }
+}
+
+/** Operating mode. */
+enum class Mode {
+    Fast,
+    Precise
+}
+
+const val MAX_SIZE: Int = 1024
 "#;
 
 // ---------------------------------------------------------------------------
