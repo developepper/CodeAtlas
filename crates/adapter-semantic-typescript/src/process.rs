@@ -66,7 +66,7 @@ pub struct TsServerProcess {
 impl TsServerProcess {
     /// Creates a new lifecycle manager with the given configuration.
     ///
-    /// The process is not started until [`start`] is called.
+    /// The process is not started until [`SemanticRuntime::start`] is called.
     #[must_use]
     pub fn new(config: TsServerConfig) -> Self {
         Self {
