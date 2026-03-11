@@ -290,8 +290,19 @@ impl FixtureProject {
         fs::write(&bridge_script, MOCK_BRIDGE_SCRIPT).expect("write mock bridge");
 
         // Write fake java wrapper.
+        // Use explicit open → write → sync → close to ensure the kernel
+        // sees the file as fully written before we exec it. Without the
+        // sync + explicit drop, the kernel may return ETXTBSY on exec
+        // (especially in CI containers using overlayfs/tmpfs).
         let fake_java = root.join("fake_java.sh");
-        fs::write(&fake_java, FAKE_JAVA_WRAPPER).expect("write fake java");
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&fake_java).expect("create fake java");
+            f.write_all(FAKE_JAVA_WRAPPER.as_bytes())
+                .expect("write fake java");
+            f.sync_all().expect("sync fake java");
+            // f is dropped here, closing the fd before chmod + exec.
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
