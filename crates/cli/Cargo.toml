@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 adapter-api.workspace = true
+adapter-semantic-kotlin.workspace = true
 adapter-semantic-typescript.workspace = true
 adapter-syntax-treesitter.workspace = true
 core-model.workspace = true
