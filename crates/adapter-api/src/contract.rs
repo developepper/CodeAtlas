@@ -60,6 +60,24 @@ impl ContractFixture {
             ],
         }
     }
+
+    /// A baseline TypeScript fixture covering common symbol kinds.
+    #[must_use]
+    pub fn typescript_baseline() -> Self {
+        Self {
+            language: "typescript".to_string(),
+            source_code: TYPESCRIPT_FIXTURE.as_bytes().to_vec(),
+            relative_path: PathBuf::from("src/config.ts"),
+            expected_min_symbols: 5,
+            expected_symbol_names: vec![
+                "Config".to_string(),
+                "create".to_string(),
+                "process".to_string(),
+                "Mode".to_string(),
+                "MAX_SIZE".to_string(),
+            ],
+        }
+    }
 }
 
 /// Baseline Rust source fixture used by contract tests.
@@ -91,6 +109,34 @@ pub enum Mode {
 }
 
 pub const MAX_SIZE: usize = 1024;
+"#;
+
+/// Baseline TypeScript source fixture used by contract tests.
+const TYPESCRIPT_FIXTURE: &str = r#"/** Configuration for processing. */
+interface Config {
+    name: string;
+    limit: number;
+}
+
+/** Creates a new config with defaults. */
+function create(name: string): Config {
+    return { name, limit: 100 };
+}
+
+class Processor {
+    /** Processes the config. */
+    process(config: Config): boolean {
+        return config.limit > 0;
+    }
+}
+
+/** Operating mode. */
+enum Mode {
+    Fast,
+    Precise,
+}
+
+const MAX_SIZE: number = 1024;
 "#;
 
 // ---------------------------------------------------------------------------
