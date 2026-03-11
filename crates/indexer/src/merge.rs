@@ -41,6 +41,24 @@ impl TaggedSymbol {
     }
 }
 
+/// Outcome of a merge decision for a single symbol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// Only one adapter produced this symbol (no overlap).
+    Unique,
+    /// Multiple adapters produced this symbol; semantic adapter won.
+    SemanticWin,
+    /// Multiple adapters produced this symbol; syntax adapter won.
+    SyntaxWin,
+    /// Semantic and syntax adapters both produced this symbol with equal
+    /// confidence; tie-broken by adapter priority in favour of semantic.
+    Tie,
+    /// Multiple adapters of the *same* quality level both produced this
+    /// symbol (e.g. two semantic adapters). Not a semantic-vs-syntax
+    /// comparison, so excluded from the win-rate KPI.
+    SameQuality,
+}
+
 /// Per-symbol provenance tracking for merged outputs.
 ///
 /// When symbols from multiple adapters are merged, each symbol retains
@@ -51,6 +69,8 @@ pub struct SymbolProvenance {
     pub source_adapter: String,
     /// The default confidence of the adapter that produced this symbol.
     pub default_confidence: f32,
+    /// Whether this symbol was unique to one adapter or won a merge contest.
+    pub merge_outcome: MergeOutcome,
 }
 
 /// Result of merging multiple adapter outputs for a single file.
@@ -97,6 +117,7 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
                 quality_level: output.quality_level,
                 source_adapter: output.source_adapter.clone(),
                 default_confidence,
+                merge_outcome: MergeOutcome::Unique,
             })
             .collect();
         return Some(MergedOutput {
@@ -122,22 +143,49 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
 
     // Deduplicate: for each (qualified_name, kind), keep the best.
     let mut best: HashMap<SymbolKey, usize> = HashMap::new();
+    // Track merge outcomes: which symbols had conflicts and what the result was.
+    let mut outcomes: HashMap<SymbolKey, MergeOutcome> = HashMap::new();
     let mut duplicates_resolved: usize = 0;
 
     for (i, ts) in tagged.iter().enumerate() {
         let key = (ts.symbol.qualified_name.clone(), ts.symbol.kind);
         match best.get(&key) {
             None => {
-                best.insert(key, i);
+                best.insert(key.clone(), i);
+                outcomes.insert(key, MergeOutcome::Unique);
             }
             Some(&existing_idx) => {
                 let existing = &tagged[existing_idx];
-                if should_replace(existing, ts) {
-                    best.insert(key, i);
-                    duplicates_resolved += 1;
+                let (winner, loser) = if should_replace(existing, ts) {
+                    best.insert(key.clone(), i);
+                    (ts, existing)
                 } else {
-                    duplicates_resolved += 1;
-                }
+                    (existing, ts)
+                };
+                duplicates_resolved += 1;
+                // Classify the merge outcome for KPI tracking.
+                // Only cross-quality (semantic vs syntax) contests count
+                // toward the win-rate KPI.
+                let outcome = if winner.quality_level == loser.quality_level {
+                    // Same quality level (e.g. two semantic adapters) —
+                    // not a semantic-vs-syntax comparison.
+                    MergeOutcome::SameQuality
+                } else {
+                    // Cross-quality contest. Check whether confidence
+                    // actually differed or it was a tiebreak.
+                    let wc = winner.effective_confidence();
+                    let lc = loser.effective_confidence();
+                    const EPSILON: f32 = 1e-6;
+                    if (wc - lc).abs() < EPSILON {
+                        // Equal confidence — semantic won by tiebreak rule.
+                        MergeOutcome::Tie
+                    } else if winner.quality_level == QualityLevel::Semantic {
+                        MergeOutcome::SemanticWin
+                    } else {
+                        MergeOutcome::SyntaxWin
+                    }
+                };
+                outcomes.insert(key, outcome);
             }
         }
     }
@@ -155,10 +203,13 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
         .iter()
         .map(|&i| {
             let ts = &tagged[i];
+            let key = (ts.symbol.qualified_name.clone(), ts.symbol.kind);
+            let merge_outcome = outcomes.get(&key).copied().unwrap_or(MergeOutcome::Unique);
             SymbolProvenance {
                 quality_level: ts.quality_level,
                 source_adapter: ts.source_adapter.clone(),
                 default_confidence: ts.default_confidence,
+                merge_outcome,
             }
         })
         .collect();
