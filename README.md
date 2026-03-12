@@ -106,6 +106,8 @@ available.
 Planning artifacts:
 
 - `docs/architecture/rust-code-intelligence-plan.md`
+- `docs/architecture/deployment-modes.md`
+- `docs/operations/runbook.md`
 - `docs/planning/issue-backlog.md`
 - `docs/planning/post-v1-roadmap.md`
 - `docs/workflow/github-process.md`
