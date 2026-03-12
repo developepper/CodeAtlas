@@ -12,6 +12,8 @@ to document or support.
 - wire the command to a reusable MCP server runner
 - keep stdio transport code outside the core `server-mcp` registry crate
 - ensure server startup and shutdown behavior is deterministic
+- make `repo_id` expectations explicit in help text or adjacent docs rather than
+  introducing a global `--repo` flag for v1
 
 ## Acceptance Criteria
 
@@ -20,6 +22,7 @@ to document or support.
 - [ ] the CLI path invokes shared MCP server logic rather than duplicating tool registry behavior
 - [ ] `server-mcp` remains focused on reusable tool registry/business logic
 - [ ] command help/usage text reflects the new `mcp` command family
+- [ ] help text or linked docs clarify that repository-scoped MCP tools continue to accept `repo_id` as part of tool parameters
 
 ## Testing Requirements
 
