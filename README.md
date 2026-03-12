@@ -40,12 +40,14 @@ Today, this repository provides:
 Today, this repository does **not** provide:
 
 - a standalone hosted deployment
-- a standalone stdio MCP transport binary in this repo
 - HTTP/gRPC product APIs
 
-That distinction matters: you can use CodeAtlas immediately through the CLI,
-and you can embed the MCP crate in your own transport wrapper, but this repo
-does not yet ship a ready-to-launch `server-mcp` executable.
+That distinction matters: you can use CodeAtlas immediately through the CLI.
+The planned MCP product direction is a built-in local stdio server launched as
+`codeatlas mcp serve --db <path>`. A separate `server-mcp` executable is not
+part of the default end-user story unless a concrete compatibility need emerges.
+Until the CLI MCP server lands, the MCP library remains an embeddable surface
+rather than a ready-to-launch end-user server.
 
 ## What You Can Do With It
 
@@ -179,7 +181,7 @@ policy allows.
 
 ## How To Use It With AI Today
 
-There are two realistic ways to use CodeAtlas with AI right now.
+There are two relevant ways to think about AI usage today.
 
 ### Option 1: Use the CLI as a retrieval tool in your agent workflow
 
@@ -206,7 +208,28 @@ codeatlas file-outline src/server.ts --db /repo/.codeatlas/index.db --repo my-ap
 codeatlas repo-outline --db /repo/.codeatlas/index.db --repo my-app
 ```
 
-### Option 2: Embed the MCP library in your own transport wrapper
+### Option 2: Planned MCP server product shape
+
+The intended end-user MCP experience is:
+
+1. index the repository once
+2. run `codeatlas mcp serve --db /repo/.codeatlas/index.db`
+3. point any stdio MCP-capable AI client at that command
+
+That is the target product shape because it is simpler to explain and support
+than requiring a separate wrapper process or a second product-facing binary.
+
+The implementation direction is:
+
+- keep `server-mcp` focused on the reusable tool registry and response model
+- add stdio MCP transport outside that crate
+- make `codeatlas mcp serve` the canonical supported launch path
+- document a small set of real MCP clients with copy-paste configuration
+
+The current implementation work for that flow is planned in
+[`docs/architecture/mcp-server-planning.md`](docs/architecture/mcp-server-planning.md).
+
+### Current implementation status
 
 The `server-mcp` crate is a library that exposes the MCP tool registry and
 response envelope model. It is intended to be embedded in a transport process
@@ -224,9 +247,9 @@ registry):
 - `get_repo_outline`
 - `search_text`
 
-If your AI client requires a standalone stdio MCP server executable, you will
-need to provide a thin wrapper binary around `server-mcp` today. This repo does
-not yet ship that transport binary.
+Until `codeatlas mcp serve` lands, an AI client that requires a standalone
+stdio MCP server executable will still need a thin wrapper around the
+`server-mcp` library.
 
 ## MCP Integration Shape
 
@@ -246,6 +269,14 @@ The `_meta` payload includes:
 
 That makes it suitable for agents that need structured retrieval, stable tool
 behavior, and quality provenance.
+
+The planned first supported MCP server release adds:
+
+- a canonical launch command: `codeatlas mcp serve --db <path>`
+- generic stdio MCP compatibility
+- tool schemas via `tools/list`
+- stderr-only diagnostics
+- copy-paste client setup guidance
 
 ## AI Usage Examples
 
