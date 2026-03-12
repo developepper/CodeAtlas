@@ -1,9 +1,16 @@
 //! Stdio MCP transport — newline-delimited JSON-RPC over stdin/stdout.
 //!
 //! Per MCP spec 2025-11-25, stdio messages are delimited by newlines and
-//! MUST NOT contain embedded newlines. This module implements the minimal
-//! MCP protocol subset for tool serving: `initialize`,
-//! `notifications/initialized`, `tools/list`, and `tools/call`.
+//! MUST NOT contain embedded newlines. This module implements the MCP
+//! protocol subset for tool serving: `initialize`,
+//! `notifications/initialized`, `tools/list`, `tools/call`, and `ping`.
+//!
+//! Compatibility shims are included for methods that documented MCP clients
+//! (Claude Desktop, Cursor, OpenAI Codex CLI) may probe during startup:
+//! `resources/list` and `prompts/list` return empty lists rather than
+//! `METHOD_NOT_FOUND`, and `notifications/cancelled` is silently accepted.
+//! These shims keep the server generic and do not add client-specific
+//! branching. See inline comments marked `COMPAT:` for rationale.
 //!
 //! All protocol output goes to stdout. All diagnostics go to stderr.
 
@@ -239,6 +246,29 @@ pub fn serve(registry: &ToolRegistry, input: impl Read, output: impl Write) -> R
                     Ok(result) => write_result(&mut writer, id, result)?,
                     Err(err) => write_error(&mut writer, id, err.code, err.message)?,
                 }
+            }
+            // COMPAT: MCP clients may send `ping` as a health check.
+            // Returning an empty result keeps the connection alive.
+            "ping" => {
+                let id = request.id.unwrap_or(Value::Null);
+                write_result(&mut writer, id, serde_json::json!({}))?;
+            }
+            // COMPAT: Some MCP clients probe `resources/list` and
+            // `prompts/list` during startup to discover server capabilities.
+            // Returning empty lists is more interoperable than METHOD_NOT_FOUND,
+            // which can cause some clients to treat the server as unhealthy.
+            "resources/list" => {
+                let id = request.id.unwrap_or(Value::Null);
+                write_result(&mut writer, id, serde_json::json!({ "resources": [] }))?;
+            }
+            "prompts/list" => {
+                let id = request.id.unwrap_or(Value::Null);
+                write_result(&mut writer, id, serde_json::json!({ "prompts": [] }))?;
+            }
+            // COMPAT: Clients may send `notifications/cancelled` when aborting
+            // a request. This is a notification (no id) and requires no response.
+            "notifications/cancelled" => {
+                // Silently accepted — no response required.
             }
             _ => {
                 if !is_notification {
@@ -994,7 +1024,7 @@ mod tests {
         let (db, make_registry) = test_registry();
         let registry = make_registry(&db);
 
-        let input = messages(&[r#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#]);
+        let input = messages(&[r#"{"jsonrpc":"2.0","id":1,"method":"completions/complete"}"#]);
 
         let mut output = Vec::new();
         serve(&registry, &input[..], &mut output).unwrap();
@@ -1017,6 +1047,122 @@ mod tests {
         let responses = parse_responses(&output);
         assert!(responses.is_empty());
     }
+
+    // ── Compatibility shim tests ────────────────────────────────────
+
+    #[test]
+    fn serve_ping_returns_empty_result() {
+        let (db, make_registry) = test_registry();
+        let registry = make_registry(&db);
+
+        let input = messages(&[r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#]);
+
+        let mut output = Vec::new();
+        serve(&registry, &input[..], &mut output).unwrap();
+
+        let responses = parse_responses(&output);
+        assert_eq!(responses.len(), 1);
+        let r = &responses[0];
+        assert_eq!(r["id"], 1);
+        assert!(r["result"].is_object());
+        assert!(r.get("error").is_none());
+    }
+
+    #[test]
+    fn serve_resources_list_returns_empty() {
+        let (db, make_registry) = test_registry();
+        let registry = make_registry(&db);
+
+        let input = messages(&[r#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#]);
+
+        let mut output = Vec::new();
+        serve(&registry, &input[..], &mut output).unwrap();
+
+        let responses = parse_responses(&output);
+        assert_eq!(responses.len(), 1);
+        let r = &responses[0];
+        assert_eq!(r["id"], 1);
+        let resources = r["result"]["resources"].as_array().unwrap();
+        assert!(resources.is_empty());
+    }
+
+    #[test]
+    fn serve_prompts_list_returns_empty() {
+        let (db, make_registry) = test_registry();
+        let registry = make_registry(&db);
+
+        let input = messages(&[r#"{"jsonrpc":"2.0","id":1,"method":"prompts/list"}"#]);
+
+        let mut output = Vec::new();
+        serve(&registry, &input[..], &mut output).unwrap();
+
+        let responses = parse_responses(&output);
+        assert_eq!(responses.len(), 1);
+        let r = &responses[0];
+        assert_eq!(r["id"], 1);
+        let prompts = r["result"]["prompts"].as_array().unwrap();
+        assert!(prompts.is_empty());
+    }
+
+    #[test]
+    fn serve_notifications_cancelled_silent() {
+        let (db, make_registry) = test_registry();
+        let registry = make_registry(&db);
+
+        let input = messages(&[
+            r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}"#,
+        ]);
+
+        let mut output = Vec::new();
+        serve(&registry, &input[..], &mut output).unwrap();
+
+        let responses = parse_responses(&output);
+        assert!(
+            responses.is_empty(),
+            "notifications/cancelled should produce no response"
+        );
+    }
+
+    #[test]
+    fn serve_tools_list_with_cursor_param() {
+        let (db, make_registry) = test_registry();
+        let registry = make_registry(&db);
+
+        // Some clients send cursor: null when requesting the first page.
+        let input = messages(&[
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":null}}"#,
+        ]);
+
+        let mut output = Vec::new();
+        serve(&registry, &input[..], &mut output).unwrap();
+
+        let responses = parse_responses(&output);
+        assert_eq!(responses.len(), 1);
+        let tools = responses[0]["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 8);
+    }
+
+    #[test]
+    fn serve_initialize_with_extra_capabilities() {
+        let (db, make_registry) = test_registry();
+        let registry = make_registry(&db);
+
+        // Clients may advertise capabilities the server doesn't support.
+        // The server should accept and respond normally.
+        let input = messages(&[
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":{"listChanged":true},"sampling":{}},"clientInfo":{"name":"cursor","version":"0.50"}}}"#,
+        ]);
+
+        let mut output = Vec::new();
+        serve(&registry, &input[..], &mut output).unwrap();
+
+        let responses = parse_responses(&output);
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
+        assert_eq!(responses[0]["result"]["serverInfo"]["name"], "codeatlas");
+    }
+
+    // ── Remaining server loop tests ──────────────────────────────────
 
     #[test]
     fn serve_malformed_json() {

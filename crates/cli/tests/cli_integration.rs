@@ -823,8 +823,13 @@ fn mcp_stdio_content_length_rejected() {
 // mcp serve signal handling tests (subprocess)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn mcp_stdio_sigterm_clean_shutdown() {
+/// Helper: send an initialize request, wait for the response on stdout to
+/// confirm the server is running, then send a signal and close stdin.
+/// Returns (exit status, stdout lines, stderr).
+fn signal_test_helper(signal: libc::c_int) -> (std::process::ExitStatus, String, String) {
+    use std::io::BufRead;
+    use std::sync::mpsc;
+
     let (_db_dir, db_path) = mcp_test_db();
 
     let mut child = Command::new(codeatlas_bin())
@@ -837,7 +842,7 @@ fn mcp_stdio_sigterm_clean_shutdown() {
 
     let pid = child.id();
 
-    // Send an initialize request so we know the server is running and responsive.
+    // Send an initialize request.
     {
         let stdin = child.stdin.as_mut().expect("stdin");
         writeln!(
@@ -845,19 +850,69 @@ fn mcp_stdio_sigterm_clean_shutdown() {
             r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-11-25","capabilities":{{}},"clientInfo":{{"name":"test","version":"1"}}}}}}"#
         )
         .expect("write initialize");
+        stdin.flush().expect("flush stdin");
     }
 
-    // Give the server a moment to process, then send SIGTERM.
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Read stdout in a separate thread. Use a channel to notify when the
+    // first response line arrives — this confirms the server has fully
+    // started (DB opened, signal handlers installed, serve loop entered).
+    let stdout_handle = child.stdout.take().expect("stdout");
+    let (tx, rx) = mpsc::channel();
+    let reader_thread = std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stdout_handle);
+        let mut all_output = String::new();
+        let mut notified = false;
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    all_output.push_str(&line);
+                    if !notified {
+                        let _ = tx.send(());
+                        notified = true;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        all_output
+    });
+
+    // Block until the server has produced its first response, confirming
+    // signal handlers are installed and the serve loop is running.
+    rx.recv_timeout(std::time::Duration::from_secs(5))
+        .expect("server should respond to initialize within 5s");
+
+    // Now send the signal — the server is confirmed to be running.
     unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        libc::kill(pid as libc::pid_t, signal);
     }
 
-    let output = child.wait_with_output().expect("wait");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Close stdin so the blocking read_line returns EOF, allowing the serve
+    // loop to reach the shutdown flag check.
+    drop(child.stdin.take());
+
+    let status = child.wait().expect("wait");
+    let stdout = reader_thread.join().expect("reader thread");
+    let stderr_handle = child.stderr.take();
+    let stderr = stderr_handle
+        .map(|mut h| {
+            let mut s = String::new();
+            std::io::Read::read_to_string(&mut h, &mut s).ok();
+            s
+        })
+        .unwrap_or_default();
+
+    (status, stdout, stderr)
+}
+
+#[test]
+fn mcp_stdio_sigterm_clean_shutdown() {
+    let (status, stdout, stderr) = signal_test_helper(libc::SIGTERM);
 
     assert!(
-        output.status.success(),
+        status.success(),
         "should exit 0 on SIGTERM.\nstderr: {stderr}"
     );
     assert!(
@@ -866,7 +921,6 @@ fn mcp_stdio_sigterm_clean_shutdown() {
     );
 
     // Stdout must contain only valid JSON lines (no partial writes).
-    let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         if line.trim().is_empty() {
             continue;
@@ -881,43 +935,14 @@ fn mcp_stdio_sigterm_clean_shutdown() {
 
 #[test]
 fn mcp_stdio_sigint_clean_shutdown() {
-    let (_db_dir, db_path) = mcp_test_db();
-
-    let mut child = Command::new(codeatlas_bin())
-        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn mcp serve");
-
-    let pid = child.id();
-
-    // Send an initialize request so we know the server is running.
-    {
-        let stdin = child.stdin.as_mut().expect("stdin");
-        writeln!(
-            stdin,
-            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-11-25","capabilities":{{}},"clientInfo":{{"name":"test","version":"1"}}}}}}"#
-        )
-        .expect("write initialize");
-    }
-
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGINT);
-    }
-
-    let output = child.wait_with_output().expect("wait");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let (status, stdout, stderr) = signal_test_helper(libc::SIGINT);
 
     assert!(
-        output.status.success(),
+        status.success(),
         "should exit 0 on SIGINT.\nstderr: {stderr}"
     );
 
     // Stdout must contain only valid JSON lines.
-    let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         if line.trim().is_empty() {
             continue;
@@ -1239,6 +1264,98 @@ fn mcp_stdio_diagnostics_on_stderr_only() {
             parsed.get("jsonrpc").is_some(),
             "stdout line missing jsonrpc field: {line}"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// mcp serve client compatibility shims (subprocess)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_stdio_ping_returns_result() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) =
+        mcp_stdio_exchange(&db_path, &[r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#]);
+
+    assert_eq!(responses.len(), 1);
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(r["id"], 1);
+    assert!(r["result"].is_object());
+    assert!(r.get("error").is_none(), "ping should not return an error");
+}
+
+#[test]
+fn mcp_stdio_resources_list_returns_empty() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[r#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#],
+    );
+
+    assert_eq!(responses.len(), 1);
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    let resources = r["result"]["resources"].as_array().unwrap();
+    assert!(resources.is_empty());
+}
+
+#[test]
+fn mcp_stdio_prompts_list_returns_empty() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[r#"{"jsonrpc":"2.0","id":1,"method":"prompts/list"}"#],
+    );
+
+    assert_eq!(responses.len(), 1);
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    let prompts = r["result"]["prompts"].as_array().unwrap();
+    assert!(prompts.is_empty());
+}
+
+#[test]
+fn mcp_stdio_client_handshake_with_extra_capabilities() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    // Simulate a client that advertises capabilities the server doesn't use.
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":{"listChanged":true},"sampling":{}},"clientInfo":{"name":"cursor","version":"0.50"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"resources/list"}"#,
+            r#"{"jsonrpc":"2.0","id":5,"method":"prompts/list"}"#,
+        ],
+    );
+
+    // 5 responses: initialize, ping, tools/list, resources/list, prompts/list.
+    // notifications/initialized produces no response.
+    assert_eq!(responses.len(), 5, "expected 5 responses");
+
+    let r1: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(r1["result"]["protocolVersion"], "2025-11-25");
+
+    let r2: serde_json::Value = serde_json::from_str(&responses[1]).unwrap();
+    assert!(r2["result"].is_object(), "ping should return result");
+
+    let r3: serde_json::Value = serde_json::from_str(&responses[2]).unwrap();
+    assert_eq!(r3["result"]["tools"].as_array().unwrap().len(), 8);
+
+    let r4: serde_json::Value = serde_json::from_str(&responses[3]).unwrap();
+    assert!(r4["result"]["resources"].as_array().unwrap().is_empty());
+
+    let r5: serde_json::Value = serde_json::from_str(&responses[4]).unwrap();
+    assert!(r5["result"]["prompts"].as_array().unwrap().is_empty());
+
+    // All stdout lines must be valid JSON-RPC.
+    for line in &responses {
+        let parsed: serde_json::Value =
+            serde_json::from_str(line).unwrap_or_else(|_| panic!("not valid JSON: {line}"));
+        assert!(parsed.get("jsonrpc").is_some());
     }
 }
 
