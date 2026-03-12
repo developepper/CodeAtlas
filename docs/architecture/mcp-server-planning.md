@@ -3,6 +3,10 @@
 This document captures the implementation plan for making CodeAtlas usable as a
 simple local MCP server for mainstream AI clients.
 
+Status note: this plan has now been implemented through Epic 11. The sections
+below remain useful as historical design context, but they should be read as
+"what was planned and delivered" rather than "what is still missing."
+
 The success criterion is not merely "an MCP binary exists." The success
 criterion is: a user can index a repository once, point their AI client at
 CodeAtlas with one obvious command, and use the CodeAtlas query surface through
@@ -26,7 +30,7 @@ The intended user flow is:
 That end-user simplicity is a required part of scope for the first supported
 MCP server release.
 
-## Current State
+## Original Starting State
 
 The `server-mcp` crate is a library-only crate. It contains the business logic
 for tool dispatch but no transport, no MCP protocol handler, and no
@@ -64,8 +68,8 @@ The registry already handles:
 - error wrapping
 - response envelope construction
 
-The missing work is transport/protocol integration, user-facing launch UX,
-client documentation, and diagnostics.
+At planning time, the missing work was transport/protocol integration,
+user-facing launch UX, client documentation, and diagnostics.
 
 ## Product Requirements
 
@@ -129,11 +133,12 @@ Documentation should include:
 - explicit statement of what is and is not supported
 - guidance on `repo_id` usage for tools that require repository scoping
 
-## What Is Missing
+## Original Gaps
 
 ### 1. JSON-RPC 2.0 framing
 
-No request/response framing types or parser exist in the workspace today.
+At planning time, no request/response framing types or parser existed in the
+workspace.
 
 Required types:
 
@@ -152,7 +157,7 @@ misbehaving.
 
 ### 2. MCP protocol state machine
 
-The workspace does not yet handle:
+At planning time, the workspace did not yet handle:
 
 - `initialize`
 - `notifications/initialized`
@@ -163,18 +168,19 @@ The workspace does not yet handle:
 
 ### 3. stdio transport loop
 
-No stdin/stdout read-write loop exists yet.
+At planning time, no stdin/stdout read-write loop existed.
 
 ### 4. User-facing CLI entrypoint
 
-The current CLI in `crates/cli/src/main.rs` does not have an `mcp` command.
+At planning time, the CLI in `crates/cli/src/main.rs` did not have an `mcp`
+command.
 
 This is the preferred place for the primary launch path because it reduces the
 number of things users need to install and understand.
 
 ### 5. Optional alias binary
 
-There is no `main.rs` in `server-mcp` and no `[[bin]]` target in
+There is still no `main.rs` in `server-mcp` and no `[[bin]]` target in
 `crates/server-mcp/Cargo.toml`.
 
 This is optional for product success, but useful as a compatibility alias or a
@@ -186,9 +192,9 @@ thin transport wrapper if the team wants a dedicated executable name.
 
 ### 7. Client-facing documentation
 
-The README currently explains that users need to wrap the MCP library
-themselves. That guidance must be replaced by a supported setup flow once this
-work lands.
+This gap has been resolved in the README and runbook. The original issue was
+that the README explained the MCP library shape without a supported end-user
+setup flow.
 
 ## Recommended Product Shape
 
@@ -371,7 +377,7 @@ remain simple and stable.
 
 ## Acceptance Criteria
 
-The work should be considered complete when all of the following are true:
+The work was considered complete when all of the following became true:
 
 1. A user can run `codeatlas mcp serve --db <path>`.
 2. A generic stdio MCP client can complete `initialize`, `tools/list`, and
@@ -380,7 +386,8 @@ The work should be considered complete when all of the following are true:
 4. Server logs and diagnostics never corrupt stdout protocol frames.
 5. The README documents a copy-pasteable supported MCP setup flow, including a
    small set of real client examples.
-6. Integration tests cover framed stdio communication with a real subprocess.
+6. Integration tests cover newline-delimited stdio communication with a real
+   subprocess.
 7. Documented clients have compatibility validation notes, and any required
    client-specific shims are explicit rather than implicit.
 
@@ -395,7 +402,7 @@ The work should be considered complete when all of the following are true:
 
 ## Recommended First Slice
 
-The smallest useful slice that still matches the product goal is:
+The smallest useful slice that matched the product goal was:
 
 1. add `codeatlas mcp serve --db <path>`
 2. implement JSON-RPC framing
@@ -412,8 +419,8 @@ Fast-follow after the first slice:
 2. add narrowly-scoped interoperability shims only if those validations prove
    they are required
 
-That is enough to make CodeAtlas meaningfully usable with real AI clients
-without introducing a larger SDK or hosted-service surface.
+That slice was enough to make CodeAtlas meaningfully usable with real AI
+clients without introducing a larger SDK or hosted-service surface.
 
 ## References
 

@@ -2,13 +2,15 @@
 
 This backlog is designed for one-PR-per-issue execution.
 
-Progress (updated 2026-03-12): Milestones M0-M9 are complete. The platform now
+Progress (updated 2026-03-12): Milestones M0-M11 are complete. The platform now
 includes indexing pipeline, query engine, MCP serving contracts, local CLI
 commands, incremental indexing with git-diff acceleration and determinism
 regression coverage, plus tracing, redacted structured logging, security
 regression coverage, performance threshold enforcement, TypeScript and Kotlin
-semantic adapters, confidence-aware merge, semantic regression gating, and
-semantic coverage/win-rate metrics. Workspace quality gates are green (`fmt`,
+semantic adapters, confidence-aware merge, semantic regression gating, semantic
+coverage/win-rate metrics, a built-in newline-delimited stdio MCP server,
+documented client setup, packaging guidance, diagnostics coverage, tool
+schemas, and compatibility notes. Workspace quality gates are green (`fmt`,
 `clippy -D warnings`, full workspace tests).
 
 ## Epic 0: Repository Governance and CI Foundation (complete)
@@ -98,15 +100,15 @@ semantic coverage/win-rate metrics. Workspace quality gates are green (`fmt`,
 - Ticket: Add compatibility policy docs (N-1 API, schema migration)
 - Manual: Release readiness checklist and go/no-go review
 
-## Epic 11: First-Class Local MCP Server for AI Clients
+## Epic 11: First-Class Local MCP Server for AI Clients (complete)
 
-- Ticket: Add codeatlas mcp serve canonical CLI entrypoint and server wiring (#135)
-- Ticket: Implement stdio JSON-RPC framing and MCP request routing (#131)
-- Ticket: Add MCP tool schemas for all existing CodeAtlas tools (#133)
-- Ticket: Add MCP diagnostics and subprocess integration coverage (#132)
-- Ticket: Publish supported MCP client setup and troubleshooting docs (#134)
-- Ticket: Add MCP packaging and installation path for end users (#136)
-- Ticket: Validate MCP client compatibility and add minimal interoperability shims (#137)
+- ~~Ticket: Add codeatlas mcp serve canonical CLI entrypoint and server wiring~~ (#135)
+- ~~Ticket: Implement stdio JSON-RPC framing and MCP request routing~~ (#131)
+- ~~Ticket: Add MCP tool schemas for all existing CodeAtlas tools~~ (#133)
+- ~~Ticket: Add MCP diagnostics and subprocess integration coverage~~ (#132)
+- ~~Ticket: Publish supported MCP client setup and troubleshooting docs~~ (#134)
+- ~~Ticket: Add MCP packaging and installation path for end users~~ (#136)
+- ~~Ticket: Validate MCP client compatibility and add minimal interoperability shims~~ (#137)
 
 ## Post-V1 Direction
 

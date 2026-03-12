@@ -4,6 +4,9 @@ This document captures the proposed GitHub epic and ticket bodies for the
 planned CodeAtlas MCP server work. It translates
 `docs/architecture/mcp-server-planning.md` into executable issue tracking.
 
+Status note: these issue bodies are historical planning artifacts for Epic 11,
+which has now been completed.
+
 ## Epic
 
 ### Title
@@ -243,7 +246,8 @@ with unit tests alone.
 
 - harden startup/runtime diagnostics for missing DB, unreadable DB, and schema/open failures
 - ensure all diagnostics remain off stdout
-- add subprocess integration tests that cover framed stdio behavior end to end
+- add subprocess integration tests that cover newline-delimited stdio behavior
+  end to end
 - add smoke coverage for `initialize -> tools/list -> tools/call`
 - assert that invalid requests are reported predictably
 
