@@ -26,6 +26,8 @@ crates/
   repo-walker/              Repository traversal, ignore rules, language detection, security filters
   adapter-api/              LanguageAdapter trait, AdapterRouter, capability model, contract tests
   adapter-syntax-treesitter/ Tree-sitter based syntax extraction (Rust support)
+  adapter-semantic-typescript/ TypeScript semantic extraction via tsserver
+  adapter-semantic-kotlin/  Kotlin semantic extraction via JVM analysis bridge
   store/                    MetadataStore (SQLite), BlobStore (content-addressed filesystem)
   indexer/                  Pipeline orchestration: discovery → parse → enrich → persist
   query-engine/             Ranked symbol/text retrieval and structure queries
@@ -54,6 +56,9 @@ Key design decisions:
 - Milestone 8 adds tracing spans across indexing/query/MCP flows, structured
   CLI logging with redaction, security regression suites, and CI-enforced
   performance thresholds plus Criterion benchmarks
+- Milestone 9 adds TypeScript and Kotlin semantic adapters, confidence-aware
+  syntax+semantic merge, regression KPI gating, and semantic coverage/win-rate
+  reporting
 
 ## Milestone/Epic Breakdown
 
@@ -66,7 +71,7 @@ Key design decisions:
 7. ~~Epic 6: MCP Server Interface and Tool Contracts~~ (complete)
 8. ~~Epic 7: Incremental Indexing and Reliability Hardening~~ (complete)
 9. ~~Epic 8: Security, Observability, and Performance Guardrails~~ (complete)
-10. Epic 9: Semantic Adapter Integration (at least two languages)
+10. ~~Epic 9: Semantic Adapter Integration (at least two languages)~~ (complete)
 11. Epic 10: Documentation, Benchmarks, and V1 Readiness Review
 
 Post-V1 direction:

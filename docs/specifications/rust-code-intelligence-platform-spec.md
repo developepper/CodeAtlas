@@ -559,7 +559,7 @@ V1 is done when:
 
 - Rust MCP server supports core query/index tools.
 - Tree-sitter syntax adapters run for baseline language set.
-- At least two semantic adapters are integrated (recommended: TypeScript + PHP, or Kotlin + TypeScript).
+- At least two semantic adapters are integrated (implemented: TypeScript + Kotlin).
 - Incremental indexing is reliable and tested.
 - Security controls are implemented and validated.
 - Observability dashboards show key metrics.

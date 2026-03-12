@@ -19,7 +19,7 @@ Primary interface target:
 - MCP server (first-class)
 - Optional HTTP/gRPC APIs (planned)
 
-## What It Can Do (Target Capabilities)
+## What It Can Do
 
 - `search_symbols`: find relevant functions, classes, methods, types, constants.
 - `get_symbol` / `get_symbols`: fetch exact symbol details with locations and signatures.
@@ -29,13 +29,14 @@ Primary interface target:
 
 ## Current Status
 
-Milestones M0-M8 are complete:
+Milestones M0-M9 are complete:
 
 - M0-M4: governance, core model, discovery/adapters, storage, and indexing pipeline.
 - M5: query engine and deterministic ranking.
 - M6: MCP server contracts and local CLI interface.
 - M7: incremental indexing, git-diff acceleration, and determinism regression coverage.
 - M8: OpenTelemetry tracing, structured logging with redaction, security regression suites, and benchmark threshold enforcement.
+- M9: TypeScript and Kotlin semantic adapters, confidence-aware syntax+semantic merge, semantic quality regression gating, and semantic coverage/win-rate metrics.
 
 ### Workspace crates
 
@@ -45,6 +46,8 @@ Milestones M0-M8 are complete:
 | `repo-walker` | Repository traversal with gitignore/security filters, language detection, structured logging | Complete |
 | `adapter-api` | `LanguageAdapter` and `AdapterRouter` traits, routing policy, contract test harness | Complete |
 | `adapter-syntax-treesitter` | Tree-sitter-based syntax extraction (Rust supported, table-driven for extensibility) | Complete |
+| `adapter-semantic-typescript` | `tsserver`-backed semantic extraction, runtime lifecycle, mapping, and regression coverage | Complete |
+| `adapter-semantic-kotlin` | JVM bridge-backed semantic extraction, runtime lifecycle, mapping, and regression coverage | Complete |
 | `store` | SQLite metadata persistence with versioned migrations, typed CRUD for repos/files/symbols | Complete |
 | `indexer` | End-to-end indexing pipeline (discovery -> parse -> enrich -> persist) | Complete |
 | `query-engine` | Symbol/text search, symbol lookup, file/repo outline retrieval | Complete |
@@ -59,6 +62,7 @@ Milestones M0-M8 are complete:
 - GitHub Actions CI quality gates for PRs and pushes to `master` (fmt, clippy, tests, build, docs, MSRV check).
 - Serde compatibility fixtures and snapshot tests for schema forward-compatibility.
 - Adapter contract test harness for preventing adapter drift across implementations.
+- Semantic regression harness with fixture-based KPI thresholds for TypeScript and Kotlin.
 - OpenTelemetry span instrumentation across indexing, query, and MCP request flows.
 - Structured CLI logging with sensitive-field redaction for local and machine-readable output.
 - Security regression coverage for malicious inputs, traversal/symlink escape, malformed files, and resource limits.
@@ -67,9 +71,27 @@ Milestones M0-M8 are complete:
 ### What does not exist yet
 
 - Watcher/local file-system triggered update mode.
-- Semantic adapter implementations beyond syntax baseline.
+- Semantic adapters beyond the current TypeScript and Kotlin implementations.
 - Hosted/server API surface (HTTP/gRPC), auth, quotas, and multi-tenant controls.
 - Production observability dashboards and hosted telemetry/export integrations beyond the local CLI baseline.
+
+### Semantic Adapter Runtime Discovery
+
+Production CLI indexing will register semantic adapters when their local runtime
+dependencies are available, and otherwise fall back to syntax-only parsing.
+
+- TypeScript semantic adapter:
+  - `TSSERVER_PATH`
+  - repo-local `node_modules/.bin/tsserver`
+  - system `PATH`
+- Kotlin semantic adapter:
+  - `JAVA_HOME/bin/java` or system `PATH`
+  - `KOTLIN_BRIDGE_JAR`
+  - repo-local `.codeatlas/kotlin-bridge.jar`
+
+If those dependencies are not present, indexing still succeeds with syntax
+adapters and the router keeps the semantic-preferred policy behavior where
+available.
 
 ## Design Principles
 
