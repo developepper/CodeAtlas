@@ -97,11 +97,29 @@ impl KotlinAnalysisProcess {
     // -----------------------------------------------------------------------
 
     fn spawn_process(&self) -> Result<Child, KotlinAnalysisError> {
-        let mut cmd = self.build_command();
-        cmd.spawn().map_err(|e| KotlinAnalysisError::SpawnFailed {
+        // Retry on ETXTBSY (errno 26 on Linux) — a transient race that
+        // occurs on overlayfs/tmpfs when the kernel hasn't fully released
+        // the write reference to an executable we just finished writing.
+        let mut last_err = None;
+        for attempt in 0..5 {
+            let mut cmd = self.build_command();
+            match cmd.spawn() {
+                Ok(child) => return Ok(child),
+                Err(e) if e.raw_os_error() == Some(26) && attempt < 4 => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    last_err = Some(e);
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    break;
+                }
+            }
+        }
+        Err(KotlinAnalysisError::SpawnFailed {
             reason: format!(
-                "failed to spawn java -jar '{}': {e}",
-                self.config.bridge_jar_path.display()
+                "failed to spawn java -jar '{}': {}",
+                self.config.bridge_jar_path.display(),
+                last_err.unwrap()
             ),
         })
     }
