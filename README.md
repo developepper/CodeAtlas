@@ -44,9 +44,10 @@ Today, this repository does **not** provide:
 
 That distinction matters: you can use CodeAtlas immediately through the CLI.
 The planned MCP product direction is a built-in local stdio server launched as
-`codeatlas mcp serve --db <path>`, with optional alias binaries only if they
-improve compatibility. Until that lands, the MCP library remains an embeddable
-surface rather than a ready-to-launch end-user server.
+`codeatlas mcp serve --db <path>`. A separate `server-mcp` executable is not
+part of the default end-user story unless a concrete compatibility need emerges.
+Until the CLI MCP server lands, the MCP library remains an embeddable surface
+rather than a ready-to-launch end-user server.
 
 ## What You Can Do With It
 
@@ -217,6 +218,13 @@ The intended end-user MCP experience is:
 
 That is the target product shape because it is simpler to explain and support
 than requiring a separate wrapper process or a second product-facing binary.
+
+The implementation direction is:
+
+- keep `server-mcp` focused on the reusable tool registry and response model
+- add stdio MCP transport outside that crate
+- make `codeatlas mcp serve` the canonical supported launch path
+- document a small set of real MCP clients with copy-paste configuration
 
 The current implementation work for that flow is planned in
 [`docs/architecture/mcp-server-planning.md`](docs/architecture/mcp-server-planning.md).

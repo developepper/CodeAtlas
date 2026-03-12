@@ -201,24 +201,43 @@ Reasons:
 - one executable for indexing, querying, and MCP serving
 - lower support burden than separate CLI and server binaries
 
-### Optional secondary entrypoint
+### Secondary entrypoint decision
 
-If useful, ship:
+Do not treat a separate `server-mcp` executable as part of the initial product
+requirement.
 
-```text
-server-mcp --db <path>
-```
+An alias binary may be added later only if a concrete client compatibility or
+packaging issue justifies it.
 
-That binary should behave as a thin alias or wrapper around the same internal
-server implementation, not a separate product path.
+Implication:
+
+- the canonical and initially supported user-facing command is
+  `codeatlas mcp serve --db <path>`
+- docs and testing should center on that command
+- packaging should optimize for one obvious executable
 
 ### Internal structure
 
-The transport implementation can still live near the `server-mcp` crate or in a
-shared internal module. The important distinction is:
+Keep `server-mcp` focused on MCP tool registry and business logic. Implement the
+stdio transport layer outside that crate in a thin internal module or crate
+that is invoked by the CLI.
+
+This is the chosen default because it preserves a clean boundary between:
+
+- tool/query semantics
+- transport/protocol concerns
+
+The important distinction is:
 
 - implementation location is an engineering decision
 - `codeatlas mcp serve` is a product decision
+
+Implication:
+
+- `server-mcp` remains reusable as a library surface
+- stdio-specific framing and process lifecycle logic do not need to live inside
+  the core registry crate
+- future transports remain easier to add
 
 ## Implementation Approach
 
@@ -295,9 +314,22 @@ Update docs to make the supported flow explicit:
 - verify the server starts
 - troubleshoot common setup failures
 
-Documentation should include representative config snippets for real clients,
-but the compatibility promise should remain generic: any stdio MCP client that
-speaks the supported subset should work.
+Documentation should include representative config snippets for a small set of
+real clients, rather than remaining fully abstract.
+
+The compatibility promise should remain generic: any stdio MCP client that
+speaks the supported subset should work. But the first supported release should
+still validate and document a small set of concrete clients so end-user setup is
+copy-pasteable.
+
+Recommended first documentation set:
+
+- Claude Desktop
+- Cursor
+- one ChatGPT/Codex-style local MCP client or wrapper with stable config shape
+
+The exact third client can be chosen based on what is stable and in active use
+at implementation time.
 
 ### Phase 6: Verification
 
@@ -328,7 +360,8 @@ The work should be considered complete when all of the following are true:
    `tools/call`.
 3. All existing CodeAtlas MCP tools are exposed with input schemas.
 4. Server logs and diagnostics never corrupt stdout protocol frames.
-5. The README documents a copy-pasteable supported MCP setup flow.
+5. The README documents a copy-pasteable supported MCP setup flow, including a
+   small set of real client examples.
 6. Integration tests cover framed stdio communication with a real subprocess.
 
 ## Non-Goals for This Slice
