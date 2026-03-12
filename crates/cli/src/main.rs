@@ -10,6 +10,7 @@ use tracing_subscriber::EnvFilter;
 mod commands;
 mod error;
 pub mod logging;
+pub mod mcp_stdio;
 mod router;
 
 /// Initialises the tracing subscriber stack.
@@ -118,7 +119,7 @@ fn print_usage() {
     eprintln!("  file-outline      List symbols in a file");
     eprintln!("  file-tree         List files in a repository");
     eprintln!("  repo-outline      Show repository structure overview");
-    eprintln!("  mcp serve         Validate MCP server startup (transport pending #131)");
+    eprintln!("  mcp serve         Start the MCP tool server (stdio)");
     eprintln!("  quality-report    Generate quality KPI report");
     eprintln!("  help              Show this help message");
 }

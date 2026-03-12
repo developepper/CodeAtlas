@@ -9,7 +9,7 @@ clients through the canonical command `codeatlas mcp serve --db <path>`.
 - implement the minimal stdio MCP subset required for real clients
 - expose all existing MCP tools through `tools/list` and `tools/call`
 - add clear startup/runtime diagnostics that do not corrupt stdout framing
-- add subprocess integration coverage for framed stdio communication
+- add subprocess integration coverage for newline-delimited stdio communication
 - document copy-paste setup guidance for a small set of real MCP clients
 
 ## Out Of Scope
@@ -45,7 +45,7 @@ clients through the canonical command `codeatlas mcp serve --db <path>`.
 - End-user installation/distribution guidance exists for the canonical MCP flow.
 - Documented clients have compatibility validation, and any required
   client-compatibility accommodations are explicit.
-- Integration tests cover framed stdio communication with a real subprocess.
+- Integration tests cover newline-delimited stdio communication with a real subprocess.
 
 ## References
 

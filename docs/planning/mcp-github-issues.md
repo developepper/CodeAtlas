@@ -21,7 +21,7 @@ clients through the canonical command `codeatlas mcp serve --db <path>`.
 - implement the minimal stdio MCP subset required for real clients
 - expose all existing MCP tools through `tools/list` and `tools/call`
 - add clear startup/runtime diagnostics that do not corrupt stdout framing
-- add subprocess integration coverage for framed stdio communication
+- add subprocess integration coverage for newline-delimited stdio communication
 - document copy-paste setup guidance for a small set of real MCP clients
 
 ### Out Of Scope
@@ -52,7 +52,7 @@ clients through the canonical command `codeatlas mcp serve --db <path>`.
 - Server diagnostics never corrupt stdout protocol frames.
 - README and supporting docs include copy-paste setup guidance for a small set
   of real MCP clients.
-- Integration tests cover framed stdio communication with a real subprocess.
+- Integration tests cover newline-delimited stdio communication with a real subprocess.
 
 ### References
 
@@ -132,7 +132,7 @@ CodeAtlas until that layer exists.
 ### Scope
 
 - add JSON-RPC request/response/error types
-- implement `Content-Length` framing parser and serializer
+- implement newline-delimited stdio message parsing and serialization
 - implement MCP request routing for `initialize`,
   `notifications/initialized`, `tools/list`, and `tools/call`
 - delegate `tools/call` to the existing `ToolRegistry`
@@ -141,7 +141,7 @@ CodeAtlas until that layer exists.
 
 ### Acceptance Criteria
 
-- [ ] the server accepts and emits `Content-Length` framed JSON-RPC messages over stdio
+- [ ] the server accepts and emits newline-delimited JSON-RPC messages over stdio
 - [ ] `initialize` returns server capabilities and tool-serving support
 - [ ] `notifications/initialized` is handled without sending a response
 - [ ] `tools/call` delegates to `ToolRegistry::call()`

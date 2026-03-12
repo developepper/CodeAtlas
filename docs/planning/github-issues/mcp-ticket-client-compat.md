@@ -15,7 +15,7 @@ real clients.
 - validate startup and handshake behavior against the documented clients
 - document any intentional compatibility accommodations and their rationale
 - avoid broad client-specific branching or unsupported feature creep
-- include validation that newline-delimited JSON misconfiguration fails clearly
+- include validation that unsupported `Content-Length` framing fails clearly
   rather than appearing to work
 
 ## Acceptance Criteria
