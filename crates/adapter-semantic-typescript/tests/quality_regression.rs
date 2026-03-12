@@ -300,6 +300,9 @@ fn typescript_regression_report_is_generated() {
     let result = regression::run_quality_regression(&adapter, &fixture);
     let report = result.report();
 
+    // Print the report so CI can capture it with --nocapture.
+    println!("\n{report}\n");
+
     assert!(report.contains("Quality Regression Report"));
     assert!(report.contains("Win rate"));
 }

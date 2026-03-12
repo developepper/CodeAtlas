@@ -89,6 +89,7 @@ fn main() {
         "file-outline" => commands::file_outline::run(&args[2..]),
         "file-tree" => commands::file_tree::run(&args[2..]),
         "repo-outline" => commands::repo_outline::run(&args[2..]),
+        "quality-report" => commands::quality_report::run(&args[2..]),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
@@ -116,5 +117,6 @@ fn print_usage() {
     eprintln!("  file-outline      List symbols in a file");
     eprintln!("  file-tree         List files in a repository");
     eprintln!("  repo-outline      Show repository structure overview");
+    eprintln!("  quality-report    Generate quality KPI report");
     eprintln!("  help              Show this help message");
 }
