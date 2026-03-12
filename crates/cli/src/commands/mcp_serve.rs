@@ -44,7 +44,7 @@ fn run_serve(args: &[String]) -> Result<(), CliError> {
 
     let opts = parse_serve_args(args)?;
 
-    // Validate DB path exists before attempting to open.
+    // Validate DB path exists and is readable before attempting to open.
     if !opts.db_path.exists() {
         return Err(CliError::Usage(format!(
             "database not found: {}\n\nHint: run 'codeatlas index <repo>' first to create the index database.",
@@ -52,8 +52,43 @@ fn run_serve(args: &[String]) -> Result<(), CliError> {
         )));
     }
 
+    if opts.db_path.is_dir() {
+        return Err(CliError::Usage(format!(
+            "database path is a directory, not a file: {}",
+            opts.db_path.display()
+        )));
+    }
+
+    // Check read permissions before opening to produce a clear diagnostic
+    // rather than a raw SQLite error.
+    match std::fs::File::open(&opts.db_path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Err(CliError::Usage(format!(
+                "database is not readable: {}\n\nHint: check file permissions.",
+                opts.db_path.display()
+            )));
+        }
+        Err(e) => {
+            return Err(CliError::Usage(format!(
+                "cannot open database: {}: {}",
+                opts.db_path.display(),
+                e
+            )));
+        }
+    }
+
     // Open store — propagates StoreError on schema mismatch or corruption.
-    let db = store::MetadataStore::open(&opts.db_path)?;
+    let db = match store::MetadataStore::open(&opts.db_path) {
+        Ok(db) => db,
+        Err(e) => {
+            return Err(CliError::Usage(format!(
+                "failed to open database: {}\n\nThe file exists but could not be opened as a CodeAtlas index: {}",
+                opts.db_path.display(),
+                e
+            )));
+        }
+    };
     let svc = StoreQueryService::new(&db);
     let registry = ToolRegistry::new(&svc);
 
