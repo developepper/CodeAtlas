@@ -207,6 +207,7 @@ name = "cli"
 version = "0.1.0"
 dependencies = [
  "adapter-api",
+ "adapter-semantic-kotlin",
  "adapter-semantic-typescript",
  "adapter-syntax-treesitter",
  "core-model",
