@@ -22,10 +22,21 @@ static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 ///
 /// The serve loop checks this flag each iteration and exits cleanly.
 /// This prevents partial writes to stdout on interruption.
-fn install_signal_handlers() {
+///
+/// Must be called once before [`serve`], typically from the CLI entry point.
+/// Kept separate from `serve` so that in-process unit tests (which share a
+/// process and run in parallel threads) are not affected by global signal
+/// state.
+pub fn install_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGTERM, signal_handler as *const () as libc::sighandler_t);
-        libc::signal(libc::SIGINT, signal_handler as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            signal_handler as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            signal_handler as *const () as libc::sighandler_t,
+        );
     }
 }
 
@@ -157,8 +168,6 @@ fn write_error(
 /// The loop terminates on clean EOF (stdin close). Parse errors produce
 /// JSON-RPC error responses; the server continues processing.
 pub fn serve(registry: &ToolRegistry, input: impl Read, output: impl Write) -> Result<(), String> {
-    install_signal_handlers();
-
     let mut reader = BufReader::new(input);
     let mut writer = BufWriter::new(output);
 

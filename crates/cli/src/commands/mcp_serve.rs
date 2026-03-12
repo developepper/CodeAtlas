@@ -63,6 +63,10 @@ fn run_serve(args: &[String]) -> Result<(), CliError> {
         registry.tool_names().len(),
     );
 
+    // Install signal handlers before entering the server loop so that
+    // SIGTERM/SIGINT trigger a clean shutdown without partial writes.
+    mcp_stdio::install_signal_handlers();
+
     // Run the stdio JSON-RPC server loop. Returns on EOF or fatal error.
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
