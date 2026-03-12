@@ -279,7 +279,7 @@ fn handle_tools_list(registry: &ToolRegistry) -> Value {
             serde_json::json!({
                 "name": name,
                 "description": tool_description(name),
-                "inputSchema": { "type": "object" }
+                "inputSchema": tool_input_schema(name)
             })
         })
         .collect();
@@ -341,6 +341,171 @@ fn tool_description(name: &str) -> &'static str {
         "get_repo_outline" => "Show repository structure and file summary",
         "search_text" => "Search for text patterns across indexed files",
         _ => "CodeAtlas tool",
+    }
+}
+
+/// Return a JSON Schema `inputSchema` for the given tool name.
+///
+/// Each schema matches the corresponding `*Params` struct in
+/// `crates/server-mcp/src/tools.rs`. Required fields mirror non-`Option`
+/// struct fields; optional fields and those with `#[serde(default)]` are
+/// listed only in `properties`.
+fn tool_input_schema(name: &str) -> Value {
+    match name {
+        "search_symbols" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search query string for symbol names"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Filter by symbol kind",
+                    "enum": ["function", "class", "method", "type", "constant"]
+                },
+                "language": {
+                    "type": "string",
+                    "description": "Filter by programming language"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return",
+                    "minimum": 0,
+                    "default": 20
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Number of results to skip for pagination",
+                    "minimum": 0,
+                    "default": 0
+                }
+            },
+            "required": ["repo_id", "query"]
+        }),
+
+        "get_symbol" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique symbol identifier"
+                }
+            },
+            "required": ["id"]
+        }),
+
+        "get_symbols" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "List of unique symbol identifiers"
+                }
+            },
+            "required": ["ids"]
+        }),
+
+        "get_file_outline" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Path of the file within the repository"
+                }
+            },
+            "required": ["repo_id", "file_path"]
+        }),
+
+        "get_file_content" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Path of the file within the repository"
+                }
+            },
+            "required": ["repo_id", "file_path"]
+        }),
+
+        "get_file_tree" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier"
+                },
+                "path_prefix": {
+                    "type": "string",
+                    "description": "Filter files by path prefix (subtree)"
+                }
+            },
+            "required": ["repo_id"]
+        }),
+
+        "get_repo_outline" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier"
+                }
+            },
+            "required": ["repo_id"]
+        }),
+
+        "search_text" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Text search pattern"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Filter by symbol kind",
+                    "enum": ["function", "class", "method", "type", "constant"]
+                },
+                "language": {
+                    "type": "string",
+                    "description": "Filter by programming language"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return",
+                    "minimum": 0,
+                    "default": 20
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Number of results to skip for pagination",
+                    "minimum": 0,
+                    "default": 0
+                }
+            },
+            "required": ["repo_id", "pattern"]
+        }),
+
+        _ => serde_json::json!({
+            "type": "object"
+        }),
     }
 }
 
@@ -550,8 +715,233 @@ mod tests {
 
         for tool in tools {
             assert!(tool["description"].is_string());
-            assert!(tool["inputSchema"].is_object());
+            let schema = &tool["inputSchema"];
+            assert_eq!(schema["type"], "object");
+            assert!(schema["properties"].is_object(), "tool {} missing properties", tool["name"]);
+            assert!(schema["required"].is_array(), "tool {} missing required", tool["name"]);
         }
+    }
+
+    // ── Schema content tests ──────────────────────────────────────────
+
+    #[test]
+    fn schema_search_symbols_matches_params() {
+        let schema = tool_input_schema("search_symbols");
+        let props = schema["properties"].as_object().unwrap();
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+
+        // Required fields from SearchSymbolsParams
+        assert!(required.contains(&"repo_id"));
+        assert!(required.contains(&"query"));
+        assert_eq!(required.len(), 2);
+
+        // All properties present
+        assert!(props.contains_key("repo_id"));
+        assert!(props.contains_key("query"));
+        assert!(props.contains_key("kind"));
+        assert!(props.contains_key("language"));
+        assert!(props.contains_key("limit"));
+        assert!(props.contains_key("offset"));
+        assert_eq!(props.len(), 6);
+
+        // kind has enum constraint
+        assert!(schema["properties"]["kind"]["enum"].is_array());
+
+        // limit/offset have minimum and default matching usize semantics
+        assert_eq!(schema["properties"]["limit"]["default"], 20);
+        assert_eq!(schema["properties"]["limit"]["minimum"], 0);
+        assert_eq!(schema["properties"]["offset"]["default"], 0);
+        assert_eq!(schema["properties"]["offset"]["minimum"], 0);
+    }
+
+    #[test]
+    fn schema_get_symbol_matches_params() {
+        let schema = tool_input_schema("get_symbol");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(required, vec!["id"]);
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn schema_get_symbols_matches_params() {
+        let schema = tool_input_schema("get_symbols");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(required, vec!["ids"]);
+        assert_eq!(schema["properties"]["ids"]["type"], "array");
+        assert_eq!(schema["properties"]["ids"]["items"]["type"], "string");
+    }
+
+    #[test]
+    fn schema_file_outline_matches_params() {
+        let schema = tool_input_schema("get_file_outline");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(required.contains(&"repo_id"));
+        assert!(required.contains(&"file_path"));
+        assert_eq!(required.len(), 2);
+    }
+
+    #[test]
+    fn schema_file_content_matches_params() {
+        let schema = tool_input_schema("get_file_content");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(required.contains(&"repo_id"));
+        assert!(required.contains(&"file_path"));
+        assert_eq!(required.len(), 2);
+    }
+
+    #[test]
+    fn schema_file_tree_matches_params() {
+        let schema = tool_input_schema("get_file_tree");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(required, vec!["repo_id"]);
+        // path_prefix is optional
+        assert!(schema["properties"].as_object().unwrap().contains_key("path_prefix"));
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn schema_repo_outline_matches_params() {
+        let schema = tool_input_schema("get_repo_outline");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(required, vec!["repo_id"]);
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn schema_search_text_matches_params() {
+        let schema = tool_input_schema("search_text");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(required.contains(&"repo_id"));
+        assert!(required.contains(&"pattern"));
+        assert_eq!(required.len(), 2);
+        assert_eq!(schema["properties"].as_object().unwrap().len(), 6);
+        assert!(schema["properties"]["kind"]["enum"].is_array());
+
+        // limit/offset have minimum matching usize semantics
+        assert_eq!(schema["properties"]["limit"]["minimum"], 0);
+        assert_eq!(schema["properties"]["offset"]["minimum"], 0);
+    }
+
+    #[test]
+    fn schema_all_tools_covered() {
+        // Verify every registered tool has a non-stub schema.
+        for name in server_mcp::registry::TOOL_NAMES {
+            let schema = tool_input_schema(name);
+            assert!(
+                schema["properties"].is_object(),
+                "tool {name} has no properties in schema"
+            );
+            assert!(
+                schema["required"].is_array(),
+                "tool {name} has no required field in schema"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_names_match_registry() {
+        // Verify tool_input_schema and tool_description cover all registry names.
+        for name in server_mcp::registry::TOOL_NAMES {
+            let desc = tool_description(name);
+            assert_ne!(desc, "CodeAtlas tool", "tool {name} has no description");
+        }
+    }
+
+    #[test]
+    fn schema_does_not_set_additional_properties() {
+        // The param structs do not use #[serde(deny_unknown_fields)], so the
+        // schema must not claim additionalProperties: false. That would be
+        // stricter than the runtime and break clients that validate inputs.
+        for name in server_mcp::registry::TOOL_NAMES {
+            let schema = tool_input_schema(name);
+            assert!(
+                schema.get("additionalProperties").is_none(),
+                "tool {name} must not set additionalProperties"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_limit_offset_have_minimum() {
+        // usize fields reject negative values at deserialization. The schema
+        // must advertise minimum: 0 so clients don't send invalid values.
+        for name in &["search_symbols", "search_text"] {
+            let schema = tool_input_schema(name);
+            for field in &["limit", "offset"] {
+                assert_eq!(
+                    schema["properties"][field]["minimum"], 0,
+                    "{name}.{field} must have minimum: 0"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn runtime_accepts_unknown_fields() {
+        // Confirms that the runtime does not reject unknown fields, which is
+        // why the schema must not set additionalProperties: false.
+        use server_mcp::tools::SearchSymbolsParams;
+        let json = serde_json::json!({
+            "repo_id": "test",
+            "query": "foo",
+            "totally_unknown_field": true
+        });
+        let result: Result<SearchSymbolsParams, _> = serde_json::from_value(json);
+        assert!(result.is_ok(), "serde should accept unknown fields");
+    }
+
+    #[test]
+    fn runtime_rejects_negative_limit() {
+        // Confirms that the runtime rejects negative values for usize fields,
+        // which is why the schema must set minimum: 0.
+        use server_mcp::tools::SearchSymbolsParams;
+        let json = serde_json::json!({
+            "repo_id": "test",
+            "query": "foo",
+            "limit": -1
+        });
+        let result: Result<SearchSymbolsParams, _> = serde_json::from_value(json);
+        assert!(result.is_err(), "serde should reject negative usize");
     }
 
     #[test]

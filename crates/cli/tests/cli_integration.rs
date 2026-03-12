@@ -704,6 +704,23 @@ fn mcp_stdio_tools_list() {
     let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
     let tools = r["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 8);
+
+    // Every tool must have a description and a full inputSchema with
+    // properties and required fields (issue #133).
+    for tool in tools {
+        let name = tool["name"].as_str().unwrap();
+        assert!(tool["description"].is_string(), "{name} missing description");
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["type"], "object", "{name} schema type");
+        assert!(
+            schema["properties"].is_object(),
+            "{name} missing properties"
+        );
+        assert!(
+            schema["required"].is_array(),
+            "{name} missing required"
+        );
+    }
 }
 
 #[test]
