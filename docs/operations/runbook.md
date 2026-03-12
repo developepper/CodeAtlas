@@ -22,9 +22,15 @@ databases, or production alerting.
 
 ## 1. Local Environment Setup
 
-### Required baseline tools
+### Install CodeAtlas
 
-- Rust toolchain compatible with workspace `rust-version`
+See the [README Installation section](../../README.md#installation) for
+supported install paths (`cargo install`, GitHub Release binaries, or building
+from source).
+
+### Required baseline tools (for building from source)
+
+- Rust toolchain compatible with workspace `rust-version` (1.81+)
 - `cargo`
 - Git
 

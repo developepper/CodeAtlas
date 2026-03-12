@@ -11,6 +11,7 @@ re-reading the whole codebase every time.
 
 - [What CodeAtlas Is](#what-codeatlas-is)
 - [What You Can Do With It](#what-you-can-do-with-it)
+- [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Semantic Adapter Setup](#semantic-adapter-setup)
 - [MCP Server Setup](#mcp-server-setup)
@@ -57,25 +58,51 @@ MCP-capable AI client at `codeatlas mcp serve --db <path>`.
 - `repo-outline`: inspect repository structure and counts
 - `quality-report`: inspect semantic coverage and merge quality metrics
 
+## Installation
+
+### Option 1: Install from source with Cargo (recommended for v1)
+
+Requires the Rust toolchain (1.81+).
+
+```bash
+cargo install --git https://github.com/developepper/CodeAtlas.git --bin codeatlas
+```
+
+This builds and installs the `codeatlas` binary to `~/.cargo/bin/`. Make sure
+that directory is in your `PATH`.
+
+After installation, verify it works:
+
+```bash
+codeatlas help
+```
+
+### Option 2: Build from a local clone
+
+```bash
+git clone https://github.com/developepper/CodeAtlas.git
+cd CodeAtlas
+cargo build --release -p cli
+```
+
+The binary is at `./target/release/codeatlas`. Copy it to a directory in your
+`PATH` or run it directly.
+
+### What is not yet supported
+
+- Prebuilt GitHub Release binaries
+- Homebrew formula
+- Platform-specific installers (`.deb`, `.rpm`, `.msi`)
+- Docker images
+
+These may be added in future releases based on demand.
+
 ## Quick Start
 
-### 1. Build the CLI
+### 1. Install CodeAtlas
 
-```bash
-cargo build -p cli
-```
-
-You can then run the binary directly:
-
-```bash
-./target/debug/codeatlas help
-```
-
-Or with Cargo:
-
-```bash
-cargo run -p cli -- help
-```
+See [Installation](#installation) above. The examples below assume `codeatlas`
+is in your `PATH`.
 
 ### 2. Index a Repository
 
@@ -183,7 +210,7 @@ CodeAtlas includes a built-in MCP server that works with any stdio MCP client.
 
 ### Prerequisites
 
-1. Build or install `codeatlas` (see [Quick Start](#quick-start)).
+1. Install `codeatlas` (see [Installation](#installation)).
 2. Index a repository so an index database exists.
 
 ### Launch the MCP server
