@@ -24,8 +24,8 @@ static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// This prevents partial writes to stdout on interruption.
 fn install_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGTERM, signal_handler as libc::sighandler_t);
-        libc::signal(libc::SIGINT, signal_handler as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, signal_handler as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGINT, signal_handler as *const () as libc::sighandler_t);
     }
 }
 
