@@ -2,12 +2,14 @@
 
 This backlog is designed for one-PR-per-issue execution.
 
-Progress (updated 2026-03-10): Milestones M0-M8 are complete. The platform now
+Progress (updated 2026-03-12): Milestones M0-M9 are complete. The platform now
 includes indexing pipeline, query engine, MCP serving contracts, local CLI
 commands, incremental indexing with git-diff acceleration and determinism
 regression coverage, plus tracing, redacted structured logging, security
-regression coverage, and performance threshold enforcement. Workspace quality
-gates are green (`fmt`, `clippy -D warnings`, full workspace tests).
+regression coverage, performance threshold enforcement, TypeScript and Kotlin
+semantic adapters, confidence-aware merge, semantic regression gating, and
+semantic coverage/win-rate metrics. Workspace quality gates are green (`fmt`,
+`clippy -D warnings`, full workspace tests).
 
 ## Epic 0: Repository Governance and CI Foundation (complete)
 
@@ -78,12 +80,16 @@ gates are green (`fmt`, `clippy -D warnings`, full workspace tests).
 - ~~Ticket: Add security tests for malicious inputs and limits~~ (#46)
 - ~~Ticket: Add performance benchmark job and threshold checks~~ (#47)
 
-## Epic 9: Semantic Adapters
+## Epic 9: Semantic Adapters (complete)
 
-- Ticket: Implement semantic adapter 1 (TypeScript recommended)
-- Ticket: Implement semantic adapter 2 (PHP or Kotlin recommended)
-- Ticket: Merge confidence-aware results across syntax+semantic outputs
-- Ticket: Add semantic coverage metrics
+- ~~Ticket: Implement semantic adapter 1 (TypeScript recommended)~~ (#48)
+- ~~Ticket: Implement semantic adapter 2 (PHP or Kotlin recommended)~~ (#49)
+- ~~Ticket: Merge confidence-aware results across syntax+semantic outputs~~ (#50)
+- ~~Ticket: Add semantic coverage metrics~~ (#51)
+- ~~Ticket: TypeScript semantic runtime integration and lifecycle~~ (#64)
+- ~~Ticket: TypeScript semantic symbol mapping baseline~~ (#65)
+- ~~Ticket: Kotlin semantic runtime integration and symbol extraction baseline~~ (#66)
+- ~~Ticket: Semantic adapter quality regression suite and gating criteria~~ (#67)
 
 ## Epic 10: V1 Readiness
 

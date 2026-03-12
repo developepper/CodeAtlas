@@ -1,12 +1,13 @@
 # Post-V1 Roadmap
 
 This document captures likely product and platform directions for CodeAtlas
-after Milestones M9 and M10 are complete. It is intentionally strategic rather
-than a committed delivery plan.
+after Milestone M10 is complete. Milestone M9 semantic adapter rollout is now
+done; this document is intentionally strategic rather than a committed delivery
+plan.
 
 ## Positioning
 
-Once semantic adapters and V1 readiness land, CodeAtlas can move from being a
+With semantic adapters in place and V1 readiness next, CodeAtlas can move from being a
 local indexing engine to becoming a general-purpose code intelligence substrate
 for agents, developer tools, and platform workflows.
 
