@@ -217,6 +217,7 @@ dependencies = [
  "opentelemetry_sdk",
  "query-engine",
  "serde_json",
+ "server-mcp",
  "store",
  "tempfile",
  "time",

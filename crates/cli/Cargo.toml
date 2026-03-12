@@ -22,6 +22,7 @@ core-model.workspace = true
 indexer.workspace = true
 query-engine.workspace = true
 serde_json.workspace = true
+server-mcp.workspace = true
 store.workspace = true
 time.workspace = true
 tracing.workspace = true
