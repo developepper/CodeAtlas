@@ -13,6 +13,10 @@ CodeAtlas until that layer exists.
 - delegate `tools/call` to the existing `ToolRegistry`
 - guarantee protocol-only stdout output
 - handle EOF and malformed request cases cleanly
+- reject or fail clearly on newline-delimited JSON input that is not valid
+  `Content-Length` framing
+- handle SIGTERM/SIGINT shutdown cleanly where practical for local subprocess
+  lifecycle management
 
 ## Acceptance Criteria
 
@@ -22,11 +26,13 @@ CodeAtlas until that layer exists.
 - [ ] `tools/call` delegates to `ToolRegistry::call()`
 - [ ] malformed requests return JSON-RPC/MCP-compatible errors without crashing the process
 - [ ] stdout contains protocol frames only
+- [ ] newline-delimited JSON input is rejected or fails in a clear, predictable way
+- [ ] process shutdown on EOF or termination signals is clean and does not corrupt stdout
 
 ## Testing Requirements
 
 - Unit: framing parser/serializer, request parsing, response/error serialization
-- Integration: handshake and tool-call flows over stdio against a spawned subprocess
+- Integration: handshake and tool-call flows over stdio against a spawned subprocess, including invalid newline-only input handling where practical
 - Security: verify malformed input does not leak non-protocol output or raw sensitive details
 - Performance: basic framing loop should avoid unnecessary buffering or repeated allocations where practical
 

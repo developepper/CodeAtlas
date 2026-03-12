@@ -31,7 +31,14 @@ or validate tool inputs.
 ## Dependencies
 
 - Parent epic: #130
-- Depends on #131
+- Can begin in parallel with #131 for schema definition work
+- Depends on #131 for stdio-path integration verification
+
+## Notes
+
+- Unit and snapshot coverage for schema definitions can be implemented before
+  the stdio server path is complete.
+- The `tools/list` integration assertion remains gated on #131.
 
 ## Definition Of Done
 

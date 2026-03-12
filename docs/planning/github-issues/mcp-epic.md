@@ -43,7 +43,8 @@ clients through the canonical command `codeatlas mcp serve --db <path>`.
 - README and supporting docs include copy-paste setup guidance for a small set
   of real MCP clients.
 - End-user installation/distribution guidance exists for the canonical MCP flow.
-- Any required client-compatibility accommodations are explicit and validated.
+- Documented clients have compatibility validation, and any required
+  client-compatibility accommodations are explicit.
 - Integration tests cover framed stdio communication with a real subprocess.
 
 ## References

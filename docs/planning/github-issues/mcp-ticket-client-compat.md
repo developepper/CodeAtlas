@@ -15,6 +15,8 @@ real clients.
 - validate startup and handshake behavior against the documented clients
 - document any intentional compatibility accommodations and their rationale
 - avoid broad client-specific branching or unsupported feature creep
+- include validation that newline-delimited JSON misconfiguration fails clearly
+  rather than appearing to work
 
 ## Acceptance Criteria
 
@@ -23,6 +25,7 @@ real clients.
 - [ ] client-specific accommodations do not leak non-protocol output to stdout
 - [ ] compatibility notes are documented where needed for maintainability
 - [ ] the server remains generic stdio MCP infrastructure rather than becoming tightly coupled to a single client
+- [ ] client-specific shims are treated as additive and only required when a documented client demonstrably needs them
 
 ## Testing Requirements
 
@@ -37,6 +40,13 @@ real clients.
 - Depends on #131
 - Depends on #132
 - Depends on #134
+
+## Notes
+
+- Compatibility validation is part of the first supported release for the
+  documented clients.
+- Client-specific shims should be fast-follow unless validation shows that a
+  documented client requires them for basic interoperability.
 
 ## Definition Of Done
 

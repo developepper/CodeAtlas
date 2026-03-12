@@ -20,7 +20,8 @@ The intended user flow is:
 1. install or build `codeatlas`
 2. index a repository
 3. configure an MCP client to launch `codeatlas mcp serve --db <path>`
-4. use CodeAtlas tools from the client without additional glue code
+4. use CodeAtlas tools from the client without additional glue code, passing
+   `repo_id` in tool parameters where required
 
 That end-user simplicity is a required part of scope for the first supported
 MCP server release.
@@ -126,6 +127,7 @@ Documentation should include:
 - minimal config examples for representative clients
 - troubleshooting for failed startup and bad DB paths
 - explicit statement of what is and is not supported
+- guidance on `repo_id` usage for tools that require repository scoping
 
 ## What Is Missing
 
@@ -143,6 +145,9 @@ JsonRpcError    { code, message, data }
 
 For stdio transport, messages must be `Content-Length` framed JSON over
 stdin/stdout, not newline-delimited JSON.
+
+Newline-delimited JSON should be treated as unsupported input. The server
+should fail clearly or reject it predictably rather than silently misbehaving.
 
 ### 2. MCP protocol state machine
 
@@ -266,6 +271,13 @@ This phase should also decide:
 
 - whether the CLI shares tracing init directly
 - whether an alias binary is worth shipping in the same milestone
+- how `repo_id` usage is explained in server docs and help output
+
+`mcp serve` should not require a global `--repo` flag for the initial design.
+The existing tool contracts already carry `repo_id` where repository-scoped
+queries need it, and the MCP server should preserve those contracts. If a
+future single-repo convenience mode is added, it should be treated as an
+additive UX improvement rather than a v1 requirement.
 
 ### Phase 2: Protocol and transport
 
@@ -275,6 +287,7 @@ Implement:
 - `Content-Length` framing parser and serializer
 - MCP request router
 - graceful EOF handling
+- graceful SIGTERM/SIGINT shutdown behavior where practical
 - stderr-only diagnostics
 
 Supported methods for the first release:
@@ -331,6 +344,10 @@ Recommended first documentation set:
 The exact third client can be chosen based on what is stable and in active use
 at implementation time.
 
+Client compatibility validation should be part of the first supported release
+for the documented clients. Client-specific shims, however, should only block
+release if a documented client demonstrably requires them.
+
 ### Phase 6: Verification
 
 Add:
@@ -363,6 +380,8 @@ The work should be considered complete when all of the following are true:
 5. The README documents a copy-pasteable supported MCP setup flow, including a
    small set of real client examples.
 6. Integration tests cover framed stdio communication with a real subprocess.
+7. Documented clients have compatibility validation notes, and any required
+   client-specific shims are explicit rather than implicit.
 
 ## Non-Goals for This Slice
 
@@ -385,6 +404,12 @@ The smallest useful slice that still matches the product goal is:
 6. implement `tools/call` by delegating to `ToolRegistry::call()`
 7. add subprocess integration tests
 8. add README setup guidance for generic stdio MCP clients
+
+Fast-follow after the first slice:
+
+1. validate documented clients against the implemented server
+2. add narrowly-scoped interoperability shims only if those validations prove
+   they are required
 
 That is enough to make CodeAtlas meaningfully usable with real AI clients
 without introducing a larger SDK or hosted-service surface.

@@ -13,6 +13,9 @@ for MCP usage without inventing their own packaging story.
 - add any packaging or release notes needed so MCP usage is a first-class part
   of distribution rather than an implied local build-only workflow
 - avoid adding a separate product-facing server binary unless required
+- treat `cargo install` and GitHub Release binaries as the realistic v1 paths,
+  with package-manager integrations such as Homebrew explicitly deferred unless
+  they become necessary
 
 ## Acceptance Criteria
 
@@ -21,6 +24,7 @@ for MCP usage without inventing their own packaging story.
 - [ ] the chosen install story does not require users to build custom wrappers
 - [ ] any release/distribution updates needed for MCP support are captured in repo docs or release process notes
 - [ ] the packaging guidance remains consistent with the product decision to keep `codeatlas` as the canonical executable
+- [ ] the initial supported packaging story is explicit about what is in v1 (`cargo install` and/or GitHub Release binaries) and what is deferred
 
 ## Testing Requirements
 
