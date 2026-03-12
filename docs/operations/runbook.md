@@ -124,6 +124,8 @@ Expected: a JSON response with `"protocolVersion":"2025-11-25"`.
 
 See the [README MCP Server Setup](../../README.md#mcp-server-setup) for
 copy-paste configuration examples for Claude Desktop, Cursor, and OpenAI Codex CLI.
+See [MCP Client Compatibility Notes](../architecture/mcp-client-compatibility.md)
+for the currently documented interoperability shims and rationale.
 
 ### Troubleshoot startup failures
 

@@ -9,7 +9,8 @@ with unit tests alone.
 
 - harden startup/runtime diagnostics for missing DB, unreadable DB, and schema/open failures
 - ensure all diagnostics remain off stdout
-- add subprocess integration tests that cover framed stdio behavior end to end
+- add subprocess integration tests that cover newline-delimited stdio behavior
+  end to end
 - add smoke coverage for `initialize -> tools/list -> tools/call`
 - assert that invalid requests are reported predictably
 

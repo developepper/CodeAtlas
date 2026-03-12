@@ -107,14 +107,14 @@ is in your `PATH`.
 ### 2. Index a Repository
 
 ```bash
-cargo run -p cli -- index /absolute/path/to/repo
+codeatlas index /absolute/path/to/repo
 ```
 
 Useful options:
 
 ```bash
-cargo run -p cli -- index /absolute/path/to/repo --db /tmp/codeatlas.db
-cargo run -p cli -- index /absolute/path/to/repo --git-diff
+codeatlas index /absolute/path/to/repo --db /tmp/codeatlas.db
+codeatlas index /absolute/path/to/repo --git-diff
 ```
 
 The CLI creates a local index database and content blob store. By default the
@@ -140,43 +140,43 @@ You will need that `repo_id` for query commands.
 Search for symbols:
 
 ```bash
-cargo run -p cli -- search-symbols greet --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas search-symbols greet --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
 ```
 
 Search with filters:
 
 ```bash
-cargo run -p cli -- search-symbols service --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app --kind class --language typescript --limit 10
+codeatlas search-symbols service --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app --kind class --language typescript --limit 10
 ```
 
 Get a symbol by ID:
 
 ```bash
-cargo run -p cli -- get-symbol 'src/lib.rs::greet#function' --db /absolute/path/to/repo/.codeatlas/index.db
+codeatlas get-symbol 'src/lib.rs::greet#function' --db /absolute/path/to/repo/.codeatlas/index.db
 ```
 
 Get a file outline:
 
 ```bash
-cargo run -p cli -- file-outline src/lib.rs --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas file-outline src/lib.rs --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
 ```
 
 Get a file tree:
 
 ```bash
-cargo run -p cli -- file-tree --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas file-tree --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
 ```
 
 Get a repository outline:
 
 ```bash
-cargo run -p cli -- repo-outline --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas repo-outline --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
 ```
 
 Generate a quality report:
 
 ```bash
-cargo run -p cli -- quality-report /absolute/path/to/repo
+codeatlas quality-report /absolute/path/to/repo
 ```
 
 ## Semantic Adapter Setup
@@ -222,6 +222,9 @@ codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
 The server communicates over stdio using newline-delimited JSON-RPC 2.0
 (MCP spec 2025-11-25). All diagnostics go to stderr; stdout is reserved for
 protocol messages only.
+
+Compatibility notes for documented clients and additive interoperability shims
+live in [docs/architecture/mcp-client-compatibility.md](docs/architecture/mcp-client-compatibility.md).
 
 ### Client configuration
 
