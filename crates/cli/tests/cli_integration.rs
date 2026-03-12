@@ -527,14 +527,14 @@ fn mcp_serve_nonexistent_db_fails() {
 }
 
 #[test]
-fn mcp_serve_valid_db_exits_non_zero() {
+fn mcp_serve_valid_db_exits_zero_on_eof() {
     let db_dir = TempDir::new().expect("db temp dir");
     let db_path = db_dir.path().join("index.db");
 
-    // Create a valid store so the DB exists.
     let _db = store::MetadataStore::open(&db_path).expect("open store");
     drop(_db);
 
+    // .output() immediately closes stdin, so the server sees EOF and exits.
     let output = Command::new(codeatlas_bin())
         .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
         .output()
@@ -543,12 +543,12 @@ fn mcp_serve_valid_db_exits_non_zero() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
-        !output.status.success(),
-        "should exit non-zero while transport is unimplemented.\nstderr: {stderr}"
+        output.status.success(),
+        "should exit 0 on clean EOF.\nstderr: {stderr}"
     );
     assert!(
-        stderr.contains("not yet implemented"),
-        "should report transport not implemented, got: {stderr}"
+        stderr.contains("stdin closed"),
+        "should log shutdown, got: {stderr}"
     );
 }
 
@@ -623,6 +623,294 @@ fn mcp_unknown_subcommand_fails() {
         stderr.contains("unknown mcp subcommand"),
         "should report unknown subcommand, got: {stderr}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// mcp serve stdio protocol tests (subprocess)
+// ---------------------------------------------------------------------------
+
+use std::io::Write;
+use std::process::Stdio;
+
+/// Send newline-delimited JSON messages to the MCP server subprocess and
+/// collect stdout responses.
+fn mcp_stdio_exchange(db_path: &std::path::Path, messages: &[&str]) -> (Vec<String>, String) {
+    let mut child = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mcp serve");
+
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        for msg in messages {
+            writeln!(stdin, "{msg}").expect("write to stdin");
+        }
+    }
+    // Drop stdin to close it, triggering EOF.
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("wait");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    let responses: Vec<String> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    (responses, stderr)
+}
+
+fn mcp_test_db() -> (TempDir, PathBuf) {
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+    let _db = store::MetadataStore::open(&db_path).expect("open store");
+    (db_dir, db_path)
+}
+
+#[test]
+fn mcp_stdio_initialize_handshake() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        ],
+    );
+
+    assert_eq!(responses.len(), 1, "only initialize gets a response");
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(r["id"], 1);
+    assert_eq!(r["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(r["result"]["serverInfo"]["name"], "codeatlas");
+}
+
+#[test]
+fn mcp_stdio_tools_list() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#],
+    );
+
+    assert_eq!(responses.len(), 1);
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    let tools = r["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 8);
+}
+
+#[test]
+fn mcp_stdio_tools_call() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_file_tree","arguments":{"repo_id":"nonexistent"}}}"#,
+        ],
+    );
+
+    assert_eq!(responses.len(), 1);
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    assert!(r["result"]["content"].is_array());
+}
+
+#[test]
+fn mcp_stdio_malformed_json_returns_error() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            "this is not json",
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        ],
+    );
+
+    assert_eq!(responses.len(), 2);
+    let err: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(err["error"]["code"], -32700);
+    let ok: serde_json::Value = serde_json::from_str(&responses[1]).unwrap();
+    assert!(ok["result"]["tools"].is_array());
+}
+
+#[test]
+fn mcp_stdio_stdout_is_protocol_only() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+        ],
+    );
+
+    // Every stdout line must be valid JSON.
+    for line in &responses {
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(line);
+        assert!(parsed.is_ok(), "stdout line is not valid JSON: {line}");
+    }
+}
+
+#[test]
+fn mcp_stdio_content_length_rejected() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let mut child = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mcp serve");
+
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        // Send Content-Length framed input (wrong transport format).
+        writeln!(stdin, "Content-Length: 47").expect("write");
+        writeln!(stdin).expect("write blank");
+        write!(stdin, r#"{{"jsonrpc":"2.0","id":1,"method":"initialize"}}"#).expect("write body");
+        writeln!(stdin).expect("write newline");
+    }
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("wait");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let responses: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("parse response"))
+        .collect();
+
+    assert!(
+        !responses.is_empty(),
+        "should produce at least one error response"
+    );
+    assert_eq!(responses[0]["error"]["code"], -32700);
+    let msg = responses[0]["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("Content-Length"),
+        "error should mention Content-Length, got: {msg}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// mcp serve signal handling tests (subprocess)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_stdio_sigterm_clean_shutdown() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let mut child = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mcp serve");
+
+    let pid = child.id();
+
+    // Send an initialize request so we know the server is running and responsive.
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        writeln!(
+            stdin,
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-11-25","capabilities":{{}},"clientInfo":{{"name":"test","version":"1"}}}}}}"#
+        )
+        .expect("write initialize");
+    }
+
+    // Give the server a moment to process, then send SIGTERM.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+    }
+
+    let output = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "should exit 0 on SIGTERM.\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("received signal") || stderr.contains("stdin closed"),
+        "should log signal shutdown, got: {stderr}"
+    );
+
+    // Stdout must contain only valid JSON lines (no partial writes).
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(line);
+        assert!(
+            parsed.is_ok(),
+            "stdout should only contain valid JSON, got: {line}"
+        );
+    }
+}
+
+#[test]
+fn mcp_stdio_sigint_clean_shutdown() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let mut child = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mcp serve");
+
+    let pid = child.id();
+
+    // Send an initialize request so we know the server is running.
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        writeln!(
+            stdin,
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-11-25","capabilities":{{}},"clientInfo":{{"name":"test","version":"1"}}}}}}"#
+        )
+        .expect("write initialize");
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGINT);
+    }
+
+    let output = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "should exit 0 on SIGINT.\nstderr: {stderr}"
+    );
+
+    // Stdout must contain only valid JSON lines.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(line);
+        assert!(
+            parsed.is_ok(),
+            "stdout should only contain valid JSON, got: {line}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

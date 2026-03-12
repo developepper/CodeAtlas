@@ -87,7 +87,7 @@ shipped, but the CLI subcommand should be treated as canonical.
 
 The server should target the common denominator used by stdio MCP clients:
 
-- JSON-RPC 2.0 framing with `Content-Length`
+- newline-delimited JSON-RPC 2.0 over stdio
 - `initialize`
 - `notifications/initialized`
 - `tools/list`
@@ -143,11 +143,12 @@ JsonRpcResponse { jsonrpc, id, result | error }
 JsonRpcError    { code, message, data }
 ```
 
-For stdio transport, messages must be `Content-Length` framed JSON over
-stdin/stdout, not newline-delimited JSON.
+For stdio transport, messages must be newline-delimited JSON-RPC messages over
+stdin/stdout. Messages must not contain embedded newlines.
 
-Newline-delimited JSON should be treated as unsupported input. The server
-should fail clearly or reject it predictably rather than silently misbehaving.
+`Content-Length` framed input should be treated as unsupported input. The
+server should fail clearly or reject it predictably rather than silently
+misbehaving.
 
 ### 2. MCP protocol state machine
 
@@ -284,7 +285,7 @@ additive UX improvement rather than a v1 requirement.
 Implement:
 
 - JSON-RPC request/response/error types
-- `Content-Length` framing parser and serializer
+- newline-delimited stdio message parser and serializer
 - MCP request router
 - graceful EOF handling
 - graceful SIGTERM/SIGINT shutdown behavior where practical
@@ -353,7 +354,7 @@ release if a documented client demonstrably requires them.
 Add:
 
 - unit tests for framing, parsing, routing, and error serialization
-- subprocess integration tests over stdio framing
+- subprocess integration tests over newline-delimited stdio transport
 - smoke test for `initialize -> tools/list -> tools/call`
 - assertion that stdout contains only protocol frames
 

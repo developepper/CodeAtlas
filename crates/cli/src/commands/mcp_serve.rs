@@ -6,6 +6,7 @@ use query_engine::StoreQueryService;
 use server_mcp::ToolRegistry;
 
 use crate::error::CliError;
+use crate::mcp_stdio;
 
 /// Entry point for the `codeatlas mcp` command family.
 ///
@@ -20,23 +21,20 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             Ok(())
         }
         Some(other) => Err(CliError::Usage(format!(
-            "unknown mcp subcommand: '{other}'\n\nUsage: codeatlas mcp <subcommand>\n\nSubcommands:\n  serve    Validate MCP server startup (transport pending #131)"
+            "unknown mcp subcommand: '{other}'\n\nUsage: codeatlas mcp <subcommand>\n\nSubcommands:\n  serve    Start the MCP tool server (stdio)"
         ))),
         None => {
             print_mcp_help();
-            Err(CliError::Usage(
-                "missing mcp subcommand".into(),
-            ))
+            Err(CliError::Usage("missing mcp subcommand".into()))
         }
     }
 }
 
 /// `codeatlas mcp serve --db <path>`
 ///
-/// Validates the database path, opens the store, and creates the tool
-/// registry. Once #131 lands, this will start the stdio JSON-RPC loop.
-/// Until then the command validates startup preconditions and exits
-/// non-zero so that callers do not mistake it for a running server.
+/// Validates the database path, opens the store, creates the tool
+/// registry, and runs the stdio JSON-RPC server loop. All diagnostics
+/// go to stderr; stdout is reserved for MCP protocol messages.
 fn run_serve(args: &[String]) -> Result<(), CliError> {
     // Handle --help before parsing to exit cleanly with code 0.
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -57,21 +55,19 @@ fn run_serve(args: &[String]) -> Result<(), CliError> {
     // Open store — propagates StoreError on schema mismatch or corruption.
     let db = store::MetadataStore::open(&opts.db_path)?;
     let svc = StoreQueryService::new(&db);
-    let _registry = ToolRegistry::new(&svc);
+    let registry = ToolRegistry::new(&svc);
 
-    // Startup preconditions passed — DB is valid and registry is wired.
     eprintln!(
-        "codeatlas mcp: validated db={} ({} tools registered)",
+        "codeatlas mcp: serving db={} ({} tools registered)",
         opts.db_path.display(),
-        _registry.tool_names().len(),
+        registry.tool_names().len(),
     );
 
-    // The stdio JSON-RPC transport loop is not yet implemented (#131).
-    // Exit non-zero so MCP clients and scripts do not mistake a
-    // successful exit for a server that ran and closed cleanly.
-    Err(CliError::Usage(
-        "stdio transport not yet implemented (see #131)".into(),
-    ))
+    // Run the stdio JSON-RPC server loop. Returns on EOF or fatal error.
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    mcp_stdio::serve(&registry, stdin.lock(), stdout.lock())
+        .map_err(|e| CliError::Usage(format!("mcp server error: {e}")))
 }
 
 // ── Argument parsing ───────────────────────────────────────────────────
@@ -114,7 +110,7 @@ fn print_mcp_help() {
     eprintln!("Usage: codeatlas mcp <subcommand>");
     eprintln!();
     eprintln!("Subcommands:");
-    eprintln!("  serve    Validate MCP server startup (transport pending #131)");
+    eprintln!("  serve    Start the MCP tool server (stdio)");
     eprintln!();
     eprintln!("Run 'codeatlas mcp serve --help' for serve options.");
 }
@@ -122,8 +118,7 @@ fn print_mcp_help() {
 fn print_serve_help() {
     eprintln!("Usage: codeatlas mcp serve --db <path>");
     eprintln!();
-    eprintln!("Validate startup preconditions for the MCP tool server.");
-    eprintln!("The stdio transport is not yet available (see #131).");
+    eprintln!("Start the MCP tool server over stdio (newline-delimited JSON-RPC).");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --db <path>    Path to the CodeAtlas index database (required)");
@@ -133,8 +128,8 @@ fn print_serve_help() {
     eprintln!("call. The repo_id is derived from the indexed directory name (e.g.,");
     eprintln!("indexing /home/user/my-app produces repo_id 'my-app').");
     eprintln!();
-    eprintln!("When the transport lands, all diagnostics will be written to stderr.");
-    eprintln!("Stdout will be reserved for MCP protocol frames.");
+    eprintln!("All diagnostics are written to stderr. Stdout is reserved for MCP");
+    eprintln!("protocol messages only.");
 }
 
 #[cfg(test)]
@@ -197,7 +192,6 @@ mod tests {
     #[test]
     fn serve_help_flag() {
         let a = args(&["serve", "--help"]);
-        // Should return Ok (not an error) for explicit help.
         assert!(run(&a).is_ok());
     }
 
@@ -205,21 +199,5 @@ mod tests {
     fn mcp_help_flag() {
         let a = args(&["--help"]);
         assert!(run(&a).is_ok());
-    }
-
-    #[test]
-    fn serve_valid_db_exits_not_implemented() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("index.db");
-        // Create a real store so the DB file exists and is valid.
-        let _db = store::MetadataStore::open(&db_path).unwrap();
-        drop(_db);
-
-        let a = args(&["serve", "--db", db_path.to_str().unwrap()]);
-        let err = run(&a).unwrap_err();
-        assert!(
-            err.to_string().contains("not yet implemented"),
-            "expected 'not yet implemented' error, got: {err}"
-        );
     }
 }

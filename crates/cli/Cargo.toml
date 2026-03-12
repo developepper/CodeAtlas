@@ -21,7 +21,9 @@ adapter-syntax-treesitter.workspace = true
 core-model.workspace = true
 indexer.workspace = true
 query-engine.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+libc.workspace = true
 server-mcp.workspace = true
 store.workspace = true
 time.workspace = true
@@ -33,4 +35,5 @@ opentelemetry-stdout.workspace = true
 tracing-opentelemetry.workspace = true
 
 [dev-dependencies]
+libc.workspace = true
 tempfile.workspace = true
