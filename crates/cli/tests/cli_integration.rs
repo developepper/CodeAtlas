@@ -493,6 +493,139 @@ fn repo_outline_fails_without_required_args() {
 }
 
 // ---------------------------------------------------------------------------
+// mcp serve command tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_serve_missing_db_fails() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve"])
+        .output()
+        .expect("mcp serve");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--db <path> is required"),
+        "should report missing --db, got: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_serve_nonexistent_db_fails() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", "/nonexistent/path/index.db"])
+        .output()
+        .expect("mcp serve");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("database not found"),
+        "should report missing database, got: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_serve_valid_db_exits_non_zero() {
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    // Create a valid store so the DB exists.
+    let _db = store::MetadataStore::open(&db_path).expect("open store");
+    drop(_db);
+
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .output()
+        .expect("mcp serve");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "should exit non-zero while transport is unimplemented.\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("not yet implemented"),
+        "should report transport not implemented, got: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_serve_stdout_is_empty() {
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let _db = store::MetadataStore::open(&db_path).expect("open store");
+    drop(_db);
+
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .output()
+        .expect("mcp serve");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.is_empty(),
+        "stdout must be empty (reserved for protocol frames), got: {stdout}"
+    );
+}
+
+#[test]
+fn mcp_serve_help_exits_zero() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--help"])
+        .output()
+        .expect("mcp serve --help");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "help should exit 0.\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Usage: codeatlas mcp serve"),
+        "should print serve usage, got: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_help_exits_zero() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "--help"])
+        .output()
+        .expect("mcp --help");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "mcp --help should exit 0.\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Subcommands:"),
+        "should list subcommands, got: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_unknown_subcommand_fails() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "start"])
+        .output()
+        .expect("mcp start");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown mcp subcommand"),
+        "should report unknown subcommand, got: {stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Help / unknown command
 // ---------------------------------------------------------------------------
 
