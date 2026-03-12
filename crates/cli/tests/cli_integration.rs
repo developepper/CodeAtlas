@@ -931,6 +931,318 @@ fn mcp_stdio_sigint_clean_shutdown() {
 }
 
 // ---------------------------------------------------------------------------
+// mcp serve startup diagnostics (subprocess)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_serve_missing_db_diagnostic() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", "/nonexistent/path/to/index.db"])
+        .output()
+        .expect("run mcp serve");
+
+    assert!(
+        !output.status.success(),
+        "should exit non-zero for missing DB"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("database not found"),
+        "should report missing DB, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("codeatlas index"),
+        "should hint about running index first, got: {stderr}"
+    );
+
+    // Stdout must be empty — no protocol output on startup failure.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.trim().is_empty(),
+        "stdout must be empty on startup failure, got: {stdout}"
+    );
+}
+
+#[test]
+fn mcp_serve_directory_as_db_diagnostic() {
+    let dir = TempDir::new().expect("temp dir");
+
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", dir.path().to_str().unwrap()])
+        .output()
+        .expect("run mcp serve");
+
+    assert!(
+        !output.status.success(),
+        "should exit non-zero for directory path"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("directory"),
+        "should report path is a directory, got: {stderr}"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.trim().is_empty(),
+        "stdout must be empty on startup failure, got: {stdout}"
+    );
+}
+
+#[test]
+fn mcp_serve_unreadable_db_diagnostic() {
+    let dir = TempDir::new().expect("temp dir");
+    let db_path = dir.path().join("locked.db");
+    std::fs::write(&db_path, "not a real database").expect("create file");
+
+    // Remove read permission.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o000))
+            .expect("set permissions");
+    }
+
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .output()
+        .expect("run mcp serve");
+
+    // Restore permissions so tempdir cleanup can succeed.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o644));
+    }
+
+    assert!(
+        !output.status.success(),
+        "should exit non-zero for unreadable DB"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not readable") || stderr.contains("cannot open"),
+        "should report unreadable DB, got: {stderr}"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.trim().is_empty(),
+        "stdout must be empty on startup failure, got: {stdout}"
+    );
+}
+
+#[test]
+fn mcp_serve_corrupt_db_diagnostic() {
+    let dir = TempDir::new().expect("temp dir");
+    let db_path = dir.path().join("corrupt.db");
+    std::fs::write(&db_path, "this is not a sqlite database").expect("create file");
+
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve", "--db", db_path.to_str().unwrap()])
+        .output()
+        .expect("run mcp serve");
+
+    assert!(
+        !output.status.success(),
+        "should exit non-zero for corrupt DB"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to open database") || stderr.contains("not a database"),
+        "should report open failure, got: {stderr}"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.trim().is_empty(),
+        "stdout must be empty on startup failure, got: {stdout}"
+    );
+}
+
+#[test]
+fn mcp_serve_missing_db_flag_diagnostic() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "serve"])
+        .output()
+        .expect("run mcp serve");
+
+    assert!(
+        !output.status.success(),
+        "should exit non-zero for missing --db"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--db <path> is required"),
+        "should report missing flag, got: {stderr}"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.trim().is_empty(),
+        "stdout must be empty on startup failure, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// mcp serve full smoke test (subprocess)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_stdio_full_smoke_initialize_list_call() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            // 1. initialize
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1.0"}}}"#,
+            // 2. notifications/initialized
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            // 3. tools/list
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            // 4. tools/call — get_file_tree on empty DB
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_file_tree","arguments":{"repo_id":"test-repo"}}}"#,
+        ],
+    );
+
+    // Should get exactly 3 responses (initialize, tools/list, tools/call).
+    // notifications/initialized produces no response.
+    assert_eq!(
+        responses.len(),
+        3,
+        "expected 3 responses, got {}.\nstderr: {stderr}",
+        responses.len()
+    );
+
+    // Verify initialize response.
+    let r1: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(r1["id"], 1);
+    assert_eq!(r1["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(r1["result"]["serverInfo"]["name"], "codeatlas");
+
+    // Verify tools/list response.
+    let r2: serde_json::Value = serde_json::from_str(&responses[1]).unwrap();
+    assert_eq!(r2["id"], 2);
+    let tools = r2["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 8);
+
+    // Verify tools/call response.
+    let r3: serde_json::Value = serde_json::from_str(&responses[2]).unwrap();
+    assert_eq!(r3["id"], 3);
+    assert!(
+        r3["result"]["content"].is_array(),
+        "tools/call should return content array"
+    );
+
+    // Every stdout line must be valid JSON (protocol-only assertion).
+    for (i, line) in responses.iter().enumerate() {
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(line);
+        assert!(parsed.is_ok(), "response {i} is not valid JSON: {line}");
+    }
+
+    // Stderr should contain startup diagnostic, not be empty.
+    assert!(
+        stderr.contains("codeatlas mcp"),
+        "stderr should contain server diagnostics, got: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_stdio_invalid_tool_params_structured_error() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            // Call search_symbols without required 'query' field.
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_symbols","arguments":{"repo_id":"test"}}}"#,
+        ],
+    );
+
+    assert_eq!(responses.len(), 1);
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+
+    // Should be a successful JSON-RPC response wrapping an MCP error.
+    assert!(
+        r["result"].is_object(),
+        "should be a result, not a JSON-RPC error"
+    );
+    assert_eq!(r["result"]["isError"], true);
+
+    // The inner MCP response should contain a structured error.
+    let content_text = r["result"]["content"][0]["text"].as_str().unwrap();
+    let mcp_response: serde_json::Value = serde_json::from_str(content_text).unwrap();
+    assert_eq!(mcp_response["status"], "error");
+    assert!(
+        mcp_response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("query"),
+        "error should mention missing 'query' field"
+    );
+}
+
+#[test]
+fn mcp_stdio_unknown_tool_structured_error() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, _stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"does_not_exist","arguments":{}}}"#,
+        ],
+    );
+
+    assert_eq!(responses.len(), 1);
+    let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
+    assert_eq!(r["result"]["isError"], true);
+
+    let content_text = r["result"]["content"][0]["text"].as_str().unwrap();
+    let mcp_response: serde_json::Value = serde_json::from_str(content_text).unwrap();
+    assert_eq!(mcp_response["status"], "error");
+    assert_eq!(mcp_response["error"]["code"], "unknown_tool");
+}
+
+#[test]
+fn mcp_stdio_diagnostics_on_stderr_only() {
+    let (_db_dir, db_path) = mcp_test_db();
+
+    let (responses, stderr) = mcp_stdio_exchange(
+        &db_path,
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        ],
+    );
+
+    // Stderr should have diagnostics.
+    assert!(
+        !stderr.trim().is_empty(),
+        "stderr should contain server diagnostics"
+    );
+    assert!(
+        stderr.contains("codeatlas mcp"),
+        "stderr should contain server identification"
+    );
+
+    // Stdout must contain only valid JSON-RPC responses.
+    for line in &responses {
+        let parsed: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|_| panic!("stdout line is not valid JSON: {line}"));
+        assert!(
+            parsed.get("jsonrpc").is_some(),
+            "stdout line missing jsonrpc field: {line}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Help / unknown command
 // ---------------------------------------------------------------------------
 
