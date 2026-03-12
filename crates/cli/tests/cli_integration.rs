@@ -709,17 +709,17 @@ fn mcp_stdio_tools_list() {
     // properties and required fields (issue #133).
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
-        assert!(tool["description"].is_string(), "{name} missing description");
+        assert!(
+            tool["description"].is_string(),
+            "{name} missing description"
+        );
         let schema = &tool["inputSchema"];
         assert_eq!(schema["type"], "object", "{name} schema type");
         assert!(
             schema["properties"].is_object(),
             "{name} missing properties"
         );
-        assert!(
-            schema["required"].is_array(),
-            "{name} missing required"
-        );
+        assert!(schema["required"].is_array(), "{name} missing required");
     }
 }
 

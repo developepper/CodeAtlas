@@ -717,8 +717,16 @@ mod tests {
             assert!(tool["description"].is_string());
             let schema = &tool["inputSchema"];
             assert_eq!(schema["type"], "object");
-            assert!(schema["properties"].is_object(), "tool {} missing properties", tool["name"]);
-            assert!(schema["required"].is_array(), "tool {} missing required", tool["name"]);
+            assert!(
+                schema["properties"].is_object(),
+                "tool {} missing properties",
+                tool["name"]
+            );
+            assert!(
+                schema["required"].is_array(),
+                "tool {} missing required",
+                tool["name"]
+            );
         }
     }
 
@@ -825,7 +833,10 @@ mod tests {
             .collect();
         assert_eq!(required, vec!["repo_id"]);
         // path_prefix is optional
-        assert!(schema["properties"].as_object().unwrap().contains_key("path_prefix"));
+        assert!(schema["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("path_prefix"));
         assert_eq!(schema["properties"].as_object().unwrap().len(), 2);
     }
 
