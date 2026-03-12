@@ -75,15 +75,21 @@ Expected output includes:
 
 ## 3. Query the Local Index
 
+All query commands require `--db <path>` to locate the index database. Commands
+that scope results to a repository also require `--repo <repo-id>`.
+
 Examples:
 
 ```bash
-cargo run -p cli -- search-symbols <repo-id> <query>
-cargo run -p cli -- get-symbol <repo-id> <symbol-id>
-cargo run -p cli -- file-outline <repo-id> <path>
-cargo run -p cli -- file-tree <repo-id>
-cargo run -p cli -- repo-outline <repo-id>
+cargo run -p cli -- search-symbols <query> --db <db-path> --repo <repo-id>
+cargo run -p cli -- get-symbol <symbol-id> --db <db-path>
+cargo run -p cli -- file-outline <path> --db <db-path> --repo <repo-id>
+cargo run -p cli -- file-tree --db <db-path> --repo <repo-id>
+cargo run -p cli -- repo-outline --db <db-path> --repo <repo-id>
 ```
+
+Note: `get-symbol` does not require `--repo` — it looks up the symbol by ID
+directly.
 
 Use the MCP server path when integrating with agent clients instead of direct
 CLI query commands.
@@ -113,28 +119,18 @@ The report includes:
 
 ## 5. Diagnose Semantic Adapter Availability
 
+For runtime discovery order and setup instructions, see the
+[README semantic adapter setup](../../README.md#semantic-adapter-setup).
+
 ### TypeScript
-
-Search order:
-
-1. `TSSERVER_PATH`
-2. `node_modules/.bin/tsserver`
-3. system `PATH`
 
 If TypeScript semantic coverage is unexpectedly absent:
 
-- verify `tsserver` exists in one of those locations
+- verify `tsserver` exists in one of the discovery locations
 - re-run indexing and inspect adapter breakdown in CLI output
 - check file errors and structured logs for startup failures
 
 ### Kotlin
-
-Search order:
-
-1. `JAVA_HOME/bin/java`
-2. system `PATH`
-3. `KOTLIN_BRIDGE_JAR`
-4. repo-local `.codeatlas/kotlin-bridge.jar`
 
 If Kotlin semantic coverage is unexpectedly absent:
 

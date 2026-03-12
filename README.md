@@ -7,7 +7,21 @@ It indexes a repository once, stores a local structured index, and lets you ask
 high-signal questions about symbols, files, and repository structure without
 re-reading the whole codebase every time.
 
-## What This Project Is
+## Table of Contents
+
+- [What CodeAtlas Is](#what-codeatlas-is)
+- [What You Can Do With It](#what-you-can-do-with-it)
+- [Quick Start](#quick-start)
+- [Semantic Adapter Setup](#semantic-adapter-setup)
+- [How To Use It With AI Today](#how-to-use-it-with-ai-today)
+- [MCP Integration Shape](#mcp-integration-shape)
+- [AI Usage Examples](#ai-usage-examples)
+- [Current Status](#current-status)
+- [Design Principles](#design-principles)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+
+## What CodeAtlas Is
 
 CodeAtlas gives you:
 
@@ -37,7 +51,7 @@ does not yet ship a ready-to-launch `server-mcp` executable.
 
 - `index`: build or update a local index for a repository
 - `search-symbols`: find functions, classes, methods, types, and constants
-- `get-symbol`: fetch an exact symbol by stable ID
+- `get-symbol`: fetch an exact symbol by stable ID (CLI uses hyphens; MCP uses underscores, e.g. `get_symbol` / `get_symbols`)
 - `file-outline`: inspect symbols in a file
 - `file-tree`: inspect indexed files in a repo
 - `repo-outline`: inspect repository structure and counts
@@ -140,7 +154,8 @@ cargo run -p cli -- quality-report /absolute/path/to/repo
 
 ## Semantic Adapter Setup
 
-Semantic coverage is optional. Indexing still works without it.
+Semantic coverage is optional. Indexing still works without it. For detailed
+diagnosis steps, see the [operations runbook](docs/operations/runbook.md#5-diagnose-semantic-adapter-availability).
 
 ### TypeScript semantic adapter
 
@@ -197,7 +212,8 @@ The `server-mcp` crate is a library that exposes the MCP tool registry and
 response envelope model. It is intended to be embedded in a transport process
 you control.
 
-Current MCP tool names:
+Current MCP tool names (see the `server-mcp` crate for the authoritative
+registry):
 
 - `search_symbols`
 - `get_symbol`
