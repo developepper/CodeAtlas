@@ -13,6 +13,7 @@ re-reading the whole codebase every time.
 - [What You Can Do With It](#what-you-can-do-with-it)
 - [Quick Start](#quick-start)
 - [Semantic Adapter Setup](#semantic-adapter-setup)
+- [MCP Server Setup](#mcp-server-setup)
 - [How To Use It With AI Today](#how-to-use-it-with-ai-today)
 - [MCP Integration Shape](#mcp-integration-shape)
 - [AI Usage Examples](#ai-usage-examples)
@@ -34,6 +35,7 @@ CodeAtlas gives you:
 Today, this repository provides:
 
 - a local CLI you can run now
+- a built-in MCP server: `codeatlas mcp serve --db <path>`
 - a reusable MCP library surface (`server-mcp`)
 - a local-first architecture with hosted-ready boundaries
 
@@ -42,12 +44,8 @@ Today, this repository does **not** provide:
 - a standalone hosted deployment
 - HTTP/gRPC product APIs
 
-That distinction matters: you can use CodeAtlas immediately through the CLI.
-The planned MCP product direction is a built-in local stdio server launched as
-`codeatlas mcp serve --db <path>`. A separate `server-mcp` executable is not
-part of the default end-user story unless a concrete compatibility need emerges.
-Until the CLI MCP server lands, the MCP library remains an embeddable surface
-rather than a ready-to-launch end-user server.
+You can use CodeAtlas immediately through the CLI or by pointing any stdio
+MCP-capable AI client at `codeatlas mcp serve --db <path>`.
 
 ## What You Can Do With It
 
@@ -179,26 +177,155 @@ CodeAtlas looks for Kotlin runtime dependencies in this order:
 If those runtimes are missing, CodeAtlas falls back to syntax adapters where
 policy allows.
 
+## MCP Server Setup
+
+CodeAtlas includes a built-in MCP server that works with any stdio MCP client.
+
+### Prerequisites
+
+1. Build or install `codeatlas` (see [Quick Start](#quick-start)).
+2. Index a repository so an index database exists.
+
+### Launch the MCP server
+
+```bash
+codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+```
+
+The server communicates over stdio using newline-delimited JSON-RPC 2.0
+(MCP spec 2025-11-25). All diagnostics go to stderr; stdout is reserved for
+protocol messages only.
+
+### Client configuration
+
+#### Claude Desktop
+
+Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "codeatlas": {
+      "command": "/path/to/codeatlas",
+      "args": ["mcp", "serve", "--db", "/path/to/repo/.codeatlas/index.db"]
+    }
+  }
+}
+```
+
+#### Cursor
+
+Add to your Cursor MCP settings (`.cursor/mcp.json` in your project or global
+config):
+
+```json
+{
+  "mcpServers": {
+    "codeatlas": {
+      "command": "/path/to/codeatlas",
+      "args": ["mcp", "serve", "--db", "/path/to/repo/.codeatlas/index.db"]
+    }
+  }
+}
+```
+
+#### OpenAI Codex CLI
+
+Create or edit `.codex/config.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "codeatlas": {
+      "command": "/path/to/codeatlas",
+      "args": ["mcp", "serve", "--db", "/path/to/repo/.codeatlas/index.db"]
+    }
+  }
+}
+```
+
+#### Generic stdio MCP client
+
+Any client that speaks newline-delimited JSON-RPC over stdio can use CodeAtlas.
+Configure it to spawn:
+
+```
+/path/to/codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+```
+
+### Available tools
+
+The MCP server exposes these tools via `tools/list`, each with full JSON Schema
+input definitions:
+
+| Tool | Description |
+|------|-------------|
+| `search_symbols` | Search for symbols by name with optional filters |
+| `get_symbol` | Get a symbol by its unique ID |
+| `get_symbols` | Get multiple symbols by their IDs |
+| `get_file_outline` | List symbols defined in a file |
+| `get_file_content` | Get the content of an indexed file |
+| `get_file_tree` | List files in a repository or subtree |
+| `get_repo_outline` | Show repository structure and file summary |
+| `search_text` | Search for text patterns across indexed files |
+
+Repository-scoped tools accept `repo_id` as a parameter. The `repo_id` is
+derived from the indexed directory name (e.g., indexing `/home/user/my-app`
+produces `repo_id` `my-app`).
+
+### Verify the server starts
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+```
+
+You should see a JSON response containing `"protocolVersion":"2025-11-25"` and
+`"serverInfo":{"name":"codeatlas",...}`.
+
+### Troubleshooting
+
+**"database not found"** — The `--db` path does not exist. Run
+`codeatlas index <repo-path>` first to create the index, then use the
+generated database path (default: `<repo>/.codeatlas/index.db`).
+
+**"database is not readable"** — The file exists but cannot be read. Check
+file permissions (`ls -la` on the DB path).
+
+**"failed to open database"** — The file exists and is readable but is not a
+valid CodeAtlas index (possibly corrupt or not a SQLite database). Re-run
+`codeatlas index <repo-path>` to rebuild.
+
+**"database path is a directory"** — The `--db` path points to a directory
+instead of a file. Point it at the `.db` file inside the directory.
+
+**No response on stdout** — Ensure the client uses newline-delimited JSON-RPC,
+not Content-Length framing. CodeAtlas will reject Content-Length headers with a
+clear error.
+
+**Empty tool results** — Verify the `repo_id` matches the indexed repository.
+The `repo_id` is derived from the directory name used during indexing.
+
+### What is not supported
+
+- HTTP, gRPC, or WebSocket transports (stdio only)
+- Content-Length framed MCP (2024-11-05 transport)
+- Authentication, tenancy, or multi-user access
+- Remote/hosted serving
+
 ## How To Use It With AI Today
 
-There are two relevant ways to think about AI usage today.
+### Option 1: MCP server (recommended)
 
-### Option 1: Use the CLI as a retrieval tool in your agent workflow
+The simplest path is to use the built-in MCP server. See
+[MCP Server Setup](#mcp-server-setup) above.
 
-This is the easiest path today.
+### Option 2: Use the CLI as a retrieval tool in your agent workflow
 
 Typical loop:
 
 1. Index the repository once.
 2. Let the agent call `codeatlas` CLI commands when it needs structure.
 3. Feed only the relevant output back into the agent.
-
-Good prompts/workflows:
-
-- “Search for all `AuthService` symbols in this repo.”
-- “Show me the outline for `src/server.ts`.”
-- “Fetch the exact symbol record for this function ID.”
-- “Give me a quality report before I trust semantic coverage.”
 
 Example shell commands an agent or wrapper can call:
 
@@ -208,75 +335,24 @@ codeatlas file-outline src/server.ts --db /repo/.codeatlas/index.db --repo my-ap
 codeatlas repo-outline --db /repo/.codeatlas/index.db --repo my-app
 ```
 
-### Option 2: Planned MCP server product shape
-
-The intended end-user MCP experience is:
-
-1. index the repository once
-2. run `codeatlas mcp serve --db /repo/.codeatlas/index.db`
-3. point any stdio MCP-capable AI client at that command
-
-That is the target product shape because it is simpler to explain and support
-than requiring a separate wrapper process or a second product-facing binary.
-
-The implementation direction is:
-
-- keep `server-mcp` focused on the reusable tool registry and response model
-- add stdio MCP transport outside that crate
-- make `codeatlas mcp serve` the canonical supported launch path
-- document a small set of real MCP clients with copy-paste configuration
-
-The current implementation work for that flow is planned in
-[`docs/architecture/mcp-server-planning.md`](docs/architecture/mcp-server-planning.md).
-
-### Current implementation status
-
-The `server-mcp` crate is a library that exposes the MCP tool registry and
-response envelope model. It is intended to be embedded in a transport process
-you control.
-
-Current MCP tool names (see the `server-mcp` crate for the authoritative
-registry):
-
-- `search_symbols`
-- `get_symbol`
-- `get_symbols`
-- `get_file_outline`
-- `get_file_content`
-- `get_file_tree`
-- `get_repo_outline`
-- `search_text`
-
-Until `codeatlas mcp serve` lands, an AI client that requires a standalone
-stdio MCP server executable will still need a thin wrapper around the
-`server-mcp` library.
-
 ## MCP Integration Shape
 
-The MCP layer returns structured envelopes with:
+The MCP server returns tool results as structured envelopes with:
 
-- `status`
-- `payload`
-- `error`
-- `_meta`
+- `status` — `"success"` or `"error"`
+- `payload` — the tool's JSON result
+- `error` — structured error with code, message, and retryable flag
+- `_meta` — envelope metadata
 
 The `_meta` payload includes:
 
-- `timing_ms`
-- `truncated`
-- `quality_stats`
-- `index_version`
+- `timing_ms` — wall-clock time for the tool call
+- `truncated` — whether results were capped by a limit
+- `quality_stats` — semantic/syntax quality mix of returned results
+- `index_version` — schema version of the index that served the query
 
-That makes it suitable for agents that need structured retrieval, stable tool
+This makes it suitable for agents that need structured retrieval, stable tool
 behavior, and quality provenance.
-
-The planned first supported MCP server release adds:
-
-- a canonical launch command: `codeatlas mcp serve --db <path>`
-- generic stdio MCP compatibility
-- tool schemas via `tools/list`
-- stderr-only diagnostics
-- copy-paste client setup guidance
 
 ## AI Usage Examples
 
@@ -344,7 +420,7 @@ Milestones M0-M9 are complete:
 | `indexer` | End-to-end indexing pipeline (discovery -> parse -> enrich -> persist) | Complete |
 | `query-engine` | Symbol/text search, symbol lookup, file/repo outline retrieval | Complete |
 | `server-mcp` | MCP tool registry, structured response/error envelopes, integration + E2E tests | Complete |
-| `cli` | Local commands for indexing, search/get symbol, file/repo outline navigation | Complete |
+| `cli` | Local commands, MCP stdio server (`codeatlas mcp serve`), indexing, search/get symbol, file/repo outline | Complete |
 
 ### Infrastructure
 
