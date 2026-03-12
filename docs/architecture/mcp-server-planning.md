@@ -1,12 +1,35 @@
-# MCP Server Binary — Planning
+# MCP Server Product and Implementation Plan
 
-This document captures the gap analysis and implementation plan for adding a
-standalone stdio MCP server binary to CodeAtlas.
+This document captures the implementation plan for making CodeAtlas usable as a
+simple local MCP server for mainstream AI clients.
+
+The success criterion is not merely "an MCP binary exists." The success
+criterion is: a user can index a repository once, point their AI client at
+CodeAtlas with one obvious command, and use the CodeAtlas query surface through
+stdio MCP without writing a custom wrapper.
+
+## Product Goal
+
+CodeAtlas should be easy to use with an AI client of the user's choice,
+including generic stdio MCP clients and common tools such as Claude Desktop,
+Cursor, ChatGPT desktop-class MCP clients, Codex-style agent wrappers, and
+similar integrations.
+
+The intended user flow is:
+
+1. install or build `codeatlas`
+2. index a repository
+3. configure an MCP client to launch `codeatlas mcp serve --db <path>`
+4. use CodeAtlas tools from the client without additional glue code
+
+That end-user simplicity is a required part of scope for the first supported
+MCP server release.
 
 ## Current State
 
-The `server-mcp` crate is a **library-only** crate. It contains all the
-business logic for tool dispatch but no transport or protocol handling.
+The `server-mcp` crate is a library-only crate. It contains the business logic
+for tool dispatch but no transport, no MCP protocol handler, and no
+user-facing launch flow.
 
 ### What exists
 
@@ -17,237 +40,327 @@ business logic for tool dispatch but no transport or protocol handling.
 | Response envelope types | `crates/server-mcp/src/types.rs` | Complete |
 | Query engine (QueryService trait) | `crates/query-engine/src/` | Complete |
 | SQLite metadata store | `crates/store/src/` | Complete |
-| Tracing and structured logging | `crates/cli/src/logging.rs` | Complete |
+| CLI entry point and tracing init | `crates/cli/src/main.rs` | Complete |
 
 ### Implemented tools
 
-- `search_symbols` — ranked symbol search by name
-- `get_symbol` — retrieve a single symbol by ID
-- `get_symbols` — batch retrieval by IDs
-- `get_file_outline` — symbols in a file
-- `get_file_content` — file source code
-- `get_file_tree` — file listing for a repo
-- `get_repo_outline` — repository structure and counts
-- `search_text` — full-text search fallback
+- `search_symbols`
+- `get_symbol`
+- `get_symbols`
+- `get_file_outline`
+- `get_file_content`
+- `get_file_tree`
+- `get_repo_outline`
+- `search_text`
 
-### How the registry works today
+### Existing scope boundary
 
-```rust
-// ToolRegistry takes a &dyn QueryService and dispatches by tool name
-let db = store::MetadataStore::open(&db_path)?;
-let svc = StoreQueryService::new(&db);
-let registry = ToolRegistry::new(&svc);
+The registry already handles:
 
-let response: McpResponse = registry.call("search_symbols", params_json);
+- parameter deserialization
+- tool dispatch
+- timing metadata
+- error wrapping
+- response envelope construction
+
+The missing work is transport/protocol integration, user-facing launch UX,
+client documentation, and diagnostics.
+
+## Product Requirements
+
+### 1. One obvious launch command
+
+The primary supported launch command should be:
+
+```text
+codeatlas mcp serve --db /absolute/path/to/repo/.codeatlas/index.db
 ```
 
-The registry handles parameter deserialization, timing, error wrapping, and
-metadata envelope construction. A transport layer only needs to route incoming
-requests to `registry.call()` and serialize the response back.
+This should be the documented default because it is easier to explain and
+support than a second product-facing binary.
 
-This is the key scope boundary: the missing work is transport/protocol
-integration, not core query logic or tool semantics.
+An optional compatibility alias such as `server-mcp --db ...` may also be
+shipped, but the CLI subcommand should be treated as canonical.
+
+### 2. Generic stdio MCP compatibility
+
+The server should target the common denominator used by stdio MCP clients:
+
+- JSON-RPC 2.0 framing with `Content-Length`
+- `initialize`
+- `notifications/initialized`
+- `tools/list`
+- `tools/call`
+- no protocol-irrelevant stdout output
+- stderr-only logs and diagnostics
+
+### 3. Local-first operation
+
+The server should:
+
+- run against a local CodeAtlas index
+- require no hosted control plane
+- require no auth for local single-user operation
+- preserve existing local-first security assumptions
+
+### 4. Clear diagnostics
+
+MCP clients often hide process stderr unless setup fails. That makes startup
+clarity part of the product contract.
+
+The first release should include:
+
+- clear errors for missing or unreadable `--db`
+- clear errors for invalid database/schema mismatch conditions
+- deterministic exit behavior on startup failure
+- no accidental stdout leakage that corrupts protocol frames
+
+### 5. Client setup documentation
+
+The first supported release is incomplete without copy-paste setup guidance for
+real MCP clients. Architecture notes alone are not enough.
+
+Documentation should include:
+
+- the canonical launch command
+- minimal config examples for representative clients
+- troubleshooting for failed startup and bad DB paths
+- explicit statement of what is and is not supported
 
 ## What Is Missing
 
 ### 1. JSON-RPC 2.0 framing
 
-MCP uses JSON-RPC 2.0 as its message format. No request/response message types
-or parsing exist in the workspace today.
+No request/response framing types or parser exist in the workspace today.
 
 Required types:
 
-```
+```text
 JsonRpcRequest  { jsonrpc, id, method, params }
 JsonRpcResponse { jsonrpc, id, result | error }
 JsonRpcError    { code, message, data }
 ```
 
-For stdio transport, messages should be treated as `Content-Length` framed
-JSON-RPC payloads over stdin/stdout, not newline-delimited JSON.
+For stdio transport, messages must be `Content-Length` framed JSON over
+stdin/stdout, not newline-delimited JSON.
 
 ### 2. MCP protocol state machine
 
-The MCP protocol lifecycle messages are not handled anywhere:
+The workspace does not yet handle:
 
-- `initialize` — client sends capabilities, server responds with server info
-  and supported capabilities
-- `notifications/initialized` — client notification confirming handshake
-- `tools/list` — client requests available tools; server returns tool schemas
-- `tools/call` — client invokes a tool by name with arguments
+- `initialize`
+- `notifications/initialized`
+- `tools/list`
+- `tools/call`
 
-The existing `ToolRegistry::call()` maps directly to the `tools/call` handler.
-`ToolRegistry::tool_names()` provides the data for `tools/list`, but tool
-parameter schemas (JSON Schema for each tool's input) would need to be added
-or derived.
+`ToolRegistry::call()` already maps naturally to `tools/call`.
 
-Operational constraints:
+### 3. stdio transport loop
 
-- notifications must not receive responses
-- stdout must contain protocol frames only
-- logs and diagnostics must go to stderr
+No stdin/stdout read-write loop exists yet.
 
-### 3. stdio transport
+### 4. User-facing CLI entrypoint
 
-No stdin/stdout read-write loop exists. MCP stdio transport should read and
-write framed JSON-RPC messages. Implementation requires:
+The current CLI in `crates/cli/src/main.rs` does not have an `mcp` command.
 
-- `Content-Length` frame parsing and serialization
-- `BufReader<Stdin>` / `BufWriter<Stdout>`
-- stdout protocol-only output discipline
-- stderr-only logging
-- Graceful EOF handling
+This is the preferred place for the primary launch path because it reduces the
+number of things users need to install and understand.
 
-### 4. Binary target
+### 5. Optional alias binary
 
-No `main.rs` in the server-mcp crate. No `[[bin]]` section in its Cargo.toml.
+There is no `main.rs` in `server-mcp` and no `[[bin]]` target in
+`crates/server-mcp/Cargo.toml`.
 
-### 5. Tool input schemas
+This is optional for product success, but useful as a compatibility alias or a
+thin transport wrapper if the team wants a dedicated executable name.
 
-`tools/list` must return JSON Schema descriptions of each tool's parameters.
-The registry knows tool names but does not currently expose parameter schemas.
+### 6. Tool input schemas
 
-This should be treated as a required deliverable for the first binary, not a
-follow-up.
+`tools/list` must return JSON Schema descriptions for each tool's input.
+
+### 7. Client-facing documentation
+
+The README currently explains that users need to wrap the MCP library
+themselves. That guidance must be replaced by a supported setup flow once this
+work lands.
+
+## Recommended Product Shape
+
+### Canonical entrypoint
+
+Use the existing CLI as the primary product surface:
+
+```text
+codeatlas mcp serve --db <path>
+```
+
+Reasons:
+
+- easier end-user mental model
+- easier packaging and install guidance
+- one executable for indexing, querying, and MCP serving
+- lower support burden than separate CLI and server binaries
+
+### Optional secondary entrypoint
+
+If useful, ship:
+
+```text
+server-mcp --db <path>
+```
+
+That binary should behave as a thin alias or wrapper around the same internal
+server implementation, not a separate product path.
+
+### Internal structure
+
+The transport implementation can still live near the `server-mcp` crate or in a
+shared internal module. The important distinction is:
+
+- implementation location is an engineering decision
+- `codeatlas mcp serve` is a product decision
+
+## Implementation Approach
+
+### Recommended protocol strategy
+
+Hand-roll the minimal JSON-RPC + MCP subset needed for stdio support.
+
+This remains the best fit because:
+
+- the protocol surface required for v1 is small
+- the workspace is already synchronous
+- it avoids introducing async runtime and SDK dependency weight
+- the team retains control over stdout/stderr discipline
+
+If MCP scope grows materially later, this choice can be revisited.
 
 ## Implementation Plan
 
-### Scope estimate
+### Phase 1: Canonical launch UX
 
-| Piece | Approx. lines |
-|-------|---------------|
-| JSON-RPC message types and parsing | 200–300 |
-| MCP protocol handler (initialize, tools/list, tools/call) | 200–300 |
-| stdio transport loop | 100–200 |
-| Binary entry point (arg parsing, store init, tracing) | ~100 |
-| Tool input schema definitions | ~150 |
-| Integration tests | 200–300 |
-| **Total** | **~800–1100** |
+Add an `mcp` command family to the CLI with:
 
-### Approach options
+- `codeatlas mcp serve --db <path>`
 
-**Option A: Hand-roll a minimal JSON-RPC + MCP handler**
+This phase should also decide:
 
-The MCP stdio protocol is simple for a single-connection server. The full
-message set needed is small (initialize, tools/list, tools/call). This avoids
-new dependencies beyond `serde` and `serde_json` (already in the workspace).
+- whether the CLI shares tracing init directly
+- whether an alias binary is worth shipping in the same milestone
 
-No async runtime is required — a synchronous stdin read loop is sufficient for
-a single-connection stdio server.
+### Phase 2: Protocol and transport
 
-Pros:
-- Zero new dependencies
-- Full control over behavior
-- Small surface area to maintain
+Implement:
 
-Cons:
-- Must track MCP spec changes manually
-- Must write JSON Schema definitions for tool inputs by hand
+- JSON-RPC request/response/error types
+- `Content-Length` framing parser and serializer
+- MCP request router
+- graceful EOF handling
+- stderr-only diagnostics
 
-**Option B: Use a Rust MCP SDK (e.g. `rmcp` or `mcp-rs`)**
+Supported methods for the first release:
 
-An MCP SDK handles JSON-RPC framing, protocol lifecycle, and tool schema
-registration. The integration work reduces to registering tools and wiring
-the query service.
+- `initialize`
+- `notifications/initialized`
+- `tools/list`
+- `tools/call`
 
-Pros:
-- Less code to write and maintain
-- Automatic protocol compliance
-- Schema generation may be built in
+### Phase 3: Tool schemas
 
-Cons:
-- Adds an external dependency (and likely an async runtime like `tokio`)
-- SDK maturity and maintenance varies
-- More dependency weight for a narrow use case
+Add JSON Schema definitions for all existing tools based on the request structs
+in `crates/server-mcp/src/tools.rs`.
 
-### Recommended approach
+This is part of the first supported release, not follow-up.
 
-Option A (hand-rolled) is the better fit for this project. The protocol surface
-is small, the workspace is already synchronous, and avoiding an async runtime
-keeps the binary lean. If the MCP spec grows significantly in the future, this
-decision can be revisited.
+### Phase 4: Diagnostics and failure behavior
 
-### Binary initialization chain
+Add clear startup and runtime behavior for:
 
-```
-1. Parse CLI args
-   --db <path>           (required: path to index database)
-   --log-level <level>   (optional: tracing verbosity)
-   --otel                (optional: enable OpenTelemetry export)
-   --read-only           (optional, future-friendly)
+- missing `--db`
+- unreadable DB path
+- open failure
+- invalid or incompatible schema
+- invalid tool params
+- unknown tool name
 
-2. Initialize tracing
-   - Prefer local tracing init or a small shared support module
-   - Do not make the server binary depend on the `cli` crate
+All diagnostics must remain off stdout.
 
-3. Open storage
-   - store::MetadataStore::open(&db_path)
+### Phase 5: Documentation and client guidance
 
-4. Create query service
-   - query_engine::StoreQueryService::new(&db)
+Update docs to make the supported flow explicit:
 
-5. Create tool registry
-   - server_mcp::ToolRegistry::new(&svc)
+- build/install
+- index once
+- configure MCP client to run `codeatlas mcp serve --db ...`
+- verify the server starts
+- troubleshoot common setup failures
 
-6. Enter stdio loop
-   - Read framed JSON-RPC request from stdin
-   - Parse method name
-   - Route: initialize → return server info
-           notifications/initialized → no response
-           tools/list  → return tool schemas
-           tools/call  → delegate to ToolRegistry::call()
-   - Serialize JSON-RPC response
-   - Write framed JSON-RPC response to stdout, flush
-   - On EOF or error, shut down cleanly
-```
+Documentation should include representative config snippets for real clients,
+but the compatibility promise should remain generic: any stdio MCP client that
+speaks the supported subset should work.
 
-### Crate placement
+### Phase 6: Verification
 
-Two options:
+Add:
 
-1. **Add a `[[bin]]` target to `server-mcp`** — keeps the transport close to the
-   registry it wraps. This is the preferred starting point because the binary
-   is thin and tightly coupled to the library crate.
+- unit tests for framing, parsing, routing, and error serialization
+- subprocess integration tests over stdio framing
+- smoke test for `initialize -> tools/list -> tools/call`
+- assertion that stdout contains only protocol frames
 
-2. **Create a new `server-mcp-stdio` crate** — cleaner separation. The binary
-   crate depends on `server-mcp`, `store`, and `query-engine`, plus any shared
-   logging support if that is extracted later. This becomes attractive only if
-   transport/runtime concerns grow beyond a thin wrapper.
+## Crate and Code Placement
 
-### Testing strategy
+There are two reasonable implementation patterns:
 
-- **Unit tests**: JSON-RPC parsing, MCP message routing, error serialization.
-- **Integration tests**: Spawn the binary as a subprocess, send JSON-RPC
-  messages over stdin/stdout, assert correct framed responses. Use a temporary
-  SQLite database with fixture data.
-- **E2E smoke test**: Index a small repo, start the server, run a tools/list →
-  tools/call sequence, verify structured output.
+1. Add the transport implementation to `server-mcp` and call it from
+   `codeatlas mcp serve`.
+2. Create a thin stdio server module or crate and invoke it from the CLI.
 
-## Prerequisites
+Either is acceptable. The stronger requirement is that the user-facing command
+remain simple and stable.
 
-- Tool parameter JSON Schemas need to be defined for each of the 8 tools.
-  These can be derived from the existing parameter structs in
-  `crates/server-mcp/src/tools.rs` or written by hand.
-- Decide whether minimal tracing init should live in the binary crate directly
-  or in a small shared support module.
+## Acceptance Criteria
+
+The work should be considered complete when all of the following are true:
+
+1. A user can run `codeatlas mcp serve --db <path>`.
+2. A generic stdio MCP client can complete `initialize`, `tools/list`, and
+   `tools/call`.
+3. All existing CodeAtlas MCP tools are exposed with input schemas.
+4. Server logs and diagnostics never corrupt stdout protocol frames.
+5. The README documents a copy-pasteable supported MCP setup flow.
+6. Integration tests cover framed stdio communication with a real subprocess.
+
+## Non-Goals for This Slice
+
+- hosted MCP serving
+- HTTP/gRPC APIs
+- auth, tenancy, quotas, or billing
+- multi-user session management
+- dynamic tool registration
+- broader MCP features beyond the minimal tool-serving subset
 
 ## Recommended First Slice
 
-1. add a `[[bin]]` target to `server-mcp`
-2. add JSON-RPC + MCP request/response types
+The smallest useful slice that still matches the product goal is:
+
+1. add `codeatlas mcp serve --db <path>`
+2. implement JSON-RPC framing
 3. implement `initialize`
 4. implement `notifications/initialized`
 5. implement `tools/list` with static schemas
 6. implement `tools/call` by delegating to `ToolRegistry::call()`
-7. add subprocess integration tests over stdio framing
+7. add subprocess integration tests
+8. add README setup guidance for generic stdio MCP clients
 
-That slice is enough to make CodeAtlas usable by real MCP clients without
-pulling in a larger SDK or introducing hosted-service concerns.
+That is enough to make CodeAtlas meaningfully usable with real AI clients
+without introducing a larger SDK or hosted-service surface.
 
 ## References
 
 - [MCP specification](https://spec.modelcontextprotocol.io/)
-- `crates/server-mcp/src/lib.rs` — current public API
-- `crates/server-mcp/src/registry.rs` — ToolRegistry implementation
-- `crates/cli/src/main.rs` — reference initialization chain
-- `docs/architecture/deployment-modes.md` — deployment context
+- `crates/server-mcp/src/lib.rs`
+- `crates/server-mcp/src/registry.rs`
+- `crates/server-mcp/src/tools.rs`
+- `crates/cli/src/main.rs`
+- `docs/architecture/deployment-modes.md`
