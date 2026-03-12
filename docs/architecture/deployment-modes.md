@@ -43,8 +43,7 @@ Current entry points:
 - `codeatlas file-tree`
 - `codeatlas repo-outline`
 - `codeatlas quality-report`
-- planned canonical MCP entrypoint: `codeatlas mcp serve --db <path>`
-- optional compatibility alias: `server-mcp --db <path>`
+- `codeatlas mcp serve --db <path>` (stdio MCP server for AI clients)
 
 ### 2. Hosted-Ready Architecture Path
 
@@ -77,8 +76,7 @@ Not implemented yet:
 3. `store` persists metadata and content blobs locally.
 4. `query-engine` answers lookup and search requests from the local index.
 5. CodeAtlas exposes the query surface to agent clients through CLI queries
-   today and through a local stdio MCP server as the planned canonical agent
-   integration path.
+   and through the local stdio MCP server (`codeatlas mcp serve --db <path>`).
 
 ### Semantic adapter processes
 
@@ -179,8 +177,9 @@ requirements for any hosted deployment.
   in structured fields
 - schema/version upgrades are handled by store migration logic and may require
   reindex decisions based on schema compatibility rules
-- the intended MCP serving model is local stdio transport launched by the user
-  from the same machine as the indexed checkout
+- the MCP serving model is local stdio transport launched by the user or AI
+  client from the same machine as the indexed checkout
+  (`codeatlas mcp serve --db <path>`)
 
 ### Future hosted operators should assume
 

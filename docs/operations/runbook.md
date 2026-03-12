@@ -11,6 +11,7 @@ This runbook covers:
 
 - local environment preparation
 - indexing and query workflows
+- MCP server setup and troubleshooting
 - semantic adapter setup and diagnosis
 - quality KPI reporting
 - schema/index maintenance workflows
@@ -94,7 +95,50 @@ directly.
 Use the MCP server path when integrating with agent clients instead of direct
 CLI query commands.
 
-## 4. Generate a Repository Quality Report
+## 4. Run the MCP Server
+
+### Start the server
+
+```bash
+codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+```
+
+The server reads newline-delimited JSON-RPC from stdin and writes responses to
+stdout. All diagnostics go to stderr.
+
+### Verify it works
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+```
+
+Expected: a JSON response with `"protocolVersion":"2025-11-25"`.
+
+### Configure an AI client
+
+See the [README MCP Server Setup](../../README.md#mcp-server-setup) for
+copy-paste configuration examples for Claude Desktop, Cursor, and OpenAI Codex CLI.
+
+### Troubleshoot startup failures
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `database not found` | DB path does not exist | Run `codeatlas index <repo>` first |
+| `database is not readable` | Permission denied | Check file permissions |
+| `failed to open database` | Corrupt or non-SQLite file | Re-run `codeatlas index <repo>` |
+| `database path is a directory` | Path points to directory | Use the `.db` file path |
+| `--db <path> is required` | Missing `--db` flag | Add `--db /path/to/index.db` |
+| No stdout response | Client uses Content-Length framing | Use newline-delimited JSON-RPC |
+| Empty tool results | Wrong `repo_id` | `repo_id` is derived from the directory name used during indexing |
+
+### What the server does not support
+
+- HTTP, gRPC, or WebSocket transports
+- Content-Length framed MCP (2024-11-05 transport)
+- Authentication or multi-user access
+- Remote/hosted serving
+
+## 5. Generate a Repository Quality Report
 
 For live repository coverage metrics:
 
@@ -117,7 +161,7 @@ The report includes:
 - per-adapter contribution breakdown
 - pass/fail summary against KPI thresholds
 
-## 5. Diagnose Semantic Adapter Availability
+## 6. Diagnose Semantic Adapter Availability
 
 For runtime discovery order and setup instructions, see the
 [README semantic adapter setup](../../README.md#semantic-adapter-setup).
@@ -144,7 +188,7 @@ If Kotlin semantic coverage is unexpectedly absent:
 If semantic runtimes are missing, indexing should still succeed with syntax
 adapters where policy allows fallback.
 
-## 6. Run the Main Quality Gates Locally
+## 7. Run the Main Quality Gates Locally
 
 Format:
 
@@ -164,7 +208,7 @@ Tests:
 cargo test --workspace --all-features
 ```
 
-## 7. Inspect Regression KPIs
+## 8. Inspect Regression KPIs
 
 Fixture-based semantic regression suites:
 
@@ -181,7 +225,7 @@ Indexer metrics-focused tests:
 cargo test -p indexer metrics:: -- --nocapture
 ```
 
-## 8. CI KPI Artifact Workflow
+## 9. CI KPI Artifact Workflow
 
 The CI job `rust-quality-kpi`:
 
@@ -192,7 +236,7 @@ The CI job `rust-quality-kpi`:
 
 Use this when reviewing semantic quality changes or milestone closeout work.
 
-## 9. Schema and Reindex Workflow
+## 10. Schema and Reindex Workflow
 
 Current state:
 
@@ -213,7 +257,7 @@ Recommended clean rebuild path:
 
 Do not manually edit SQLite schema state.
 
-## 10. Logging and Tracing
+## 11. Logging and Tracing
 
 Structured logging defaults:
 
@@ -233,7 +277,7 @@ OpenTelemetry export can be enabled with:
 CODEATLAS_OTEL=1 cargo run -p cli -- index <repo-path>
 ```
 
-## 11. Key Failure Modes
+## 12. Key Failure Modes
 
 ### No symbols extracted
 
@@ -268,7 +312,7 @@ Check:
 - workflow grep patterns still match the printed output
 - uploaded artifact path in CI workflow is unchanged
 
-## 12. Reference Documents
+## 13. Reference Documents
 
 - `README.md`
 - `docs/architecture/deployment-modes.md`
