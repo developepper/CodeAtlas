@@ -36,7 +36,7 @@ jobs:
           components: rustfmt
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -54,7 +54,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Lint
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -70,7 +70,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Test
         run: cargo test --workspace --all-features
@@ -86,7 +86,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: cargo build --workspace --all-features
@@ -102,7 +102,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Docs
         env:
@@ -120,7 +120,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Run performance threshold tests
         run: |
@@ -142,7 +142,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry and build
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Generate quality KPI report
         run: |
@@ -202,7 +202,7 @@ jobs:
 
       - name: Cache cargo registry and build
         if: steps.msrv.outputs.skip == 'false'
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Cargo check (MSRV)
         if: steps.msrv.outputs.skip == 'false'
