@@ -23,6 +23,10 @@ jobs:
           test -f docs/architecture/rust-code-intelligence-plan.md
           test -f docs/planning/issue-backlog.md
 
+  # NOTE: `Swatinem/rust-cache@v2` still uses Node 20 in its latest released
+  # tag. Keep watching for a released Node 24-compatible version and bump it
+  # once available.
+
   rust-fmt:
     name: Rust Format Check
     runs-on: ubuntu-latest
@@ -168,7 +172,7 @@ jobs:
           } | tee target/kpi-report/quality-kpi-report.md
 
       - name: Upload KPI report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: quality-kpi-report
