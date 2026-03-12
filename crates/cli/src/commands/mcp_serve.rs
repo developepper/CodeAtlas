@@ -89,10 +89,10 @@ fn parse_serve_args(args: &[String]) -> Result<ServeOpts, CliError> {
         match args[i].as_str() {
             "--db" => {
                 i += 1;
-                db_path = Some(PathBuf::from(
-                    args.get(i)
-                        .ok_or_else(|| CliError::Usage("--db requires a value".into()))?,
-                ));
+                db_path =
+                    Some(PathBuf::from(args.get(i).ok_or_else(|| {
+                        CliError::Usage("--db requires a value".into())
+                    })?));
             }
             other => {
                 return Err(CliError::Usage(format!("unknown option: {other}")));
@@ -102,9 +102,7 @@ fn parse_serve_args(args: &[String]) -> Result<ServeOpts, CliError> {
     }
 
     let db_path = db_path.ok_or_else(|| {
-        CliError::Usage(
-            "--db <path> is required\n\nUsage: codeatlas mcp serve --db <path>".into(),
-        )
+        CliError::Usage("--db <path> is required\n\nUsage: codeatlas mcp serve --db <path>".into())
     })?;
 
     Ok(ServeOpts { db_path })
