@@ -494,10 +494,14 @@ mod tests {
         // Leak dir to keep the temp directory alive for the test duration.
         std::mem::forget(dir);
         (db, |db: &store::MetadataStore| {
-            let svc = query_engine::StoreQueryService::new(db);
-            // SAFETY: we know `svc` lives as long as `db` in the test scope.
+            let svc = Box::new(query_engine::StoreQueryService::new(db));
+            let svc_ptr = Box::into_raw(svc);
+            // SAFETY: the heap allocation is intentionally leaked so the
+            // ToolRegistry reference remains valid for the test duration.
+            // The inner &db reference is valid because the caller keeps
+            // the MetadataStore alive in the returned tuple.
             let svc_ref: &'static dyn query_engine::QueryService =
-                unsafe { std::mem::transmute(&svc as &dyn query_engine::QueryService) };
+                unsafe { std::mem::transmute(&*svc_ptr as &dyn query_engine::QueryService) };
             ToolRegistry::new(svc_ref)
         })
     }
