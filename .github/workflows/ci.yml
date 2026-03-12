@@ -131,6 +131,49 @@ jobs:
       - name: Run criterion benchmarks
         run: cargo bench --workspace
 
+  rust-quality-kpi:
+    name: Quality KPI Report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate quality KPI report
+        run: |
+          mkdir -p target/kpi-report
+          {
+            echo "# Quality KPI Report"
+            echo "Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo ""
+            echo "## TypeScript Semantic Adapter"
+            echo '```'
+            cargo test -p adapter-semantic-typescript --test quality_regression -- --nocapture 2>&1 | grep -A 20 'Quality Regression Report' || echo "(no report output)"
+            echo '```'
+            echo ""
+            echo "## Kotlin Semantic Adapter"
+            echo '```'
+            cargo test -p adapter-semantic-kotlin --test quality_regression -- --nocapture 2>&1 | grep -A 20 'Quality Regression Report' || echo "(no report output)"
+            echo '```'
+            echo ""
+            echo "## Coverage Metrics Tests"
+            echo '```'
+            cargo test -p indexer metrics:: -- --nocapture 2>&1 | grep -E '(test .* ok|test result:)' || echo "(no output)"
+            echo '```'
+          } | tee target/kpi-report/quality-kpi-report.md
+
+      - name: Upload KPI report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quality-kpi-report
+          path: target/kpi-report/quality-kpi-report.md
+
   msrv-check:
     name: Rust MSRV Check
     runs-on: ubuntu-latest
