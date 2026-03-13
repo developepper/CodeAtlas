@@ -1,27 +1,30 @@
 # Deployment Modes and Control Boundaries
 
-This document describes the current CodeAtlas deployment model and the
-hosted-ready boundaries preserved in the implementation.
+This document describes the CodeAtlas deployment models and the control
+boundaries preserved in the implementation.
 
 It is a companion to the canonical specification:
 - `docs/specifications/rust-code-intelligence-platform-spec.md`
 
+For the persistent local service architecture, see:
+- `docs/architecture/persistent-local-service.md`
+
 ## Purpose
 
-CodeAtlas is implemented as a local-first system today, but the repository,
-crate boundaries, and operational controls are intentionally shaped so hosted
+CodeAtlas is implemented as a local-first system. The repository, crate
+boundaries, and operational controls are intentionally shaped so hosted
 deployment can be added without redesigning the core indexing/query model.
 
 This document answers:
 
-- what exists today
+- what deployment modes exist and which is canonical
 - what is local-only versus hosted-ready
 - which controls apply in each mode
 - what assumptions operators should make when running the system
 
-## Supported Modes
+## Current Supported Mode
 
-### 1. Local-Only
+### Local-Only (direct-store)
 
 This is the current production mode implemented in the repository.
 
@@ -45,10 +48,34 @@ Current entry points:
 - `codeatlas quality-report`
 - `codeatlas mcp serve --db <path>` (stdio MCP server for AI clients)
 
-### 2. Hosted-Ready Architecture Path
+## Planned: Persistent Local Service
+
+Epic 13 (#148) defines a transition toward a persistent multi-repo local
+service as the canonical local deployment model. The architecture for that
+model is documented in `docs/architecture/persistent-local-service.md`.
+
+When implemented, the persistent service model will:
+
+- run one long-running CodeAtlas service process per developer machine
+- use a shared storage root for multiple repositories
+- expose an HTTP transport for service communication (localhost only)
+- provide an MCP bridge process so AI clients can connect to the service
+
+The current direct-store commands listed above will continue to work during
+and after the transition. See `docs/architecture/persistent-local-service.md`
+for the full architecture direction and decision records.
+
+Implementation status: not yet started (Epic 13, #148-#154).
+
+### Hosted-Ready Architecture Path
 
 This mode is not implemented yet as a deployable product, but the current code
 preserves boundaries needed for it.
+
+The persistent local service architecture is designed so the same core crates
+and query model can be reused in a hosted deployment. See the "Relationship to
+Hosted/Centralized Deployment" section in
+`docs/architecture/persistent-local-service.md` for details.
 
 Hosted-ready assumptions:
 
@@ -61,7 +88,7 @@ Hosted-ready assumptions:
 
 Not implemented yet:
 
-- hosted HTTP/gRPC service surface
+- hosted HTTP/gRPC service surface beyond the local service
 - authn/authz
 - tenant isolation and quotas
 - managed object storage or hosted database deployment
@@ -128,6 +155,14 @@ Stored content:
 
 - file blobs keyed by content hash
 
+### Storage root
+
+Current default: per-repo database at `<repo>/.codeatlas/index.db`, with each
+repo having its own database and blob directory.
+
+The persistent local service plan proposes moving to a shared storage root; see
+`docs/architecture/persistent-local-service.md` for that direction.
+
 ### Hosted-ready boundary
 
 The storage layer is already separated from indexing/query orchestration, which
@@ -136,8 +171,8 @@ without changing the higher-level query or adapter contracts.
 
 ## Security and Privacy Controls
 
-These controls apply now in local-only mode and should remain baseline
-requirements for any hosted deployment.
+These controls apply now in local mode and should remain baseline requirements
+for any hosted deployment.
 
 ### Input handling
 
@@ -194,6 +229,9 @@ Current reality:
 
 - CodeAtlas is publishable and actionable as a local-first system.
 - The repository is not yet publishable as a hosted service implementation.
+- The persistent local service model is the planned next architectural
+  direction (Epic 13, #148). Architecture decisions for that initiative are
+  recorded in `docs/architecture/persistent-local-service.md`.
 
 Hosted-ready claim means:
 

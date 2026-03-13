@@ -153,12 +153,28 @@ These are not committed issues, but they are plausible backlog seeds.
 - Add per-repo indexing policy configuration.
 - Add MCP/client diagnostics and operator-facing setup validation.
 
+Planning note:
+
+- The local-service initiative in
+  `docs/planning/persistent-multi-repo-local-service.md` intentionally pulls in
+  the minimal Epic 12 concerns required for repo lifecycle, freshness, and
+  service health.
+
 ### Epic 13: Multi-Repo Intelligence
 
 - Add multi-repo storage/query model extensions.
 - Add cross-repo search and dependency traversal.
 - Add ownership/service metadata integration.
 - Add connector-backed acquisition for remote repositories and mirrors.
+
+Planning note:
+
+- The concrete first execution slice for Epic 13 is documented in
+  `docs/planning/persistent-multi-repo-local-service.md`.
+- The active GitHub issue set for that slice is #148 through #154.
+- That slice focuses on the persistent multi-repo local service model.
+- Cross-repo search, dependency traversal, ownership metadata, and remote
+  connectors remain plausible follow-on work after the local service baseline.
 
 ### Epic 14: Service APIs and Integrations
 
@@ -223,8 +239,8 @@ This model is intended to be fair in two directions:
 If the goal is fastest product value after V1, prioritize in this order:
 
 1. Agent retrieval and relationship queries.
-2. Watch mode and operational UX.
-3. Multi-repo intelligence and connectors.
+2. Multi-repo local service baseline, watch mode, and operational UX.
+3. Broader multi-repo intelligence and connectors.
 4. Service APIs, ecosystem integrations, and enrichment.
 5. Enterprise, explainability, and policy expansions.
 
