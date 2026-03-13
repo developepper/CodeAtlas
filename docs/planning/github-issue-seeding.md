@@ -1,5 +1,21 @@
 # GitHub Issue Seeding
 
+This file is historical bootstrap guidance for the initial repository setup.
+
+For current issue creation, use the reviewed issue-body docs under:
+
+- `docs/planning/github-issues/`
+
+Current planned post-v1 issue set:
+
+- `persistent-service-epic.md`
+- `persistent-service-ticket-architecture.md`
+- `persistent-service-ticket-shared-store-catalog.md`
+- `persistent-service-ticket-repo-lifecycle.md`
+- `persistent-service-ticket-runtime.md`
+- `persistent-service-ticket-mcp-bridge.md`
+- `persistent-service-ticket-docs.md`
+
 Use these labels first:
 
 ```bash
