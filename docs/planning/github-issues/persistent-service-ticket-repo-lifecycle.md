@@ -34,8 +34,8 @@ database rather than a usable multi-project tool.
 
 ## Dependencies
 
-- Parent epic: Epic 13 persistent local service issue
-- Depends on the shared-store/catalog ticket
+- Parent epic: #148
+- Depends on #150
 
 ## Review Checklist
 
@@ -47,3 +47,4 @@ database rather than a usable multi-project tool.
 
 - [docs/planning/persistent-multi-repo-local-service.md](docs/planning/persistent-multi-repo-local-service.md)
 - [docs/operations/runbook.md](docs/operations/runbook.md)
+- GitHub issue: #151

@@ -8,13 +8,13 @@ For current issue creation, use the reviewed issue-body docs under:
 
 Current planned post-v1 issue set:
 
-- `persistent-service-epic.md`
-- `persistent-service-ticket-architecture.md`
-- `persistent-service-ticket-shared-store-catalog.md`
-- `persistent-service-ticket-repo-lifecycle.md`
-- `persistent-service-ticket-runtime.md`
-- `persistent-service-ticket-mcp-bridge.md`
-- `persistent-service-ticket-docs.md`
+- `persistent-service-epic.md` -> #148
+- `persistent-service-ticket-architecture.md` -> #149
+- `persistent-service-ticket-shared-store-catalog.md` -> #150
+- `persistent-service-ticket-repo-lifecycle.md` -> #151
+- `persistent-service-ticket-runtime.md` -> #152
+- `persistent-service-ticket-mcp-bridge.md` -> #153
+- `persistent-service-ticket-docs.md` -> #154
 
 Use these labels first:
 

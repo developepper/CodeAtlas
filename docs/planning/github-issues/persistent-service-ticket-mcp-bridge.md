@@ -36,10 +36,10 @@ long-running backend without spawning isolated per-repo instances.
 
 ## Dependencies
 
-- Parent epic: Epic 13 persistent local service issue
-- Depends on the architecture-definition ticket
-- Depends on the repo lifecycle ticket
-- Depends on the persistent runtime ticket
+- Parent epic: #148
+- Depends on #149
+- Depends on #151
+- Depends on #152
 
 ## Review Checklist
 
@@ -53,3 +53,4 @@ long-running backend without spawning isolated per-repo instances.
 - [docs/planning/persistent-multi-repo-local-service.md](docs/planning/persistent-multi-repo-local-service.md)
 - [docs/architecture/mcp-server-planning.md](docs/architecture/mcp-server-planning.md)
 - [docs/architecture/mcp-client-compatibility.md](docs/architecture/mcp-client-compatibility.md)
+- GitHub issue: #153

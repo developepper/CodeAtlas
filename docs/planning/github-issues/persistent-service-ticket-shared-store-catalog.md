@@ -38,8 +38,8 @@ persistent local backend.
 
 ## Dependencies
 
-- Parent epic: Epic 13 persistent local service issue
-- Depends on the architecture-definition ticket
+- Parent epic: #148
+- Depends on #149
 
 ## Review Checklist
 
@@ -53,3 +53,4 @@ persistent local backend.
 - [docs/planning/persistent-multi-repo-local-service.md](docs/planning/persistent-multi-repo-local-service.md)
 - [crates/store/src/migrations.rs](crates/store/src/migrations.rs)
 - [docs/architecture/deployment-modes.md](docs/architecture/deployment-modes.md)
+- GitHub issue: #150

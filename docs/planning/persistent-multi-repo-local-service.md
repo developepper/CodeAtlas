@@ -1,6 +1,6 @@
 # Persistent Multi-Repo Local Service Plan
 
-Status: Draft for review
+Status: Approved planning baseline; tracked in GitHub issues #148-#154
 
 Owner intent: make CodeAtlas usable as one persistent local code-intelligence
 backend across many repositories and AI clients, while preserving a clean path
@@ -33,6 +33,16 @@ The desired product shape is:
 This document is the review artifact for that direction and is intentionally
 written so its Epic and ticket sections can later be promoted directly into
 GitHub issues.
+
+Tracked GitHub issues:
+
+- Epic: #148
+- Ticket 1: #149
+- Ticket 2: #150
+- Ticket 3: #151
+- Ticket 4: #152
+- Ticket 5: #153
+- Ticket 6: #154
 
 ## Product Decision
 

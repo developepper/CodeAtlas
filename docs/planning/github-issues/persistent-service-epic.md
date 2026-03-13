@@ -32,12 +32,12 @@ integration path is currently stdio MCP tied to a single spawned process.
 
 ## Child Tickets
 
-- Ticket: Define the persistent multi-repo local service architecture
-- Ticket: Make shared-store usage canonical and add missing repo catalog metadata
-- Ticket: Add repo catalog and lifecycle operations for a persistent local service
-- Ticket: Implement a persistent local service runtime
-- Ticket: Adapt AI client integration for the persistent service model
-- Ticket: Update docs and canonical usage guidance for the persistent local model
+- #149 Ticket: Define the persistent multi-repo local service architecture
+- #150 Ticket: Make shared-store usage canonical and add missing repo catalog metadata
+- #151 Ticket: Add repo catalog and lifecycle operations for a persistent local service
+- #152 Ticket: Implement a persistent local service runtime
+- #153 Ticket: Adapt AI client integration for the persistent service model
+- #154 Ticket: Update docs and canonical usage guidance for the persistent local model
 
 ## Epic Definition Of Done
 
@@ -66,6 +66,7 @@ integration path is currently stdio MCP tied to a single spawned process.
 - It intentionally absorbs the local-service portion of Epic 12 work where repo
   lifecycle, freshness, and service health are required.
 - Docker packaging is a follow-up, not part of the first implementation epic.
+- GitHub tracking issue: #148
 
 ## References
 

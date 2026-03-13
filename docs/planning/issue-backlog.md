@@ -123,6 +123,7 @@ The current concrete planning artifact for post-v1 implementation is:
 
 - Epic 13 persistent local service plan:
   `docs/planning/persistent-multi-repo-local-service.md`
+- GitHub epic and tickets: #148, #149, #150, #151, #152, #153, #154
 
 That plan defines the first execution slice for the broader multi-repo
 direction:
@@ -133,6 +134,16 @@ direction:
 - persistent local runtime
 - MCP bridge/client integration
 - canonical doc updates
+
+Open issue set:
+
+- #148 Epic 13: Persistent Multi-Repo Local Service
+- #149 Ticket: Define the persistent multi-repo local service architecture
+- #150 Ticket: Make shared-store usage canonical and add missing repo catalog metadata
+- #151 Ticket: Add repo catalog and lifecycle operations for a persistent local service
+- #152 Ticket: Implement a persistent local service runtime
+- #153 Ticket: Adapt AI client integration for the persistent service model
+- #154 Ticket: Update docs and canonical usage guidance for the persistent local model
 
 Deferred from the first slice:
 

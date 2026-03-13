@@ -33,9 +33,9 @@ clear startup, storage-root ownership, lifecycle handling, and diagnostics.
 
 ## Dependencies
 
-- Parent epic: Epic 13 persistent local service issue
-- Depends on the architecture-definition ticket
-- Depends on the shared-store/catalog ticket
+- Parent epic: #148
+- Depends on #149
+- Depends on #150
 
 ## Notes
 
@@ -54,3 +54,4 @@ clear startup, storage-root ownership, lifecycle handling, and diagnostics.
 - [docs/planning/persistent-multi-repo-local-service.md](docs/planning/persistent-multi-repo-local-service.md)
 - [docs/architecture/deployment-modes.md](docs/architecture/deployment-modes.md)
 - [docs/operations/runbook.md](docs/operations/runbook.md)
+- GitHub issue: #152

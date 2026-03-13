@@ -42,7 +42,7 @@ deployment.
 
 ## Dependencies
 
-- Parent epic: Epic 13 persistent local service issue
+- Parent epic: #148
 
 ## Review Checklist
 
@@ -58,3 +58,4 @@ deployment.
 - [docs/architecture/deployment-modes.md](docs/architecture/deployment-modes.md)
 - [docs/architecture/mcp-server-planning.md](docs/architecture/mcp-server-planning.md)
 - [docs/planning/post-v1-roadmap.md](docs/planning/post-v1-roadmap.md)
+- GitHub issue: #149

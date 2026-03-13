@@ -36,12 +36,12 @@ the CLI migration path clearly.
 
 ## Dependencies
 
-- Parent epic: Epic 13 persistent local service issue
-- Depends on the architecture-definition ticket
-- Depends on the shared-store/catalog ticket
-- Depends on the repo lifecycle ticket
-- Depends on the persistent runtime ticket
-- Depends on the MCP bridge ticket
+- Parent epic: #148
+- Depends on #149
+- Depends on #150
+- Depends on #151
+- Depends on #152
+- Depends on #153
 
 ## Review Checklist
 
@@ -56,3 +56,4 @@ the CLI migration path clearly.
 - [docs/architecture/deployment-modes.md](docs/architecture/deployment-modes.md)
 - [docs/operations/runbook.md](docs/operations/runbook.md)
 - [docs/planning/post-v1-roadmap.md](docs/planning/post-v1-roadmap.md)
+- GitHub issue: #154
