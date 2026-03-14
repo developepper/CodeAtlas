@@ -117,33 +117,28 @@ Strategic roadmap themes after M10 live in:
 - `docs/planning/post-v1-roadmap.md`
 - `docs/planning/persistent-multi-repo-local-service.md`
 
-### Planned First Post-V1 Execution Slice
+### Epic 13: Persistent Multi-Repo Local Service (complete)
 
-The current concrete planning artifact for post-v1 implementation is:
+The first post-v1 execution slice is complete. Planning artifact:
+`docs/planning/persistent-multi-repo-local-service.md`.
 
-- Epic 13 persistent local service plan:
-  `docs/planning/persistent-multi-repo-local-service.md`
-- GitHub epic and tickets: #148, #149, #150, #151, #152, #153, #154
+GitHub epic and tickets (all complete):
 
-That plan defines the first execution slice for the broader multi-repo
-direction:
+- ~~#148 Epic 13: Persistent Multi-Repo Local Service~~
+- ~~#149 Ticket: Define the persistent multi-repo local service architecture~~
+- ~~#150 Ticket: Make shared-store usage canonical and add missing repo catalog metadata~~
+- ~~#151 Ticket: Add repo catalog and lifecycle operations for a persistent local service~~
+- ~~#152 Ticket: Implement a persistent local service runtime~~
+- ~~#153 Ticket: Adapt AI client integration for the persistent service model~~
+- ~~#154 Ticket: Update docs and canonical usage guidance for the persistent local model~~
 
-- architecture definition for a persistent local multi-repo service
-- canonical shared-store usage and repo catalog metadata
-- repo registration/listing/refresh/remove lifecycle
-- persistent local runtime
-- MCP bridge/client integration
+What was delivered:
+
+- persistent HTTP service (`codeatlas serve`)
+- repo catalog with lifecycle operations (`codeatlas repo add/list/status/refresh/remove`)
+- MCP bridge for AI client integration (`codeatlas mcp bridge`)
+- shared storage root and repo catalog metadata
 - canonical doc updates
-
-Open issue set:
-
-- #148 Epic 13: Persistent Multi-Repo Local Service
-- #149 Ticket: Define the persistent multi-repo local service architecture
-- #150 Ticket: Make shared-store usage canonical and add missing repo catalog metadata
-- #151 Ticket: Add repo catalog and lifecycle operations for a persistent local service
-- #152 Ticket: Implement a persistent local service runtime
-- #153 Ticket: Adapt AI client integration for the persistent service model
-- #154 Ticket: Update docs and canonical usage guidance for the persistent local model
 
 Deferred from the first slice:
 

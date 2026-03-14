@@ -22,22 +22,39 @@ This document answers:
 - which controls apply in each mode
 - what assumptions operators should make when running the system
 
-## Current Supported Mode
+## Current Supported Modes
 
-### Local-Only (direct-store)
+### Persistent Local Service (canonical)
 
-This is the current production mode implemented in the repository.
+This is the canonical local deployment model, implemented in Epic 13
+(#148-#154). The architecture is documented in
+`docs/architecture/persistent-local-service.md`.
 
 Characteristics:
 
-- indexing runs on a local checkout
-- metadata is stored in local SQLite
-- content blobs are stored on local disk
-- MCP and CLI are the primary interfaces
-- semantic adapters execute as local child processes
-- no hosted auth, tenancy, or remote storage is required
+- one long-running CodeAtlas service process per developer machine
+- shared storage root (`~/.codeatlas/`) for multiple repositories
+- HTTP transport for service communication (localhost only, port 52337)
+- MCP bridge process so AI clients connect to the service
+- repo catalog with lifecycle operations (add, list, status, refresh, remove)
+- no hosted auth, tenancy, or remote storage required
 
-Current entry points:
+Service entry points:
+
+- `codeatlas serve` (start the persistent HTTP service)
+- `codeatlas repo add <path>` (register and index a repository)
+- `codeatlas repo list` (list registered repositories)
+- `codeatlas repo status <repo_id>` (inspect a repository)
+- `codeatlas repo refresh <repo_id>` (re-index a repository)
+- `codeatlas repo remove <repo_id>` (de-register and clean up)
+- `codeatlas mcp bridge` (MCP bridge for AI clients)
+
+### Direct-Store (legacy, still supported)
+
+The direct-store mode remains available for simple single-repo workflows and
+low-level operations. It does not require the persistent service.
+
+Direct-store entry points:
 
 - `codeatlas index`
 - `codeatlas search-symbols`
@@ -47,25 +64,6 @@ Current entry points:
 - `codeatlas repo-outline`
 - `codeatlas quality-report`
 - `codeatlas mcp serve --db <path>` (stdio MCP server for AI clients)
-
-## Planned: Persistent Local Service
-
-Epic 13 (#148) defines a transition toward a persistent multi-repo local
-service as the canonical local deployment model. The architecture for that
-model is documented in `docs/architecture/persistent-local-service.md`.
-
-When implemented, the persistent service model will:
-
-- run one long-running CodeAtlas service process per developer machine
-- use a shared storage root for multiple repositories
-- expose an HTTP transport for service communication (localhost only)
-- provide an MCP bridge process so AI clients can connect to the service
-
-The current direct-store commands listed above will continue to work during
-and after the transition. See `docs/architecture/persistent-local-service.md`
-for the full architecture direction and decision records.
-
-Implementation status: not yet started (Epic 13, #148-#154).
 
 ### Hosted-Ready Architecture Path
 
@@ -102,8 +100,11 @@ Not implemented yet:
 2. `indexer` routes files to syntax and semantic adapters.
 3. `store` persists metadata and content blobs locally.
 4. `query-engine` answers lookup and search requests from the local index.
-5. CodeAtlas exposes the query surface to agent clients through CLI queries
-   and through the local stdio MCP server (`codeatlas mcp serve --db <path>`).
+5. CodeAtlas exposes the query surface through:
+   - the persistent HTTP service (`codeatlas serve`)
+   - the MCP bridge (`codeatlas mcp bridge`) for AI client integration
+   - CLI query commands (`search-symbols`, `get-symbol`, etc.)
+   - the direct stdio MCP server (`codeatlas mcp serve`) for legacy use
 
 ### Semantic adapter processes
 
@@ -157,11 +158,12 @@ Stored content:
 
 ### Storage root
 
-Current default: per-repo database at `<repo>/.codeatlas/index.db`, with each
-repo having its own database and blob directory.
+Current default: shared storage root at `~/.codeatlas/` containing one
+`metadata.db` for all repos and a shared `blobs/` directory. Override with
+`CODEATLAS_DATA_ROOT` or `--data-root` (service) / `--db` (direct commands).
 
-The persistent local service plan proposes moving to a shared storage root; see
-`docs/architecture/persistent-local-service.md` for that direction.
+Legacy per-repo paths (`<repo>/.codeatlas/index.db`) still work with
+direct-store commands using `--db`.
 
 ### Hosted-ready boundary
 
@@ -204,17 +206,17 @@ for any hosted deployment.
 
 ## Operational Assumptions by Mode
 
-### Local-only operators should assume
+### Local operators should assume
 
-- the index lives with the checkout unless `--db` changes the location
+- the canonical model is one persistent service per developer machine
+- the shared store lives at `~/.codeatlas/` unless overridden
+- AI clients connect through the MCP bridge, not by spawning per-repo processes
 - semantic coverage depends on local runtime availability
 - local logs may contain operational metadata but should not contain raw source
   in structured fields
 - schema/version upgrades are handled by store migration logic and may require
   reindex decisions based on schema compatibility rules
-- the MCP serving model is local stdio transport launched by the user or AI
-  client from the same machine as the indexed checkout
-  (`codeatlas mcp serve --db <path>`)
+- the service binds to localhost only (127.0.0.1) with no authentication
 
 ### Future hosted operators should assume
 
@@ -227,11 +229,11 @@ for any hosted deployment.
 
 Current reality:
 
-- CodeAtlas is publishable and actionable as a local-first system.
+- CodeAtlas is publishable and actionable as a local-first system with a
+  persistent multi-repo service model.
+- The persistent local service (Epic 13, #148-#154) is implemented. Architecture
+  decisions are recorded in `docs/architecture/persistent-local-service.md`.
 - The repository is not yet publishable as a hosted service implementation.
-- The persistent local service model is the planned next architectural
-  direction (Epic 13, #148). Architecture decisions for that initiative are
-  recorded in `docs/architecture/persistent-local-service.md`.
 
 Hosted-ready claim means:
 

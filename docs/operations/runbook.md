@@ -9,9 +9,10 @@ It is intended to be actionable for maintainers and local operators.
 
 This runbook covers:
 
-- local environment preparation
-- indexing and query workflows
-- MCP server setup and troubleshooting
+- persistent service startup and management
+- repo catalog lifecycle operations
+- MCP bridge setup for AI clients
+- direct-store indexing and query workflows
 - semantic adapter setup and diagnosis
 - quality KPI reporting
 - schema/index maintenance workflows
@@ -45,109 +46,153 @@ from source).
 
 ### Useful environment variables
 
-- `TSSERVER_PATH`
-- `JAVA_HOME`
-- `KOTLIN_BRIDGE_JAR`
-- `CODEATLAS_LOG`
-- `CODEATLAS_LOG_FORMAT`
-- `CODEATLAS_OTEL`
+- `CODEATLAS_DATA_ROOT` — override the shared storage root (default: `~/.codeatlas`)
+- `CODEATLAS_PORT` — override the service port (default: `52337`)
+- `CODEATLAS_HOST` — override the service bind address (default: `127.0.0.1`)
+- `CODEATLAS_LOG` — set log level (e.g. `debug`, `info`)
+- `CODEATLAS_LOG_FORMAT` — `json` (default) or `compact`
+- `CODEATLAS_OTEL` — set to `1` to enable OpenTelemetry export
+- `TSSERVER_PATH` — explicit path to `tsserver` binary
+- `JAVA_HOME` — JDK location for Kotlin semantic adapter
+- `KOTLIN_BRIDGE_JAR` — path to Kotlin analysis bridge JAR
 
-## 2. Index a Repository
+## 2. Start the Persistent Service
 
-Full index:
+The canonical local model is one persistent service managing multiple repos.
 
-```bash
-cargo run -p cli -- index <repo-path>
-```
-
-Optional custom DB path:
-
-```bash
-cargo run -p cli -- index <repo-path> --db <db-path>
-```
-
-Optional git-diff acceleration:
+### Start the service
 
 ```bash
-cargo run -p cli -- index <repo-path> --git-diff
+codeatlas serve
 ```
 
-Expected output includes:
-
-- files discovered / parsed / errored
-- symbols extracted
-- semantic coverage summary
-- confidence summary
-- per-adapter breakdown when available
-
-## 3. Query the Local Index
-
-Query commands default to the shared store at `~/.codeatlas/metadata.db`.
-Use `--db <path>` to override. Commands that scope results to a repository
-require `--repo <repo-id>`.
-
-Examples:
+The service listens on `127.0.0.1:52337` by default. Override with:
 
 ```bash
-cargo run -p cli -- search-symbols <query> --repo <repo-id>
-cargo run -p cli -- get-symbol <symbol-id>
-cargo run -p cli -- file-outline <path> --repo <repo-id>
-cargo run -p cli -- file-tree --repo <repo-id>
-cargo run -p cli -- repo-outline --repo <repo-id>
+codeatlas serve --port 8080
+codeatlas serve --data-root /path/to/store
+codeatlas serve --host 0.0.0.0  # caution: exposes to network
 ```
 
-Note: `get-symbol` does not require `--repo` — symbol IDs include the repo
-prefix (e.g. `my-app//src/lib.rs::Config#class`) so they are globally unique.
+### Verify it's running
 
-Use the MCP server path when integrating with agent clients instead of direct
-CLI query commands.
+```bash
+curl http://127.0.0.1:52337/health    # 200 OK
+curl http://127.0.0.1:52337/status    # JSON with version, uptime, repo count
+```
 
-## 4. Run the MCP Server
+### Stop the service
 
-### Start the server
+Send SIGINT (Ctrl-C) or SIGTERM. The service shuts down gracefully.
+
+## 3. Manage Repositories
+
+### Add a repository
+
+```bash
+codeatlas repo add /absolute/path/to/my-app
+codeatlas repo add /absolute/path/to/billing --repo-id billing-v2
+codeatlas repo add /absolute/path/to/my-app --git-diff  # incremental
+```
+
+### List repositories
+
+```bash
+codeatlas repo list
+```
+
+### Check status
+
+```bash
+codeatlas repo status my-app
+```
+
+### Re-index after code changes
+
+```bash
+codeatlas repo refresh my-app
+codeatlas repo refresh my-app --git-diff  # incremental
+```
+
+### Remove a repository
+
+```bash
+codeatlas repo remove my-app
+```
+
+This deletes metadata, files, symbols, and orphaned blobs.
+
+## 4. Connect AI Clients (MCP Bridge)
+
+The MCP bridge proxies tool calls from AI clients to the persistent service.
+
+### Configure the client
+
+Add to your AI client's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "codeatlas": {
+      "command": "codeatlas",
+      "args": ["mcp", "bridge"]
+    }
+  }
+}
+```
+
+See the [README MCP Server Setup](../../README.md#mcp-server-setup) for
+client-specific examples (Claude Desktop, Cursor, OpenAI Codex CLI).
+
+### Override the service address
+
+```bash
+codeatlas mcp bridge --service-url 127.0.0.1:8080
+```
+
+Or via environment: `CODEATLAS_PORT`, `CODEATLAS_HOST`.
+
+### Troubleshoot bridge issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `cannot reach CodeAtlas service` | Service not running | Start with `codeatlas serve` |
+| Empty tool results | Wrong `repo_id` | Use `list_repos` tool or `codeatlas repo list` |
+| No stdout response | Client uses wrong framing | Bridge uses newline-delimited JSON-RPC |
+
+## 5. Direct-Store Workflows (Legacy)
+
+The direct-store commands still work for simple single-repo use or low-level
+operations without the persistent service.
+
+### Index a repository
+
+```bash
+codeatlas index <repo-path>
+codeatlas index <repo-path> --db <db-path>
+codeatlas index <repo-path> --git-diff
+```
+
+### Query the local index
+
+```bash
+codeatlas search-symbols <query> --repo <repo-id>
+codeatlas get-symbol <symbol-id>
+codeatlas file-outline <path> --repo <repo-id>
+codeatlas file-tree --repo <repo-id>
+codeatlas repo-outline --repo <repo-id>
+```
+
+### Run the direct MCP server
 
 ```bash
 codeatlas mcp serve --db ~/.codeatlas/metadata.db
 ```
 
-The server reads newline-delimited JSON-RPC from stdin and writes responses to
-stdout. All diagnostics go to stderr.
-
-### Verify it works
-
-```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db ~/.codeatlas/metadata.db
-```
-
-Expected: a JSON response with `"protocolVersion":"2025-11-25"`.
-
-### Configure an AI client
-
-See the [README MCP Server Setup](../../README.md#mcp-server-setup) for
-copy-paste configuration examples for Claude Desktop, Cursor, and OpenAI Codex CLI.
 See [MCP Client Compatibility Notes](../architecture/mcp-client-compatibility.md)
-for the currently documented interoperability shims and rationale.
+for interoperability shims and rationale.
 
-### Troubleshoot startup failures
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `database not found` | DB path does not exist | Run `codeatlas index <repo>` first (default: `~/.codeatlas/metadata.db`) |
-| `database is not readable` | Permission denied | Check file permissions |
-| `failed to open database` | Corrupt or non-SQLite file | Re-run `codeatlas index <repo>` |
-| `database path is a directory` | Path points to directory | Use the `.db` file path |
-| `--db <path> is required` | Missing `--db` flag | Add `--db /path/to/index.db` |
-| No stdout response | Client uses Content-Length framing | Use newline-delimited JSON-RPC |
-| Empty tool results | Wrong `repo_id` | `repo_id` is derived from the directory name used during indexing |
-
-### What the server does not support
-
-- HTTP, gRPC, or WebSocket transports
-- Content-Length framed MCP (2024-11-05 transport)
-- Authentication or multi-user access
-- Remote/hosted serving
-
-## 5. Generate a Repository Quality Report
+## 6. Generate a Repository Quality Report
 
 For live repository coverage metrics:
 
@@ -170,7 +215,7 @@ The report includes:
 - per-adapter contribution breakdown
 - pass/fail summary against KPI thresholds
 
-## 6. Diagnose Semantic Adapter Availability
+## 7. Diagnose Semantic Adapter Availability
 
 For runtime discovery order and setup instructions, see the
 [README semantic adapter setup](../../README.md#semantic-adapter-setup).
@@ -197,7 +242,7 @@ If Kotlin semantic coverage is unexpectedly absent:
 If semantic runtimes are missing, indexing should still succeed with syntax
 adapters where policy allows fallback.
 
-## 7. Run the Main Quality Gates Locally
+## 8. Run the Main Quality Gates Locally
 
 Format:
 
@@ -217,7 +262,7 @@ Tests:
 cargo test --workspace --all-features
 ```
 
-## 8. Inspect Regression KPIs
+## 9. Inspect Regression KPIs
 
 Fixture-based semantic regression suites:
 
@@ -234,7 +279,7 @@ Indexer metrics-focused tests:
 cargo test -p indexer metrics:: -- --nocapture
 ```
 
-## 9. CI KPI Artifact Workflow
+## 10. CI KPI Artifact Workflow
 
 The CI job `rust-quality-kpi`:
 
@@ -245,7 +290,7 @@ The CI job `rust-quality-kpi`:
 
 Use this when reviewing semantic quality changes or milestone closeout work.
 
-## 10. Schema and Reindex Workflow
+## 11. Schema and Reindex Workflow
 
 Current state:
 
@@ -258,7 +303,15 @@ Operator guidance:
   continue with normal indexing
 - if compatibility rules require reindex, rebuild the local index from source
 
-Recommended clean rebuild path:
+Recommended clean rebuild path (service mode):
+
+1. stop the service
+2. for each repo: `codeatlas repo refresh <repo_id>`
+3. if a full rebuild is needed: `codeatlas repo remove <repo_id>` then
+   `codeatlas repo add <path>` for each repository
+4. verify with `codeatlas repo list` and `codeatlas repo status <repo_id>`
+
+Recommended clean rebuild path (direct-store mode):
 
 1. remove or relocate the shared database (default: `~/.codeatlas/metadata.db`)
 2. rerun `codeatlas index <repo-path>` for each repository
@@ -266,7 +319,7 @@ Recommended clean rebuild path:
 
 Do not manually edit SQLite schema state.
 
-## 11. Logging and Tracing
+## 12. Logging and Tracing
 
 Structured logging defaults:
 
@@ -286,7 +339,7 @@ OpenTelemetry export can be enabled with:
 CODEATLAS_OTEL=1 cargo run -p cli -- index <repo-path>
 ```
 
-## 12. Key Failure Modes
+## 13. Key Failure Modes
 
 ### No symbols extracted
 
@@ -321,10 +374,12 @@ Check:
 - workflow grep patterns still match the printed output
 - uploaded artifact path in CI workflow is unchanged
 
-## 13. Reference Documents
+## 14. Reference Documents
 
 - `README.md`
 - `docs/architecture/deployment-modes.md`
+- `docs/architecture/persistent-local-service.md`
+- `docs/architecture/mcp-client-compatibility.md`
 - `docs/specifications/rust-code-intelligence-platform-spec.md`
 - `docs/workflow/github-process.md`
 - `docs/benchmarks/corpus.md`

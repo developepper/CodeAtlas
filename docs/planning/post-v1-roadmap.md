@@ -169,12 +169,14 @@ Planning note:
 
 Planning note:
 
-- The concrete first execution slice for Epic 13 is documented in
-  `docs/planning/persistent-multi-repo-local-service.md`.
-- The active GitHub issue set for that slice is #148 through #154.
-- That slice focuses on the persistent multi-repo local service model.
+- The first execution slice for Epic 13 is complete (#148 through #154).
+  It delivered the persistent multi-repo local service, repo catalog lifecycle,
+  MCP bridge, and canonical doc updates. See
+  `docs/planning/persistent-multi-repo-local-service.md` for the planning
+  artifact and `docs/architecture/persistent-local-service.md` for architecture
+  decisions.
 - Cross-repo search, dependency traversal, ownership metadata, and remote
-  connectors remain plausible follow-on work after the local service baseline.
+  connectors remain plausible follow-on work.
 
 ### Epic 14: Service APIs and Integrations
 

@@ -18,6 +18,7 @@ re-reading the whole codebase every time.
 - [How To Use It With AI Today](#how-to-use-it-with-ai-today)
 - [MCP Integration Shape](#mcp-integration-shape)
 - [AI Usage Examples](#ai-usage-examples)
+- [Service Architecture](#service-architecture)
 - [Current Status](#current-status)
 - [Design Principles](#design-principles)
 - [Roadmap](#roadmap)
@@ -35,27 +36,49 @@ CodeAtlas gives you:
 
 Today, this repository provides:
 
-- a local CLI you can run now
-- a built-in MCP server: `codeatlas mcp serve --db <path>`
-- a reusable MCP library surface (`server-mcp`)
+- a persistent local service: `codeatlas serve`
+- a multi-repo catalog with lifecycle operations: `codeatlas repo add/list/status/refresh/remove`
+- an MCP bridge for AI clients: `codeatlas mcp bridge`
+- a direct MCP server for simple single-repo use: `codeatlas mcp serve`
+- a local CLI for indexing and querying
 - a local-first architecture with hosted-ready boundaries
 
 Today, this repository does **not** provide:
 
 - a standalone hosted deployment
-- HTTP/gRPC product APIs
+- auth, tenancy, or multi-user controls
+- Docker packaging (deferred follow-up)
 
-You can use CodeAtlas immediately through the CLI or by pointing any stdio
-MCP-capable AI client at `codeatlas mcp serve --db <path>`.
+The canonical local usage model is one persistent service managing multiple
+repositories. AI clients connect through the MCP bridge.
 
 ## What You Can Do With It
 
-- `index`: build or update a local index for a repository
+### Service and repo management
+
+- `serve`: start the persistent local HTTP service
+- `repo add <path>`: register and index a repository
+- `repo list`: list all registered repositories with status
+- `repo status <repo_id>`: show detailed status for a repository
+- `repo refresh <repo_id>`: re-index a registered repository
+- `repo remove <repo_id>`: de-register a repository and clean up data
+
+### Querying
+
 - `search-symbols`: find functions, classes, methods, types, and constants
 - `get-symbol`: fetch an exact symbol by stable ID (CLI uses hyphens; MCP uses underscores, e.g. `get_symbol` / `get_symbols`)
 - `file-outline`: inspect symbols in a file
 - `file-tree`: inspect indexed files in a repo
 - `repo-outline`: inspect repository structure and counts
+
+### AI integration
+
+- `mcp bridge`: start the MCP bridge to the persistent service (recommended)
+- `mcp serve`: start a direct stdio MCP server (simple single-repo use)
+
+### Other
+
+- `index`: build or update a local index (lower-level; prefer `repo add`)
 - `quality-report`: inspect semantic coverage and merge quality metrics
 
 ## Installation
@@ -104,85 +127,68 @@ These may be added in future releases based on demand.
 See [Installation](#installation) above. The examples below assume `codeatlas`
 is in your `PATH`.
 
-### 2. Index a Repository
+### 2. Start the service and add repositories
 
 ```bash
-codeatlas index /absolute/path/to/repo
+# Start the persistent service (runs in foreground).
+codeatlas serve &
+
+# Add repositories to the catalog.
+codeatlas repo add /absolute/path/to/my-app
+codeatlas repo add /absolute/path/to/billing
+
+# Check what's registered.
+codeatlas repo list
 ```
 
-Useful options:
+The service stores data in `~/.codeatlas/` by default (override with
+`--data-root <path>` or `CODEATLAS_DATA_ROOT`). The `repo_id` is derived from
+the directory name — indexing `/Users/alex/work/my-app` produces `repo_id`
+`my-app`.
 
-```bash
-codeatlas index /absolute/path/to/repo --db /tmp/codeatlas.db
-codeatlas index /absolute/path/to/repo --git-diff
+### 3. Connect an AI client
+
+Configure your AI client to use the MCP bridge:
+
+```json
+{
+  "mcpServers": {
+    "codeatlas": {
+      "command": "codeatlas",
+      "args": ["mcp", "bridge"]
+    }
+  }
+}
 ```
 
-The CLI stores the index in a shared storage root. By default the DB lives at:
+That's it. The bridge connects to the running service and exposes all indexed
+repositories through the standard MCP tool interface. See
+[MCP Server Setup](#mcp-server-setup) for client-specific examples.
 
-```text
-~/.codeatlas/metadata.db
-```
-
-This shared store supports multiple repositories — each `codeatlas index`
-invocation adds or updates a repository in the same database. You can override
-the path with `--db <path>` or by setting `CODEATLAS_DATA_ROOT`.
-
-### 3. Find the Repo ID
-
-The CLI derives `repo_id` from the indexed directory name.
-
-Example:
-
-- repo path: `/Users/alex/work/my-app`
-- repo id: `my-app`
-
-You will need that `repo_id` for query commands and symbol IDs.
-
-### 4. Query the Index
+### 4. Query from the CLI
 
 All query commands default to the shared store at `~/.codeatlas/metadata.db`.
 Use `--db <path>` to override.
 
-Search for symbols:
-
 ```bash
 codeatlas search-symbols greet --repo my-app
-```
-
-Search with filters:
-
-```bash
-codeatlas search-symbols service --repo my-app --kind class --language typescript --limit 10
-```
-
-Get a symbol by ID (symbol IDs include the repo prefix):
-
-```bash
 codeatlas get-symbol 'my-app//src/lib.rs::greet#function'
-```
-
-Get a file outline:
-
-```bash
 codeatlas file-outline src/lib.rs --repo my-app
-```
-
-Get a file tree:
-
-```bash
 codeatlas file-tree --repo my-app
-```
-
-Get a repository outline:
-
-```bash
 codeatlas repo-outline --repo my-app
 ```
 
-Generate a quality report:
+### 5. Manage repositories
 
 ```bash
-codeatlas quality-report /absolute/path/to/repo
+# Re-index after code changes.
+codeatlas repo refresh my-app
+
+# Check status.
+codeatlas repo status my-app
+
+# Remove a repo and clean up its data.
+codeatlas repo remove my-app
 ```
 
 ## Semantic Adapter Setup
@@ -212,29 +218,29 @@ policy allows.
 
 ## MCP Server Setup
 
-CodeAtlas includes a built-in MCP server that works with any stdio MCP client.
+CodeAtlas provides two MCP integration paths:
 
-### Prerequisites
+1. **MCP bridge** (recommended) — a thin stdio process that proxies tool calls
+   to the persistent CodeAtlas service. One service, many repos, one client
+   config.
+2. **Direct MCP server** — a standalone stdio server for simple single-repo
+   workflows. No service needed.
+
+Both speak newline-delimited JSON-RPC 2.0 (MCP spec 2025-11-25). Compatibility
+notes and interoperability shims are documented in
+[docs/architecture/mcp-client-compatibility.md](docs/architecture/mcp-client-compatibility.md).
+
+### Option 1: MCP bridge (recommended)
+
+Prerequisites:
 
 1. Install `codeatlas` (see [Installation](#installation)).
-2. Index a repository so an index database exists.
+2. Start the service: `codeatlas serve`
+3. Add at least one repo: `codeatlas repo add /path/to/repo`
 
-### Launch the MCP server
+#### Client configuration
 
-```bash
-codeatlas mcp serve --db ~/.codeatlas/metadata.db
-```
-
-The server communicates over stdio using newline-delimited JSON-RPC 2.0
-(MCP spec 2025-11-25). All diagnostics go to stderr; stdout is reserved for
-protocol messages only.
-
-Compatibility notes for documented clients and additive interoperability shims
-live in [docs/architecture/mcp-client-compatibility.md](docs/architecture/mcp-client-compatibility.md).
-
-### Client configuration
-
-#### Claude Desktop
+##### Claude Desktop
 
 Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
 
@@ -242,57 +248,70 @@ Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
 {
   "mcpServers": {
     "codeatlas": {
-      "command": "/path/to/codeatlas",
-      "args": ["mcp", "serve", "--db", "/path/to/.codeatlas/metadata.db"]
+      "command": "codeatlas",
+      "args": ["mcp", "bridge"]
     }
   }
 }
 ```
 
-#### Cursor
+##### Cursor
 
-Add to your Cursor MCP settings (`.cursor/mcp.json` in your project or global
-config):
+Add to your Cursor MCP settings (`.cursor/mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "codeatlas": {
-      "command": "/path/to/codeatlas",
-      "args": ["mcp", "serve", "--db", "/path/to/.codeatlas/metadata.db"]
+      "command": "codeatlas",
+      "args": ["mcp", "bridge"]
     }
   }
 }
 ```
 
-#### OpenAI Codex CLI
+##### OpenAI Codex CLI
 
-Create or edit `.codex/config.json` in your project root:
+Create or edit `.codex/config.json`:
 
 ```json
 {
   "mcpServers": {
     "codeatlas": {
-      "command": "/path/to/codeatlas",
-      "args": ["mcp", "serve", "--db", "/path/to/.codeatlas/metadata.db"]
+      "command": "codeatlas",
+      "args": ["mcp", "bridge"]
     }
   }
 }
 ```
 
-#### Generic stdio MCP client
+##### Generic stdio MCP client
 
-Any client that speaks newline-delimited JSON-RPC over stdio can use CodeAtlas.
 Configure it to spawn:
 
 ```
-/path/to/codeatlas mcp serve --db /path/to/.codeatlas/metadata.db
+codeatlas mcp bridge
 ```
+
+The bridge connects to the service at `127.0.0.1:52337` by default. Override
+with `--service-url <host:port>` or the `CODEATLAS_PORT`/`CODEATLAS_HOST`
+environment variables.
+
+### Option 2: Direct MCP server
+
+For simple single-repo use without running the persistent service:
+
+```bash
+codeatlas mcp serve --db ~/.codeatlas/metadata.db
+```
+
+Client configuration is the same as above but uses `["mcp", "serve"]` (or
+`["mcp", "serve", "--db", "/path/to/metadata.db"]`) instead of
+`["mcp", "bridge"]`.
 
 ### Available tools
 
-The MCP server exposes these tools via `tools/list`, each with full JSON Schema
-input definitions:
+Both the bridge and direct server expose these tools via `tools/list`:
 
 | Tool | Description |
 |------|-------------|
@@ -304,57 +323,43 @@ input definitions:
 | `get_file_tree` | List files in a repository or subtree |
 | `get_repo_outline` | Show repository structure and file summary |
 | `search_text` | Search for text patterns across indexed files |
+| `list_repos` | List all indexed repositories with status |
+| `get_repo_status` | Get detailed status for a specific repository |
 
 Repository-scoped tools accept `repo_id` as a parameter. Symbol IDs include
 the repo prefix (e.g., `my-app//src/lib.rs::Config#class`). The `repo_id` is
 derived from the indexed directory name (e.g., indexing `/home/user/my-app`
 produces `repo_id` `my-app`).
 
-### Verify the server starts
-
-```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db ~/.codeatlas/metadata.db
-```
-
-You should see a JSON response containing `"protocolVersion":"2025-11-25"` and
-`"serverInfo":{"name":"codeatlas",...}`.
-
 ### Troubleshooting
 
-**"database not found"** — The `--db` path does not exist. Run
-`codeatlas index <repo-path>` first to create the index (default:
-`~/.codeatlas/metadata.db`).
+**"cannot reach CodeAtlas service"** (bridge) — The service is not running.
+Start it with `codeatlas serve`.
 
-**"database is not readable"** — The file exists but cannot be read. Check
-file permissions (`ls -la` on the DB path).
+**"database not found"** (direct server) — The `--db` path does not exist.
+Run `codeatlas repo add <path>` or `codeatlas index <path>` first.
 
-**"failed to open database"** — The file exists and is readable but is not a
-valid CodeAtlas index (possibly corrupt or not a SQLite database). Re-run
-`codeatlas index <repo-path>` to rebuild.
-
-**"database path is a directory"** — The `--db` path points to a directory
-instead of a file. Point it at the `.db` file inside the directory.
+**Empty tool results** — Verify the `repo_id` matches an indexed repository.
+Use `codeatlas repo list` or the `list_repos` tool to see available repos.
 
 **No response on stdout** — Ensure the client uses newline-delimited JSON-RPC,
-not Content-Length framing. CodeAtlas will reject Content-Length headers with a
-clear error.
-
-**Empty tool results** — Verify the `repo_id` matches the indexed repository.
-The `repo_id` is derived from the directory name used during indexing.
+not Content-Length framing.
 
 ### What is not supported
 
-- HTTP, gRPC, or WebSocket transports (stdio only)
 - Content-Length framed MCP (2024-11-05 transport)
 - Authentication, tenancy, or multi-user access
 - Remote/hosted serving
+- The service HTTP API (`/tools/call`, `/repos`, etc.) is internal to the
+  local machine. AI clients should use the MCP bridge, not the HTTP endpoints
+  directly.
 
 ## How To Use It With AI Today
 
-### Option 1: MCP server (recommended)
+### Option 1: MCP bridge with persistent service (recommended)
 
-The simplest path is to use the built-in MCP server. See
-[MCP Server Setup](#mcp-server-setup) above.
+Start the service, add your repos, and configure your AI client to use the
+bridge. See [Quick Start](#quick-start) and [MCP Server Setup](#mcp-server-setup).
 
 ### Option 2: Use the CLI as a retrieval tool in your agent workflow
 
@@ -433,6 +438,42 @@ codeatlas quality-report /absolute/path/to/repo
 Use that output to decide whether the agent should trust semantic results or
 fall back to broader file reads.
 
+## Service Architecture
+
+The canonical local deployment is one persistent CodeAtlas service managing
+multiple repositories:
+
+```
+AI Client (Claude, Cursor)
+    |  stdio MCP
+MCP Bridge (codeatlas mcp bridge)
+    |  HTTP (localhost)
+CodeAtlas Service (codeatlas serve)
+    |
+Shared Store (~/.codeatlas/)
+    ├── metadata.db
+    ├── blobs/
+    ├── repo: my-app
+    ├── repo: billing
+    └── repo: shared-lib
+```
+
+The service listens on `127.0.0.1:52337` by default and exposes:
+
+- `GET /health` — health check
+- `GET /status` — service metadata (version, uptime, repo count)
+- `GET /repos` — list all repositories
+- `GET /repos/{repo_id}` — repository details
+- `DELETE /repos/{repo_id}` — remove a repository
+- `POST /tools/call` — execute a query tool
+
+The direct-store commands (`codeatlas index`, `codeatlas mcp serve --db`,
+`codeatlas search-symbols --repo`, etc.) continue to work for low-level
+workflows. The service model is the recommended path for daily multi-repo use.
+
+For architecture decisions and the relationship to future hosted deployment,
+see `docs/architecture/persistent-local-service.md`.
+
 ## Current Status
 
 Milestones M0-M9 are complete:
@@ -458,7 +499,8 @@ Milestones M0-M9 are complete:
 | `indexer` | End-to-end indexing pipeline (discovery -> parse -> enrich -> persist) | Complete |
 | `query-engine` | Symbol/text search, symbol lookup, file/repo outline retrieval | Complete |
 | `server-mcp` | MCP tool registry, structured response/error envelopes, integration + E2E tests | Complete |
-| `cli` | Local commands, MCP stdio server (`codeatlas mcp serve`), indexing, search/get symbol, file/repo outline | Complete |
+| `service` | Persistent local HTTP service runtime (`codeatlas serve`), repo catalog and query APIs | Complete |
+| `cli` | Local commands, MCP stdio server, MCP bridge, repo lifecycle, service startup, indexing, querying | Complete |
 
 ### Infrastructure
 
@@ -478,7 +520,8 @@ Milestones M0-M9 are complete:
 
 - Watcher/local file-system triggered update mode.
 - Semantic adapters beyond the current TypeScript and Kotlin implementations.
-- Hosted/server API surface (HTTP/gRPC), auth, quotas, and multi-tenant controls.
+- Docker packaging for the persistent service.
+- Hosted auth, quotas, and multi-tenant controls.
 - Production observability dashboards and hosted telemetry/export integrations beyond the local CLI baseline.
 
 ### Semantic Adapter Runtime Discovery
