@@ -2,6 +2,7 @@
 //!
 //! These tests exercise the CLI binary end-to-end by invoking it as a subprocess.
 
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -629,7 +630,6 @@ fn mcp_unknown_subcommand_fails() {
 // mcp serve stdio protocol tests (subprocess)
 // ---------------------------------------------------------------------------
 
-use std::io::Write;
 use std::process::Stdio;
 
 /// Send newline-delimited JSON messages to the MCP server subprocess and
@@ -1690,4 +1690,130 @@ fn repo_status_nonexistent() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("not found"));
+}
+
+// ---------------------------------------------------------------------------
+// Serve command tests
+// ---------------------------------------------------------------------------
+
+/// Starts `codeatlas serve` on port 0 and reads stderr with a timeout to
+/// extract the actual listening address. Returns (child, addr_string).
+/// Kills the child on timeout so tests don't hang.
+fn start_serve(db_dir: &TempDir) -> (std::process::Child, String) {
+    let mut child = std::process::Command::new(codeatlas_bin())
+        .args([
+            "serve",
+            "--data-root",
+            db_dir.path().to_str().unwrap(),
+            "--port",
+            "0",
+        ])
+        .env("CODEATLAS_LOG_FORMAT", "compact")
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn serve");
+
+    let stderr = child.stderr.take().unwrap();
+
+    // Read stderr in a background thread so we can apply a timeout.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+            if let Some(start) = line.find("http://") {
+                let addr = line[start..]
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_start_matches("http://")
+                    .to_string();
+                let _ = tx.send(addr);
+                return;
+            }
+        }
+    });
+
+    let addr = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap_or_else(|_| {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("service did not print listening address within 10 seconds");
+        });
+
+    (child, addr)
+}
+
+/// Send a minimal HTTP/1.1 request over raw TCP and return the response.
+/// Avoids a dependency on curl or an HTTP client crate in tests.
+fn http_get(addr: &str, path: &str) -> (u16, String) {
+    let mut stream = std::net::TcpStream::connect(addr).expect("connect to service");
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .ok();
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).expect("send request");
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("read response");
+
+    // Parse status code from "HTTP/1.1 200 OK\r\n..."
+    let status_code = response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+
+    // Extract body (after the blank line separating headers from body).
+    let body = response.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+
+    (status_code, body)
+}
+
+#[test]
+fn serve_help_shows_usage() {
+    let output = Command::new(codeatlas_bin())
+        .args(["serve", "--help"])
+        .output()
+        .expect("serve help");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--data-root"));
+    assert!(stderr.contains("--port"));
+    assert!(stderr.contains("/health"));
+}
+
+#[test]
+fn serve_starts_and_responds_to_health() {
+    let db_dir = TempDir::new().expect("temp dir");
+    let (mut child, addr) = start_serve(&db_dir);
+
+    let (status, _body) = http_get(&addr, "/health");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(status, 200, "health endpoint should return 200");
+}
+
+#[test]
+fn serve_status_endpoint_returns_json() {
+    let db_dir = TempDir::new().expect("temp dir");
+    let (mut child, addr) = start_serve(&db_dir);
+
+    let (status, body) = http_get(&addr, "/status");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(status, 200);
+    let json: serde_json::Value = serde_json::from_str(&body).expect("parse status JSON");
+    assert_eq!(json["status"], "ok");
+    assert!(json["uptime_secs"].is_number());
+    assert!(json["repo_count"].is_number());
 }

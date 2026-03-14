@@ -1,0 +1,23 @@
+[package]
+name = "service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "CodeAtlas persistent local HTTP service runtime"
+
+[dependencies]
+axum.workspace = true
+tokio.workspace = true
+core-model.workspace = true
+query-engine.workspace = true
+server-mcp.workspace = true
+store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "test-util"] }
+tower.workspace = true

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/adapter-api", "crates/adapter-semantic-kotlin", "crates/adapter-semantic-typescript", "crates/adapter-syntax-treesitter", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/server-mcp", "crates/store", "crates/workspace-placeholder"]
+members = ["crates/adapter-api", "crates/adapter-semantic-kotlin", "crates/adapter-semantic-typescript", "crates/adapter-syntax-treesitter", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/server-mcp", "crates/service", "crates/store", "crates/workspace-placeholder"]
 resolver = "2"
 
 [workspace.package]
@@ -36,3 +36,7 @@ opentelemetry-stdout = "0.27"
 tracing-opentelemetry = "0.28"
 criterion = { version = "0.5", features = ["html_reports"] }
 libc = "0.2"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+service = { path = "crates/service" }
+tower = "0.5"

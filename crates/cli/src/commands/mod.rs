@@ -7,3 +7,4 @@ pub mod quality_report;
 pub mod repo;
 pub mod repo_outline;
 pub mod search_symbols;
+pub mod serve;

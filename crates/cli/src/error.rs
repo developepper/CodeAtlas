@@ -9,6 +9,7 @@ pub enum CliError {
     Index(indexer::PipelineError),
     Query(query_engine::QueryError),
     Store(store::StoreError),
+    Service(service::ServiceError),
     Io(std::io::Error),
 }
 
@@ -19,6 +20,7 @@ impl fmt::Display for CliError {
             Self::Index(e) => write!(f, "indexing failed: {e}"),
             Self::Query(e) => write!(f, "query failed: {e}"),
             Self::Store(e) => write!(f, "store error: {e}"),
+            Self::Service(e) => write!(f, "service error: {e}"),
             Self::Io(e) => write!(f, "I/O error: {e}"),
         }
     }
@@ -30,6 +32,7 @@ impl std::error::Error for CliError {
             Self::Index(e) => Some(e),
             Self::Query(e) => Some(e),
             Self::Store(e) => Some(e),
+            Self::Service(e) => Some(e),
             Self::Io(e) => Some(e),
             Self::Usage(_) => None,
         }
@@ -51,6 +54,12 @@ impl From<query_engine::QueryError> for CliError {
 impl From<store::StoreError> for CliError {
     fn from(e: store::StoreError) -> Self {
         Self::Store(e)
+    }
+}
+
+impl From<service::ServiceError> for CliError {
+    fn from(e: service::ServiceError) -> Self {
+        Self::Service(e)
     }
 }
 
