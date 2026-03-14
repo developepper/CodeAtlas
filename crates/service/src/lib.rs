@@ -9,7 +9,7 @@
 mod routes;
 mod state;
 
-pub use state::ServiceConfig;
+pub use state::{ServiceConfig, DEFAULT_HOST, DEFAULT_PORT};
 
 use std::net::SocketAddr;
 
