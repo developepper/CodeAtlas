@@ -201,6 +201,23 @@ impl QueryService for StoreQueryService<'_> {
         })
     }
 
+    fn list_repos(&self) -> Result<Vec<core_model::RepoRecord>, QueryError> {
+        let span = info_span!("query_list_repos");
+        let _guard = span.enter();
+
+        Ok(self.store.repos().list_all()?)
+    }
+
+    fn get_repo_status(&self, repo_id: &str) -> Result<core_model::RepoRecord, QueryError> {
+        let span = info_span!("query_get_repo_status", repo_id = %repo_id);
+        let _guard = span.enter();
+
+        self.store
+            .repos()
+            .get(repo_id)?
+            .ok_or_else(|| QueryError::NotFound { id: repo_id.into() })
+    }
+
     fn search_text(&self, query: &TextQuery) -> Result<QueryResult<TextMatch>, QueryError> {
         let span = info_span!(
             "query_search_text",

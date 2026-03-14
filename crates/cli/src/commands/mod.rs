@@ -4,5 +4,6 @@ pub mod get_symbol;
 pub mod index;
 pub mod mcp_serve;
 pub mod quality_report;
+pub mod repo;
 pub mod repo_outline;
 pub mod search_symbols;

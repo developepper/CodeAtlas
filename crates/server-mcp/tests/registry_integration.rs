@@ -21,11 +21,11 @@ fn call(tool: &str, params: serde_json::Value) -> McpResponse {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn registry_lists_all_eight_tools() {
+fn registry_lists_all_tools() {
     let svc = StubQueryService::new();
     let reg = ToolRegistry::new(&svc);
     let names = reg.tool_names();
-    assert_eq!(names.len(), 8);
+    assert_eq!(names.len(), 10);
     assert!(names.contains(&"search_symbols"));
     assert!(names.contains(&"get_symbol"));
     assert!(names.contains(&"get_symbols"));
@@ -34,6 +34,8 @@ fn registry_lists_all_eight_tools() {
     assert!(names.contains(&"get_file_tree"));
     assert!(names.contains(&"get_repo_outline"));
     assert!(names.contains(&"search_text"));
+    assert!(names.contains(&"list_repos"));
+    assert!(names.contains(&"get_repo_status"));
 }
 
 #[test]
@@ -445,6 +447,55 @@ fn get_file_outline_symbols_carry_source_adapter() {
 }
 
 // ---------------------------------------------------------------------------
+// Repo catalog tool tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn list_repos_returns_repos() {
+    let resp = call("list_repos", json!({}));
+    assert_eq!(resp.status, Status::Success);
+    let payload = resp.payload.unwrap();
+    let repos = payload["repos"].as_array().unwrap();
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0]["repo_id"], "repo-1");
+    assert_eq!(repos[0]["indexing_status"], "ready");
+    assert_eq!(repos[0]["freshness_status"], "fresh");
+    assert!(repos[0]["source_root"].is_string());
+    assert_eq!(payload["count"], 1);
+}
+
+#[test]
+fn get_repo_status_returns_full_record() {
+    let resp = call("get_repo_status", json!({ "repo_id": "repo-1" }));
+    assert_eq!(resp.status, Status::Success);
+    let payload = resp.payload.unwrap();
+    assert_eq!(payload["repo_id"], "repo-1");
+    assert_eq!(payload["indexing_status"], "ready");
+    assert_eq!(payload["freshness_status"], "fresh");
+    assert!(payload["indexed_at"].is_string());
+    assert!(payload["index_version"].is_string());
+    assert!(payload["file_count"].is_number());
+    assert!(payload["symbol_count"].is_number());
+    assert!(payload["language_counts"].is_object());
+}
+
+#[test]
+fn get_repo_status_not_found() {
+    let resp = call("get_repo_status", json!({ "repo_id": "nonexistent" }));
+    assert_eq!(resp.status, Status::Error);
+    let err = resp.error.unwrap();
+    assert_eq!(err.code, ErrorCode::NotFound);
+}
+
+#[test]
+fn get_repo_status_missing_params() {
+    let resp = call("get_repo_status", json!({}));
+    assert_eq!(resp.status, Status::Error);
+    let err = resp.error.unwrap();
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+}
+
+// ---------------------------------------------------------------------------
 // Retryable error contract
 // ---------------------------------------------------------------------------
 
@@ -514,6 +565,18 @@ impl query_engine::QueryService for FailingQueryService {
         &self,
         _: &query_engine::TextQuery,
     ) -> Result<query_engine::QueryResult<query_engine::TextMatch>, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn list_repos(&self) -> Result<Vec<core_model::RepoRecord>, QueryError> {
+        Err(QueryError::Store(store::StoreError::Validation(
+            "simulated store failure".into(),
+        )))
+    }
+
+    fn get_repo_status(&self, _: &str) -> Result<core_model::RepoRecord, QueryError> {
         Err(QueryError::Store(store::StoreError::Validation(
             "simulated store failure".into(),
         )))

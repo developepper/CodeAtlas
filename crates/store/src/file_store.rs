@@ -157,6 +157,27 @@ impl<'a> FileStore<'a> {
         Ok(map)
     }
 
+    /// Returns the distinct `file_hash` values for all files in a repository.
+    pub fn list_hashes(&self, repo_id: &str) -> Result<Vec<String>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT file_hash FROM files WHERE repo_id = ?1")?;
+        let hashes = stmt
+            .query_map(params![repo_id], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(hashes)
+    }
+
+    /// Returns whether any file record in the store references the given hash.
+    pub fn is_hash_referenced(&self, file_hash: &str) -> Result<bool, StoreError> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE file_hash = ?1 LIMIT 1",
+            params![file_hash],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
     /// Returns the total number of file records for a repository.
     pub fn count(&self, repo_id: &str) -> Result<u64, StoreError> {
         let count: i64 = self.conn.query_row(

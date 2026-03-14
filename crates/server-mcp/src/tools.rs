@@ -65,6 +65,11 @@ pub struct RepoOutlineParams {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RepoStatusParams {
+    pub repo_id: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SearchTextParams {
     pub repo_id: String,
     pub pattern: String,
@@ -393,6 +398,60 @@ pub fn search_text(svc: &dyn QueryService, params: serde_json::Value) -> ToolRes
         }),
         truncated: result.meta.truncated,
         quality_stats,
+    })
+}
+
+pub fn list_repos(svc: &dyn QueryService, _params: serde_json::Value) -> ToolResult {
+    let repos = svc.list_repos()?;
+
+    let items: Vec<serde_json::Value> = repos
+        .iter()
+        .map(|r| {
+            json!({
+                "repo_id": r.repo_id,
+                "display_name": r.display_name,
+                "source_root": r.source_root,
+                "indexed_at": r.indexed_at,
+                "indexing_status": r.indexing_status.as_str(),
+                "freshness_status": r.freshness_status.as_str(),
+                "file_count": r.file_count,
+                "symbol_count": r.symbol_count,
+                "language_counts": r.language_counts,
+                "registered_at": r.registered_at,
+            })
+        })
+        .collect();
+
+    Ok(ToolOutput {
+        payload: json!({ "repos": items, "count": items.len() }),
+        truncated: false,
+        quality_stats: QualityStats::default(),
+    })
+}
+
+pub fn get_repo_status(svc: &dyn QueryService, params: serde_json::Value) -> ToolResult {
+    let p: RepoStatusParams =
+        serde_json::from_value(params).map_err(|e| McpError::invalid_params(e.to_string()))?;
+
+    let repo = svc.get_repo_status(&p.repo_id)?;
+
+    Ok(ToolOutput {
+        payload: json!({
+            "repo_id": repo.repo_id,
+            "display_name": repo.display_name,
+            "source_root": repo.source_root,
+            "indexed_at": repo.indexed_at,
+            "index_version": repo.index_version,
+            "indexing_status": repo.indexing_status.as_str(),
+            "freshness_status": repo.freshness_status.as_str(),
+            "file_count": repo.file_count,
+            "symbol_count": repo.symbol_count,
+            "language_counts": repo.language_counts,
+            "registered_at": repo.registered_at,
+            "git_head": repo.git_head,
+        }),
+        truncated: false,
+        quality_stats: QualityStats::default(),
     })
 }
 

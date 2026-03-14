@@ -370,6 +370,8 @@ fn tool_description(name: &str) -> &'static str {
         "get_file_tree" => "List files in a repository or subtree",
         "get_repo_outline" => "Show repository structure and file summary",
         "search_text" => "Search for text patterns across indexed files",
+        "list_repos" => "List all indexed repositories with status and metadata",
+        "get_repo_status" => "Get detailed status and metadata for a specific repository",
         _ => "CodeAtlas tool",
     }
 }
@@ -531,6 +533,23 @@ fn tool_input_schema(name: &str) -> Value {
                 }
             },
             "required": ["repo_id", "pattern"]
+        }),
+
+        "list_repos" => serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+
+        "get_repo_status" => serde_json::json!({
+            "type": "object",
+            "properties": {
+                "repo_id": {
+                    "type": "string",
+                    "description": "Repository identifier"
+                }
+            },
+            "required": ["repo_id"]
         }),
 
         _ => serde_json::json!({
@@ -736,7 +755,7 @@ mod tests {
         let responses = parse_responses(&output);
         assert_eq!(responses.len(), 1);
         let tools = responses[0]["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 10);
 
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"search_symbols"));
@@ -1139,7 +1158,7 @@ mod tests {
         let responses = parse_responses(&output);
         assert_eq!(responses.len(), 1);
         let tools = responses[0]["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 10);
     }
 
     #[test]
