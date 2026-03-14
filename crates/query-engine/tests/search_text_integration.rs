@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use core_model::{FileRecord, QualityLevel, QualityMix, RepoRecord, SymbolKind, SymbolRecord};
+use core_model::{
+    FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+    SymbolRecord,
+};
 use query_engine::{QueryError, QueryFilters, QueryService, StoreQueryService, TextQuery};
 use store::MetadataStore;
 
@@ -21,6 +24,9 @@ fn seed_store() -> MetadataStore {
             file_count: 2,
             symbol_count: 5,
             git_head: None,
+            registered_at: Some("2026-03-09T00:00:00Z".to_string()),
+            indexing_status: IndexingStatus::Ready,
+            freshness_status: FreshnessStatus::Fresh,
         })
         .unwrap();
 
@@ -103,7 +109,8 @@ fn make_symbol(
 ) -> SymbolRecord {
     let qualified_name = format!("crate::{name}");
     SymbolRecord {
-        id: core_model::build_symbol_id(file_path, &qualified_name, kind).expect("build id"),
+        id: core_model::build_symbol_id("repo-1", file_path, &qualified_name, kind)
+            .expect("build id"),
         repo_id: "repo-1".into(),
         file_path: file_path.into(),
         language: "rust".into(),
@@ -381,6 +388,9 @@ fn fts_index_updated_on_symbol_insert() {
             file_count: 1,
             symbol_count: 0,
             git_head: None,
+            registered_at: Some("2026-03-09T00:00:00Z".to_string()),
+            indexing_status: IndexingStatus::Ready,
+            freshness_status: FreshnessStatus::Fresh,
         })
         .unwrap();
 
@@ -418,7 +428,7 @@ fn fts_index_updated_on_symbol_insert() {
     store
         .symbols()
         .upsert(&SymbolRecord {
-            id: core_model::build_symbol_id("a.rs", &qualified_name, SymbolKind::Function)
+            id: core_model::build_symbol_id("r", "a.rs", &qualified_name, SymbolKind::Function)
                 .expect("build id"),
             repo_id: "r".into(),
             file_path: "a.rs".into(),

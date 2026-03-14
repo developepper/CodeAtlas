@@ -497,7 +497,7 @@ fn repo_outline_fails_without_required_args() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn mcp_serve_missing_db_fails() {
+fn mcp_serve_no_db_flag_uses_default_and_fails_when_missing() {
     let output = Command::new(codeatlas_bin())
         .args(["mcp", "serve"])
         .output()
@@ -506,8 +506,8 @@ fn mcp_serve_missing_db_fails() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--db <path> is required"),
-        "should report missing --db, got: {stderr}"
+        stderr.contains("database not found"),
+        "should report database not found at default path, got: {stderr}"
     );
 }
 
@@ -1090,7 +1090,7 @@ fn mcp_serve_corrupt_db_diagnostic() {
 }
 
 #[test]
-fn mcp_serve_missing_db_flag_diagnostic() {
+fn mcp_serve_no_db_flag_default_path_diagnostic() {
     let output = Command::new(codeatlas_bin())
         .args(["mcp", "serve"])
         .output()
@@ -1098,13 +1098,13 @@ fn mcp_serve_missing_db_flag_diagnostic() {
 
     assert!(
         !output.status.success(),
-        "should exit non-zero for missing --db"
+        "should exit non-zero when default db does not exist"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--db <path> is required"),
-        "should report missing flag, got: {stderr}"
+        stderr.contains("database not found"),
+        "should report database not found, got: {stderr}"
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);

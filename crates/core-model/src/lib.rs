@@ -65,6 +65,72 @@ pub enum QualityLevel {
     Syntax,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexingStatus {
+    Pending,
+    Indexing,
+    #[default]
+    Ready,
+    Failed,
+}
+
+impl IndexingStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Indexing => "indexing",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl std::str::FromStr for IndexingStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(Self::Pending),
+            "indexing" => Ok(Self::Indexing),
+            "ready" => Ok(Self::Ready),
+            "failed" => Ok(Self::Failed),
+            other => Err(format!("unknown indexing status: '{other}'")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FreshnessStatus {
+    #[default]
+    Fresh,
+    Stale,
+}
+
+impl FreshnessStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+        }
+    }
+}
+
+impl std::str::FromStr for FreshnessStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "fresh" => Ok(Self::Fresh),
+            "stale" => Ok(Self::Stale),
+            other => Err(format!("unknown freshness status: '{other}'")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
@@ -154,12 +220,24 @@ pub struct RepoRecord {
     pub repo_id: String,
     pub display_name: String,
     pub source_root: String,
+    /// Last successful index completion time (RFC 3339). Updated on each
+    /// successful indexing run.
     pub indexed_at: String,
     pub index_version: String,
     pub language_counts: BTreeMap<String, u64>,
     pub file_count: u64,
     pub symbol_count: u64,
     pub git_head: Option<String>,
+    /// When the repo was first registered in the catalog. `None` for legacy
+    /// records created before catalog metadata was added.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registered_at: Option<String>,
+    /// Current indexing lifecycle status.
+    #[serde(default)]
+    pub indexing_status: IndexingStatus,
+    /// Explicit freshness/staleness signal for repo-catalog workflows.
+    #[serde(default)]
+    pub freshness_status: FreshnessStatus,
 }
 
 impl Validate for SymbolRecord {
@@ -176,11 +254,16 @@ impl Validate for SymbolRecord {
         require_non_empty(&self.indexed_at, "indexed_at")?;
         validate_symbol_id(&self.id)?;
 
-        let expected_id = build_symbol_id(&self.file_path, &self.qualified_name, self.kind)?;
+        let expected_id = build_symbol_id(
+            &self.repo_id,
+            &self.file_path,
+            &self.qualified_name,
+            self.kind,
+        )?;
         if self.id != expected_id {
             return Err(ValidationError::InvalidField {
                 field: "id",
-                reason: "must match canonical {file}::{qualified_name}#{kind} format",
+                reason: "must match canonical {repo_id}//{file}::{qualified_name}#{kind} format",
             });
         }
 
@@ -277,6 +360,10 @@ impl Validate for RepoRecord {
         validate_rfc3339_timestamp(&self.indexed_at, "indexed_at")?;
         validate_optional_string(&self.git_head, "git_head")?;
 
+        if let Some(ref ts) = self.registered_at {
+            validate_rfc3339_timestamp(ts, "registered_at")?;
+        }
+
         for language in self.language_counts.keys() {
             require_non_empty(language, "language_counts key")?;
         }
@@ -359,8 +446,8 @@ mod tests {
 
     use super::{
         build_symbol_id, disambiguate_symbol_id, normalize_file_path, parse_symbol_id,
-        validate_symbol_id, FileRecord, QualityLevel, QualityMix, RepoRecord, SymbolKind,
-        SymbolRecord, Validate,
+        validate_symbol_id, FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix,
+        RepoRecord, SymbolKind, SymbolRecord, Validate,
     };
 
     fn valid_symbol_record() -> SymbolRecord {
@@ -368,7 +455,8 @@ mod tests {
         let qualified_name = "crate::run";
         let kind = SymbolKind::Function;
         SymbolRecord {
-            id: build_symbol_id(file_path, qualified_name, kind).expect("build canonical id"),
+            id: build_symbol_id("repo-1", file_path, qualified_name, kind)
+                .expect("build canonical id"),
             repo_id: "repo-1".to_string(),
             file_path: file_path.to_string(),
             language: "rust".to_string(),
@@ -423,6 +511,9 @@ mod tests {
             file_count: 10,
             symbol_count: 90,
             git_head: None,
+            registered_at: Some("2026-03-09T00:00:00Z".to_string()),
+            indexing_status: IndexingStatus::Ready,
+            freshness_status: FreshnessStatus::Fresh,
         }
     }
 
@@ -554,7 +645,7 @@ mod tests {
     #[test]
     fn symbol_kind_unknown_deserializes_and_fails_validation() {
         let payload = json!({
-            "id": "src/main.rs::crate::run#unknown",
+            "id": "repo-1//src/main.rs::crate::run#unknown",
             "repo_id": "repo-1",
             "file_path": "src/main.rs",
             "language": "rust",
@@ -589,19 +680,35 @@ mod tests {
 
     #[test]
     fn symbol_id_constructor_is_stable_for_unchanged_identity() {
-        let id_a = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
-            .expect("build id");
-        let id_b = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
-            .expect("build id");
+        let id_a = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
+        let id_b = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
 
         assert_eq!(id_a, id_b);
     }
 
     #[test]
     fn symbol_id_changes_on_symbol_rename() {
-        let original = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
-            .expect("build id");
+        let original = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
         let renamed = build_symbol_id(
+            "test-repo",
             "src/lib.rs",
             "crate::service::execute",
             SymbolKind::Function,
@@ -613,9 +720,15 @@ mod tests {
 
     #[test]
     fn symbol_id_changes_on_file_move() {
-        let original = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
-            .expect("build id");
+        let original = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
         let moved = build_symbol_id(
+            "test-repo",
             "src/engine/lib.rs",
             "crate::service::run",
             SymbolKind::Function,
@@ -627,11 +740,20 @@ mod tests {
 
     #[test]
     fn symbol_id_changes_on_kind_change() {
-        let function_id =
-            build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
-                .expect("build id");
-        let method_id = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Method)
-            .expect("build id");
+        let function_id = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
+        let method_id = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Method,
+        )
+        .expect("build id");
 
         assert_ne!(function_id, method_id);
     }
@@ -645,10 +767,12 @@ mod tests {
             "::crate::run#function",
             "src/lib.rs::crate::run",
             "src/lib.rs::crate::run#",
+            "src/lib.rs::crate::run#function",
             "src/lib.rs::crate::run#invalid",
-            "src/lib.rs::crate::run#function@bad",
-            "src/lib.rs::crate::run#function@10:zero",
-            "src/lib.rs::crate::run#function@10:0",
+            "repo//src/lib.rs::crate::run#invalid",
+            "repo//src/lib.rs::crate::run#function@bad",
+            "repo//src/lib.rs::crate::run#function@10:zero",
+            "repo//src/lib.rs::crate::run#function@10:0",
         ] {
             assert!(
                 parse_symbol_id(malformed).is_err(),
@@ -659,8 +783,13 @@ mod tests {
 
     #[test]
     fn symbol_id_collision_disambiguation_is_deterministic() {
-        let base = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
-            .expect("build id");
+        let base = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
         let first = disambiguate_symbol_id(&base, 10, 20).expect("disambiguate");
         let again = disambiguate_symbol_id(&base, 10, 20).expect("disambiguate");
         let second = disambiguate_symbol_id(&base, 30, 20).expect("disambiguate");
@@ -671,8 +800,13 @@ mod tests {
 
     #[test]
     fn symbol_id_parser_accepts_disambiguated_ids() {
-        let base = build_symbol_id("src/lib.rs", "crate::service::run", SymbolKind::Function)
-            .expect("build id");
+        let base = build_symbol_id(
+            "test-repo",
+            "src/lib.rs",
+            "crate::service::run",
+            SymbolKind::Function,
+        )
+        .expect("build id");
         let disambiguated = disambiguate_symbol_id(&base, 10, 20).expect("disambiguate");
         let parsed = parse_symbol_id(&disambiguated).expect("parse disambiguated id");
 
@@ -683,7 +817,7 @@ mod tests {
 
     #[test]
     fn canonical_symbol_id_rejects_unknown_kind_token() {
-        let err = validate_symbol_id("src/lib.rs::crate::service::run#unknown")
+        let err = validate_symbol_id("test-repo//src/lib.rs::crate::service::run#unknown")
             .expect_err("unknown kind should fail canonical validation");
         assert!(format!("{err}").contains("unknown"));
     }

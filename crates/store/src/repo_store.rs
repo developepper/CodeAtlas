@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use rusqlite::{params, Connection};
 
-use core_model::{RepoRecord, Validate};
+use core_model::{FreshnessStatus, IndexingStatus, RepoRecord, Validate};
 
 use crate::StoreError;
 
@@ -33,8 +33,9 @@ impl<'a> RepoStore<'a> {
         self.conn.execute(
             "INSERT OR REPLACE INTO repos
                 (repo_id, display_name, source_root, indexed_at, index_version,
-                 language_counts, file_count, symbol_count, git_head)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 language_counts, file_count, symbol_count, git_head,
+                 registered_at, indexing_status, freshness_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 record.repo_id,
                 record.display_name,
@@ -45,6 +46,9 @@ impl<'a> RepoStore<'a> {
                 record.file_count,
                 record.symbol_count,
                 record.git_head,
+                record.registered_at,
+                record.indexing_status.as_str(),
+                record.freshness_status.as_str(),
             ],
         )?;
         Ok(())
@@ -54,7 +58,8 @@ impl<'a> RepoStore<'a> {
     pub fn get(&self, repo_id: &str) -> Result<Option<RepoRecord>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT repo_id, display_name, source_root, indexed_at, index_version,
-                    language_counts, file_count, symbol_count, git_head
+                    language_counts, file_count, symbol_count, git_head,
+                    registered_at, indexing_status, freshness_status
              FROM repos WHERE repo_id = ?1",
         )?;
 
@@ -70,6 +75,13 @@ impl<'a> RepoStore<'a> {
                         )
                     })?;
 
+                let indexing_status_str: String = row.get(10)?;
+                let indexing_status: IndexingStatus =
+                    indexing_status_str.parse().unwrap_or_default();
+                let freshness_status_str: String = row.get(11)?;
+                let freshness_status: FreshnessStatus =
+                    freshness_status_str.parse().unwrap_or_default();
+
                 Ok(RepoRecord {
                     repo_id: row.get(0)?,
                     display_name: row.get(1)?,
@@ -80,6 +92,9 @@ impl<'a> RepoStore<'a> {
                     file_count: row.get::<_, i64>(6)? as u64,
                     symbol_count: row.get::<_, i64>(7)? as u64,
                     git_head: row.get(8)?,
+                    registered_at: row.get(9)?,
+                    indexing_status,
+                    freshness_status,
                 })
             })
             .optional()?;
@@ -109,12 +124,14 @@ impl<'a> RepoStore<'a> {
         let language_counts_json = serde_json::to_string(&record.language_counts)
             .map_err(|e| StoreError::Validation(e.to_string()))?;
 
-        // Create row if it doesn't exist yet.
+        // Create row if it doesn't exist yet. Sets registered_at on first
+        // creation; the UPDATE below intentionally does not touch it.
         self.conn.execute(
             "INSERT OR IGNORE INTO repos
                 (repo_id, display_name, source_root, indexed_at, index_version,
-                 language_counts, file_count, symbol_count, git_head)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 language_counts, file_count, symbol_count, git_head,
+                 registered_at, indexing_status, freshness_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 record.repo_id,
                 record.display_name,
@@ -125,13 +142,19 @@ impl<'a> RepoStore<'a> {
                 record.file_count,
                 record.symbol_count,
                 record.git_head,
+                record.registered_at,
+                record.indexing_status.as_str(),
+                record.freshness_status.as_str(),
             ],
         )?;
 
-        // Update non-aggregate fields on the existing row.
+        // Update non-aggregate fields on the existing row. Note:
+        // registered_at is intentionally NOT updated here — it records the
+        // original registration time.
         self.conn.execute(
             "UPDATE repos SET display_name = ?2, source_root = ?3,
-                 indexed_at = ?4, index_version = ?5, git_head = ?6
+                 indexed_at = ?4, index_version = ?5, git_head = ?6,
+                 indexing_status = ?7, freshness_status = ?8
              WHERE repo_id = ?1",
             params![
                 record.repo_id,
@@ -140,6 +163,8 @@ impl<'a> RepoStore<'a> {
                 record.indexed_at,
                 record.index_version,
                 record.git_head,
+                record.indexing_status.as_str(),
+                record.freshness_status.as_str(),
             ],
         )?;
 
@@ -220,6 +245,9 @@ mod tests {
             file_count: 15,
             symbol_count: 150,
             git_head: Some("abc123def456".to_string()),
+            registered_at: Some("2025-01-15T10:30:00Z".to_string()),
+            indexing_status: IndexingStatus::Ready,
+            freshness_status: FreshnessStatus::Fresh,
         }
     }
 
@@ -240,6 +268,9 @@ mod tests {
         assert_eq!(loaded.file_count, repo.file_count);
         assert_eq!(loaded.symbol_count, repo.symbol_count);
         assert_eq!(loaded.git_head, repo.git_head);
+        assert_eq!(loaded.registered_at, repo.registered_at);
+        assert_eq!(loaded.indexing_status, repo.indexing_status);
+        assert_eq!(loaded.freshness_status, repo.freshness_status);
     }
 
     #[test]

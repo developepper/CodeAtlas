@@ -72,7 +72,10 @@ fn parse_args(args: &[String]) -> Result<FileTreeOpts, CliError> {
         i += 1;
     }
 
-    let db_path = db_path.ok_or_else(|| CliError::Usage("--db <path> is required".into()))?;
+    let db_path = match db_path {
+        Some(p) => p,
+        None => cli::data_root::default_db_path().map_err(CliError::Usage)?,
+    };
     let repo_id = repo_id.ok_or_else(|| CliError::Usage("--repo <id> is required".into()))?;
 
     Ok(FileTreeOpts {

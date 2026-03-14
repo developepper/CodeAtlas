@@ -222,6 +222,9 @@ mod tests {
                 file_count: 0,
                 symbol_count: 0,
                 git_head: None,
+                registered_at: Some("2025-01-15T10:30:00Z".to_string()),
+                indexing_status: core_model::IndexingStatus::Ready,
+                freshness_status: core_model::FreshnessStatus::Fresh,
             })
             .unwrap();
         store

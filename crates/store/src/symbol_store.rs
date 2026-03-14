@@ -82,7 +82,10 @@ impl<'a> SymbolStore<'a> {
         Ok(())
     }
 
-    /// Retrieves a symbol record by ID.
+    /// Retrieves a symbol record by its globally unique ID.
+    ///
+    /// Symbol IDs include the repo_id prefix (`{repo_id}//{file}::{name}#{kind}`)
+    /// so they are unique across repos in a shared store.
     pub fn get(&self, id: &str) -> Result<Option<SymbolRecord>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, repo_id, file_path, language, kind, name, qualified_name,
@@ -138,7 +141,7 @@ impl<'a> SymbolStore<'a> {
         Ok(result)
     }
 
-    /// Deletes a symbol record by ID.
+    /// Deletes a symbol record by its globally unique ID.
     pub fn delete(&self, id: &str) -> Result<bool, StoreError> {
         let changed = self
             .conn
@@ -405,7 +408,7 @@ impl<T> OptionalRow<T> for Result<T, rusqlite::Error> {
 mod tests {
     use super::*;
     use crate::MetadataStore;
-    use core_model::{FileRecord, QualityMix, RepoRecord};
+    use core_model::{FileRecord, FreshnessStatus, IndexingStatus, QualityMix, RepoRecord};
     use std::collections::BTreeMap;
 
     fn setup_store() -> MetadataStore {
@@ -422,6 +425,9 @@ mod tests {
                 file_count: 0,
                 symbol_count: 0,
                 git_head: None,
+                registered_at: Some("2025-01-15T10:30:00Z".to_string()),
+                indexing_status: IndexingStatus::Ready,
+                freshness_status: FreshnessStatus::Fresh,
             })
             .unwrap();
         store
@@ -445,7 +451,7 @@ mod tests {
 
     fn test_symbol() -> SymbolRecord {
         SymbolRecord {
-            id: "src/main.rs::main#function".to_string(),
+            id: "test-repo//src/main.rs::main#function".to_string(),
             repo_id: "test-repo".to_string(),
             file_path: "src/main.rs".to_string(),
             language: "rust".to_string(),
@@ -479,7 +485,7 @@ mod tests {
         store.symbols().upsert(&sym).unwrap();
         let loaded = store
             .symbols()
-            .get("src/main.rs::main#function")
+            .get("test-repo//src/main.rs::main#function")
             .unwrap()
             .unwrap();
 
@@ -529,7 +535,7 @@ mod tests {
 
         let loaded = store
             .symbols()
-            .get("src/main.rs::main#function")
+            .get("test-repo//src/main.rs::main#function")
             .unwrap()
             .unwrap();
         assert!((loaded.confidence_score - 0.9).abs() < f32::EPSILON);
@@ -543,11 +549,11 @@ mod tests {
 
         assert!(store
             .symbols()
-            .delete("src/main.rs::main#function")
+            .delete("test-repo//src/main.rs::main#function")
             .unwrap());
         assert!(store
             .symbols()
-            .get("src/main.rs::main#function")
+            .get("test-repo//src/main.rs::main#function")
             .unwrap()
             .is_none());
     }
@@ -556,12 +562,12 @@ mod tests {
     fn list_ids_for_file_returns_sorted() {
         let store = setup_store();
         let mut s1 = test_symbol();
-        s1.id = "src/main.rs::alpha#function".to_string();
+        s1.id = "test-repo//src/main.rs::alpha#function".to_string();
         s1.name = "alpha".to_string();
         s1.qualified_name = "alpha".to_string();
 
         let mut s2 = test_symbol();
-        s2.id = "src/main.rs::beta#function".to_string();
+        s2.id = "test-repo//src/main.rs::beta#function".to_string();
         s2.name = "beta".to_string();
         s2.qualified_name = "beta".to_string();
 
@@ -574,7 +580,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             ids,
-            vec!["src/main.rs::alpha#function", "src/main.rs::beta#function"]
+            vec![
+                "test-repo//src/main.rs::alpha#function",
+                "test-repo//src/main.rs::beta#function"
+            ]
         );
     }
 
@@ -583,7 +592,7 @@ mod tests {
         let store = setup_store();
         let s1 = test_symbol();
         let mut s2 = test_symbol();
-        s2.id = "src/main.rs::helper#function".to_string();
+        s2.id = "test-repo//src/main.rs::helper#function".to_string();
         s2.name = "helper".to_string();
         s2.qualified_name = "helper".to_string();
 
@@ -617,7 +626,7 @@ mod tests {
         store.symbols().upsert(&sym).unwrap();
         let loaded = store
             .symbols()
-            .get("src/main.rs::main#function")
+            .get("test-repo//src/main.rs::main#function")
             .unwrap()
             .unwrap();
 
@@ -637,7 +646,7 @@ mod tests {
         store.files().delete("test-repo", "src/main.rs").unwrap();
         assert!(store
             .symbols()
-            .get("src/main.rs::main#function")
+            .get("test-repo//src/main.rs::main#function")
             .unwrap()
             .is_none());
     }
@@ -692,7 +701,7 @@ mod tests {
         assert_eq!(store.symbols().count_for_repo("test-repo").unwrap(), 1);
 
         let mut s2 = test_symbol();
-        s2.id = "src/main.rs::helper#function".to_string();
+        s2.id = "test-repo//src/main.rs::helper#function".to_string();
         s2.name = "helper".to_string();
         s2.qualified_name = "helper".to_string();
         store.symbols().upsert(&s2).unwrap();

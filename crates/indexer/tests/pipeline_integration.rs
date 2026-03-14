@@ -233,8 +233,9 @@ fn pipeline_end_to_end_smoke_test() {
     assert!(file.symbol_count >= 1);
 
     // Verify persistence: symbol record exists.
-    let symbol_id = core_model::build_symbol_id("src/main.rs", "main", SymbolKind::Function)
-        .expect("build symbol id");
+    let symbol_id =
+        core_model::build_symbol_id("test-repo", "src/main.rs", "main", SymbolKind::Function)
+            .expect("build symbol id");
     let symbol = db
         .symbols()
         .get(&symbol_id)

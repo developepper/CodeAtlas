@@ -117,12 +117,15 @@ codeatlas index /absolute/path/to/repo --db /tmp/codeatlas.db
 codeatlas index /absolute/path/to/repo --git-diff
 ```
 
-The CLI creates a local index database and content blob store. By default the
-DB lives under:
+The CLI stores the index in a shared storage root. By default the DB lives at:
 
 ```text
-<repo>/.codeatlas/index.db
+~/.codeatlas/metadata.db
 ```
+
+This shared store supports multiple repositories — each `codeatlas index`
+invocation adds or updates a repository in the same database. You can override
+the path with `--db <path>` or by setting `CODEATLAS_DATA_ROOT`.
 
 ### 3. Find the Repo ID
 
@@ -133,44 +136,47 @@ Example:
 - repo path: `/Users/alex/work/my-app`
 - repo id: `my-app`
 
-You will need that `repo_id` for query commands.
+You will need that `repo_id` for query commands and symbol IDs.
 
 ### 4. Query the Index
+
+All query commands default to the shared store at `~/.codeatlas/metadata.db`.
+Use `--db <path>` to override.
 
 Search for symbols:
 
 ```bash
-codeatlas search-symbols greet --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas search-symbols greet --repo my-app
 ```
 
 Search with filters:
 
 ```bash
-codeatlas search-symbols service --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app --kind class --language typescript --limit 10
+codeatlas search-symbols service --repo my-app --kind class --language typescript --limit 10
 ```
 
-Get a symbol by ID:
+Get a symbol by ID (symbol IDs include the repo prefix):
 
 ```bash
-codeatlas get-symbol 'src/lib.rs::greet#function' --db /absolute/path/to/repo/.codeatlas/index.db
+codeatlas get-symbol 'my-app//src/lib.rs::greet#function'
 ```
 
 Get a file outline:
 
 ```bash
-codeatlas file-outline src/lib.rs --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas file-outline src/lib.rs --repo my-app
 ```
 
 Get a file tree:
 
 ```bash
-codeatlas file-tree --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas file-tree --repo my-app
 ```
 
 Get a repository outline:
 
 ```bash
-codeatlas repo-outline --db /absolute/path/to/repo/.codeatlas/index.db --repo my-app
+codeatlas repo-outline --repo my-app
 ```
 
 Generate a quality report:
@@ -216,7 +222,7 @@ CodeAtlas includes a built-in MCP server that works with any stdio MCP client.
 ### Launch the MCP server
 
 ```bash
-codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+codeatlas mcp serve --db ~/.codeatlas/metadata.db
 ```
 
 The server communicates over stdio using newline-delimited JSON-RPC 2.0
@@ -237,7 +243,7 @@ Add to your Claude Desktop MCP config (`claude_desktop_config.json`):
   "mcpServers": {
     "codeatlas": {
       "command": "/path/to/codeatlas",
-      "args": ["mcp", "serve", "--db", "/path/to/repo/.codeatlas/index.db"]
+      "args": ["mcp", "serve", "--db", "/path/to/.codeatlas/metadata.db"]
     }
   }
 }
@@ -253,7 +259,7 @@ config):
   "mcpServers": {
     "codeatlas": {
       "command": "/path/to/codeatlas",
-      "args": ["mcp", "serve", "--db", "/path/to/repo/.codeatlas/index.db"]
+      "args": ["mcp", "serve", "--db", "/path/to/.codeatlas/metadata.db"]
     }
   }
 }
@@ -268,7 +274,7 @@ Create or edit `.codex/config.json` in your project root:
   "mcpServers": {
     "codeatlas": {
       "command": "/path/to/codeatlas",
-      "args": ["mcp", "serve", "--db", "/path/to/repo/.codeatlas/index.db"]
+      "args": ["mcp", "serve", "--db", "/path/to/.codeatlas/metadata.db"]
     }
   }
 }
@@ -280,7 +286,7 @@ Any client that speaks newline-delimited JSON-RPC over stdio can use CodeAtlas.
 Configure it to spawn:
 
 ```
-/path/to/codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+/path/to/codeatlas mcp serve --db /path/to/.codeatlas/metadata.db
 ```
 
 ### Available tools
@@ -299,14 +305,15 @@ input definitions:
 | `get_repo_outline` | Show repository structure and file summary |
 | `search_text` | Search for text patterns across indexed files |
 
-Repository-scoped tools accept `repo_id` as a parameter. The `repo_id` is
+Repository-scoped tools accept `repo_id` as a parameter. Symbol IDs include
+the repo prefix (e.g., `my-app//src/lib.rs::Config#class`). The `repo_id` is
 derived from the indexed directory name (e.g., indexing `/home/user/my-app`
 produces `repo_id` `my-app`).
 
 ### Verify the server starts
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db ~/.codeatlas/metadata.db
 ```
 
 You should see a JSON response containing `"protocolVersion":"2025-11-25"` and
@@ -315,8 +322,8 @@ You should see a JSON response containing `"protocolVersion":"2025-11-25"` and
 ### Troubleshooting
 
 **"database not found"** — The `--db` path does not exist. Run
-`codeatlas index <repo-path>` first to create the index, then use the
-generated database path (default: `<repo>/.codeatlas/index.db`).
+`codeatlas index <repo-path>` first to create the index (default:
+`~/.codeatlas/metadata.db`).
 
 **"database is not readable"** — The file exists but cannot be read. Check
 file permissions (`ls -la` on the DB path).
@@ -360,9 +367,9 @@ Typical loop:
 Example shell commands an agent or wrapper can call:
 
 ```bash
-codeatlas search-symbols AuthService --db /repo/.codeatlas/index.db --repo my-app
-codeatlas file-outline src/server.ts --db /repo/.codeatlas/index.db --repo my-app
-codeatlas repo-outline --db /repo/.codeatlas/index.db --repo my-app
+codeatlas search-symbols AuthService --repo my-app
+codeatlas file-outline src/server.ts --repo my-app
+codeatlas repo-outline --repo my-app
 ```
 
 ## MCP Integration Shape
@@ -391,14 +398,15 @@ behavior, and quality provenance.
 1. Run:
 
 ```bash
-codeatlas search-symbols PaymentService --db /repo/.codeatlas/index.db --repo billing
+codeatlas search-symbols PaymentService --repo billing
 ```
 
-2. Pick the exact symbol ID from the results.
+2. Pick the exact symbol ID from the results (symbol IDs include the repo
+   prefix, e.g. `billing//src/payment/service.ts::PaymentService#class`).
 3. Run:
 
 ```bash
-codeatlas get-symbol 'src/payment/service.ts::PaymentService#class' --db /repo/.codeatlas/index.db
+codeatlas get-symbol 'billing//src/payment/service.ts::PaymentService#class'
 ```
 
 4. Ask the agent to reason about only that class and its file outline instead of
@@ -407,7 +415,7 @@ codeatlas get-symbol 'src/payment/service.ts::PaymentService#class' --db /repo/.
 ### Example: inspect a suspicious file before editing
 
 ```bash
-codeatlas file-outline src/auth/session.rs --db /repo/.codeatlas/index.db --repo my-app
+codeatlas file-outline src/auth/session.rs --repo my-app
 ```
 
 Use that output to ask the agent:
