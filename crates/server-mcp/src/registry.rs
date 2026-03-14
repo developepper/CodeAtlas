@@ -19,6 +19,8 @@ pub const TOOL_NAMES: &[&str] = &[
     "get_file_tree",
     "get_repo_outline",
     "search_text",
+    "list_repos",
+    "get_repo_status",
 ];
 
 /// Central dispatcher that routes MCP tool calls to query-engine handlers.
@@ -59,6 +61,8 @@ impl<'a> ToolRegistry<'a> {
             "get_file_tree" => tools::get_file_tree(self.svc, params),
             "get_repo_outline" => tools::get_repo_outline(self.svc, params),
             "search_text" => tools::search_text(self.svc, params),
+            "list_repos" => tools::list_repos(self.svc, params),
+            "get_repo_status" => tools::get_repo_status(self.svc, params),
             _ => {
                 let meta = McpMeta {
                     timing_ms: start.elapsed().as_millis() as u64,

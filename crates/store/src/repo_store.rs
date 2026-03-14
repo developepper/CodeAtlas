@@ -8,6 +8,40 @@ use core_model::{FreshnessStatus, IndexingStatus, RepoRecord, Validate};
 
 use crate::StoreError;
 
+/// Maps a SQLite row (with the canonical repos column order) to a [`RepoRecord`].
+fn row_to_repo(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepoRecord> {
+    let language_counts_json: String = row.get(5)?;
+    let language_counts: BTreeMap<String, u64> = serde_json::from_str(&language_counts_json)
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e))
+        })?;
+
+    let indexing_status_str: String = row.get(10)?;
+    let indexing_status: IndexingStatus = indexing_status_str.parse().unwrap_or_default();
+    let freshness_status_str: String = row.get(11)?;
+    let freshness_status: FreshnessStatus = freshness_status_str.parse().unwrap_or_default();
+
+    Ok(RepoRecord {
+        repo_id: row.get(0)?,
+        display_name: row.get(1)?,
+        source_root: row.get(2)?,
+        indexed_at: row.get(3)?,
+        index_version: row.get(4)?,
+        language_counts,
+        file_count: row.get::<_, i64>(6)? as u64,
+        symbol_count: row.get::<_, i64>(7)? as u64,
+        git_head: row.get(8)?,
+        registered_at: row.get(9)?,
+        indexing_status,
+        freshness_status,
+    })
+}
+
+/// Canonical SELECT column list for the repos table.
+const REPO_COLUMNS: &str = "repo_id, display_name, source_root, indexed_at, index_version, \
+     language_counts, file_count, symbol_count, git_head, \
+     registered_at, indexing_status, freshness_status";
+
 /// Accessor for repository metadata operations.
 pub struct RepoStore<'a> {
     conn: &'a Connection,
@@ -56,53 +90,16 @@ impl<'a> RepoStore<'a> {
 
     /// Retrieves a repository record by ID.
     pub fn get(&self, repo_id: &str) -> Result<Option<RepoRecord>, StoreError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT repo_id, display_name, source_root, indexed_at, index_version,
-                    language_counts, file_count, symbol_count, git_head,
-                    registered_at, indexing_status, freshness_status
-             FROM repos WHERE repo_id = ?1",
-        )?;
-
-        let result = stmt
-            .query_row(params![repo_id], |row| {
-                let language_counts_json: String = row.get(5)?;
-                let language_counts: BTreeMap<String, u64> =
-                    serde_json::from_str(&language_counts_json).map_err(|e| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            5,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        )
-                    })?;
-
-                let indexing_status_str: String = row.get(10)?;
-                let indexing_status: IndexingStatus =
-                    indexing_status_str.parse().unwrap_or_default();
-                let freshness_status_str: String = row.get(11)?;
-                let freshness_status: FreshnessStatus =
-                    freshness_status_str.parse().unwrap_or_default();
-
-                Ok(RepoRecord {
-                    repo_id: row.get(0)?,
-                    display_name: row.get(1)?,
-                    source_root: row.get(2)?,
-                    indexed_at: row.get(3)?,
-                    index_version: row.get(4)?,
-                    language_counts,
-                    file_count: row.get::<_, i64>(6)? as u64,
-                    symbol_count: row.get::<_, i64>(7)? as u64,
-                    git_head: row.get(8)?,
-                    registered_at: row.get(9)?,
-                    indexing_status,
-                    freshness_status,
-                })
-            })
-            .optional()?;
-
+        let sql = format!("SELECT {REPO_COLUMNS} FROM repos WHERE repo_id = ?1");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let result = stmt.query_row(params![repo_id], row_to_repo).optional()?;
         Ok(result)
     }
 
-    /// Deletes a repository and all associated files/symbols (cascading).
+    /// Deletes a repository and all associated files/symbols.
+    ///
+    /// Child rows in the `files` and `symbols` tables are removed
+    /// automatically via `ON DELETE CASCADE` foreign keys in the schema.
     pub fn delete(&self, repo_id: &str) -> Result<bool, StoreError> {
         let changed = self
             .conn
@@ -207,6 +204,16 @@ impl<'a> RepoStore<'a> {
             .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<String>, _>>()?;
         Ok(ids)
+    }
+
+    /// Lists all repository records, sorted by `repo_id`.
+    pub fn list_all(&self) -> Result<Vec<RepoRecord>, StoreError> {
+        let sql = format!("SELECT {REPO_COLUMNS} FROM repos ORDER BY repo_id");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([], row_to_repo)?
+            .collect::<Result<Vec<RepoRecord>, _>>()?;
+        Ok(rows)
     }
 }
 
@@ -322,6 +329,37 @@ mod tests {
 
         let ids = store.repos().list_ids().unwrap();
         assert_eq!(ids, vec!["alpha-repo", "beta-repo"]);
+    }
+
+    #[test]
+    fn list_all_returns_empty_for_fresh_store() {
+        let store = MetadataStore::open_in_memory().unwrap();
+        let repos = store.repos().list_all().unwrap();
+        assert!(repos.is_empty());
+    }
+
+    #[test]
+    fn list_all_returns_sorted_records() {
+        let store = MetadataStore::open_in_memory().unwrap();
+        let mut r1 = test_repo();
+        r1.repo_id = "beta-repo".to_string();
+        r1.file_count = 20;
+        let mut r2 = test_repo();
+        r2.repo_id = "alpha-repo".to_string();
+        r2.file_count = 10;
+
+        store.repos().upsert(&r1).unwrap();
+        store.repos().upsert(&r2).unwrap();
+
+        let repos = store.repos().list_all().unwrap();
+        assert_eq!(repos.len(), 2);
+        assert_eq!(repos[0].repo_id, "alpha-repo");
+        assert_eq!(repos[0].file_count, 10);
+        assert_eq!(repos[1].repo_id, "beta-repo");
+        assert_eq!(repos[1].file_count, 20);
+        // Verify full record fields are populated (not just IDs).
+        assert_eq!(repos[0].display_name, "Test Repository");
+        assert_eq!(repos[1].indexing_status, IndexingStatus::Ready);
     }
 
     #[test]

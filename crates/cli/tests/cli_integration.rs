@@ -703,7 +703,7 @@ fn mcp_stdio_tools_list() {
     assert_eq!(responses.len(), 1);
     let r: serde_json::Value = serde_json::from_str(&responses[0]).unwrap();
     let tools = r["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 8);
+    assert_eq!(tools.len(), 10);
 
     // Every tool must have a description and a full inputSchema with
     // properties and required fields (issue #133).
@@ -1155,7 +1155,7 @@ fn mcp_stdio_full_smoke_initialize_list_call() {
     let r2: serde_json::Value = serde_json::from_str(&responses[1]).unwrap();
     assert_eq!(r2["id"], 2);
     let tools = r2["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 8);
+    assert_eq!(tools.len(), 10);
 
     // Verify tools/call response.
     let r3: serde_json::Value = serde_json::from_str(&responses[2]).unwrap();
@@ -1343,7 +1343,7 @@ fn mcp_stdio_client_handshake_with_extra_capabilities() {
     assert!(r2["result"].is_object(), "ping should return result");
 
     let r3: serde_json::Value = serde_json::from_str(&responses[2]).unwrap();
-    assert_eq!(r3["result"]["tools"].as_array().unwrap().len(), 8);
+    assert_eq!(r3["result"]["tools"].as_array().unwrap().len(), 10);
 
     let r4: serde_json::Value = serde_json::from_str(&responses[3]).unwrap();
     assert!(r4["result"]["resources"].as_array().unwrap().is_empty());
@@ -1392,4 +1392,302 @@ fn no_args_shows_usage() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Usage:"));
+}
+
+// ---------------------------------------------------------------------------
+// Repo command tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn repo_help_shows_subcommands() {
+    let output = Command::new(codeatlas_bin())
+        .args(["repo", "--help"])
+        .output()
+        .expect("repo help");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("add"));
+    assert!(stderr.contains("list"));
+    assert!(stderr.contains("status"));
+    assert!(stderr.contains("refresh"));
+    assert!(stderr.contains("remove"));
+}
+
+#[test]
+fn repo_unknown_subcommand_fails() {
+    let output = Command::new(codeatlas_bin())
+        .args(["repo", "bogus"])
+        .output()
+        .expect("repo bogus");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown repo subcommand"));
+}
+
+#[test]
+fn repo_add_list_status_refresh_remove_lifecycle() {
+    let repo_dir = setup_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("metadata.db");
+
+    // add
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "add",
+            repo_dir.path().to_str().unwrap(),
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("repo add");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "repo add failed: {stdout}");
+    assert!(stdout.contains("registered:"));
+
+    // Derive the repo_id the same way the CLI does (directory name).
+    let repo_id = repo_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    // list
+    let output = Command::new(codeatlas_bin())
+        .args(["repo", "list", "--db", db_path.to_str().unwrap()])
+        .output()
+        .expect("repo list");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "repo list failed: {stdout}");
+    assert!(
+        stdout.contains(&repo_id),
+        "list should contain repo_id '{repo_id}': {stdout}"
+    );
+
+    // status
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "status",
+            &repo_id,
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("repo status");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "repo status failed: {stdout}");
+    assert!(stdout.contains("repo_id:"));
+    assert!(stdout.contains("indexing_status:"));
+    assert!(stdout.contains("ready"));
+
+    // refresh
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "refresh",
+            &repo_id,
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("repo refresh");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "repo refresh failed: {stdout}");
+    assert!(stdout.contains("refreshed:"));
+
+    // remove
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "remove",
+            &repo_id,
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("repo remove");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "repo remove failed: {stdout}");
+    assert!(stdout.contains("removed:"));
+
+    // Verify repo is gone after remove.
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "status",
+            &repo_id,
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("repo status after remove");
+    assert!(!output.status.success());
+}
+
+#[test]
+fn repo_list_empty_store() {
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("metadata.db");
+
+    // Create an empty store by opening and closing it.
+    store::MetadataStore::open(&db_path).expect("create empty store");
+
+    let output = Command::new(codeatlas_bin())
+        .args(["repo", "list", "--db", db_path.to_str().unwrap()])
+        .output()
+        .expect("repo list empty");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("No repositories registered"));
+}
+
+#[test]
+fn repo_add_collision_different_source_root() {
+    let repo_dir1 = setup_test_repo();
+    let repo_dir2 = setup_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("metadata.db");
+
+    // Add first repo with explicit repo_id.
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "add",
+            repo_dir1.path().to_str().unwrap(),
+            "--repo-id",
+            "shared-name",
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("first repo add");
+    assert!(output.status.success());
+
+    // Add second repo with same repo_id but different path — should fail.
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "add",
+            repo_dir2.path().to_str().unwrap(),
+            "--repo-id",
+            "shared-name",
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("collision repo add");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("already registered"));
+}
+
+#[test]
+fn repo_remove_nonexistent() {
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("metadata.db");
+    store::MetadataStore::open(&db_path).expect("create empty store");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "remove",
+            "nonexistent",
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("remove nonexistent");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not found"));
+}
+
+#[test]
+fn repo_remove_warns_on_blob_deletion_failure() {
+    let repo_dir = setup_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("metadata.db");
+    let blob_path = db_dir.path().join("blobs");
+
+    // Add a repo so blobs get written.
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "add",
+            repo_dir.path().to_str().unwrap(),
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("repo add");
+    assert!(output.status.success());
+
+    let repo_id = repo_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    // Collect the file hashes stored in the DB so we can sabotage a blob.
+    let db = store::MetadataStore::open(&db_path).expect("open db");
+    let hashes = db.files().list_hashes(&repo_id).expect("list hashes");
+    drop(db);
+
+    // Sabotage one blob by replacing the file with a directory, which makes
+    // fs::remove_file fail with a "is a directory" error.
+    if let Some(hash) = hashes.first() {
+        let shard = &hash[..2];
+        let blob_file = blob_path.join(shard).join(hash);
+        if blob_file.exists() {
+            std::fs::remove_file(&blob_file).expect("remove blob file");
+            std::fs::create_dir(&blob_file).expect("replace blob with dir");
+        }
+    }
+
+    // Remove the repo — should succeed but warn about the blob failure.
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "remove",
+            &repo_id,
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("repo remove with blob error");
+    assert!(output.status.success(), "remove should still succeed");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stderr.contains("warning: failed to delete blob"),
+        "stderr should warn about blob failure: {stderr}"
+    );
+    assert!(
+        stdout.contains("failed"),
+        "stdout summary should mention failure count: {stdout}"
+    );
+}
+
+#[test]
+fn repo_status_nonexistent() {
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("metadata.db");
+    store::MetadataStore::open(&db_path).expect("create empty store");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "repo",
+            "status",
+            "nonexistent",
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("status nonexistent");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not found"));
 }

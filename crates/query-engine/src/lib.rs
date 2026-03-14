@@ -164,6 +164,10 @@ pub trait QueryService {
     fn get_repo_outline(&self, request: &RepoOutlineRequest) -> Result<RepoOutline, QueryError>;
 
     fn search_text(&self, query: &TextQuery) -> Result<QueryResult<TextMatch>, QueryError>;
+
+    fn list_repos(&self) -> Result<Vec<RepoRecord>, QueryError>;
+
+    fn get_repo_status(&self, repo_id: &str) -> Result<RepoRecord, QueryError>;
 }
 
 // ── Validation helpers ─────────────────────────────────────────────────
@@ -479,6 +483,18 @@ pub mod test_support {
                     truncated: false,
                 },
             })
+        }
+
+        fn list_repos(&self) -> Result<Vec<RepoRecord>, QueryError> {
+            Ok(vec![self.repo.clone()])
+        }
+
+        fn get_repo_status(&self, repo_id: &str) -> Result<RepoRecord, QueryError> {
+            if self.repo.repo_id == repo_id {
+                Ok(self.repo.clone())
+            } else {
+                Err(QueryError::NotFound { id: repo_id.into() })
+            }
         }
     }
 }

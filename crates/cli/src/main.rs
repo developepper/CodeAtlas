@@ -90,6 +90,7 @@ fn main() {
         "file-outline" => commands::file_outline::run(&args[2..]),
         "file-tree" => commands::file_tree::run(&args[2..]),
         "repo-outline" => commands::repo_outline::run(&args[2..]),
+        "repo" => commands::repo::run(&args[2..]),
         "mcp" => commands::mcp_serve::run(&args[2..]),
         "quality-report" => commands::quality_report::run(&args[2..]),
         "help" | "--help" | "-h" => {
@@ -114,6 +115,7 @@ fn print_usage() {
     eprintln!();
     eprintln!("Commands:");
     eprintln!("  index             Index a repository");
+    eprintln!("  repo              Manage the repository catalog (add/list/status/refresh/remove)");
     eprintln!("  search-symbols    Search for symbols by name");
     eprintln!("  get-symbol        Get a symbol by ID");
     eprintln!("  file-outline      List symbols in a file");
