@@ -2,16 +2,33 @@ use crate::{SymbolKind, ValidationError, ValidationResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSymbolId {
+    pub repo_id: String,
     pub file_path: String,
     pub qualified_name: String,
     pub kind: SymbolKind,
 }
 
+/// Builds a globally unique symbol ID.
+///
+/// Format: `{repo_id}//{file_path}::{qualified_name}#{kind}`
+///
+/// The `//` separator is unambiguous because normalized file paths never
+/// contain `//` and repo IDs (derived from directory names) do not either.
 pub fn build_symbol_id(
+    repo_id: &str,
     file_path: &str,
     qualified_name: &str,
     kind: SymbolKind,
 ) -> Result<String, ValidationError> {
+    if repo_id.trim().is_empty() {
+        return Err(ValidationError::MissingField { field: "repo_id" });
+    }
+    if repo_id.contains("//") {
+        return Err(ValidationError::InvalidField {
+            field: "repo_id",
+            reason: "must not contain '//' because it conflicts with symbol ID separators",
+        });
+    }
     let file_path = normalize_file_path(file_path)?;
     let qualified_name = normalize_qualified_name(qualified_name)?;
     if kind == SymbolKind::Unknown {
@@ -21,18 +38,34 @@ pub fn build_symbol_id(
         });
     }
 
-    Ok(format!("{file_path}::{qualified_name}#{}", kind.as_str()))
+    Ok(format!(
+        "{repo_id}//{file_path}::{qualified_name}#{}",
+        kind.as_str()
+    ))
 }
 
 pub fn parse_symbol_id(value: &str) -> Result<ParsedSymbolId, ValidationError> {
-    // ID format invariant: `file_path` must not contain `::`.
-    // We split on the first `::` and treat the remainder as `{qualified_name}#{kind}`.
-    let (file_path, symbol_part) = value
-        .split_once("::")
+    // ID format: `{repo_id}//{file_path}::{qualified_name}#{kind}[@disambiguator]`
+    // Split on the first `//` to extract repo_id.
+    let (repo_id, rest) = value
+        .split_once("//")
         .ok_or(ValidationError::InvalidField {
             field: "id",
-            reason: "must contain '::' separator",
+            reason: "must contain '//' repo separator",
         })?;
+
+    if repo_id.trim().is_empty() {
+        return Err(ValidationError::InvalidField {
+            field: "id",
+            reason: "repo_id portion must not be empty",
+        });
+    }
+
+    // Split on the first `::` to separate file_path from qualified_name#kind.
+    let (file_path, symbol_part) = rest.split_once("::").ok_or(ValidationError::InvalidField {
+        field: "id",
+        reason: "must contain '::' separator",
+    })?;
 
     let (qualified_name, kind_with_suffix) =
         symbol_part
@@ -58,6 +91,7 @@ pub fn parse_symbol_id(value: &str) -> Result<ParsedSymbolId, ValidationError> {
     }
 
     Ok(ParsedSymbolId {
+        repo_id: repo_id.to_string(),
         file_path: normalized_file,
         qualified_name: normalized_qualified,
         kind,

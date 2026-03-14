@@ -65,12 +65,8 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     let opts = parse_args(args)?;
 
     let source_root = opts.source_root.canonicalize()?;
-    let db_path = opts
-        .db_path
-        .unwrap_or_else(|| source_root.join(".codeatlas").join("index.db"));
-    let blob_path = db_path
-        .parent()
-        .map_or_else(|| PathBuf::from(".codeatlas/blobs"), |p| p.join("blobs"));
+    let (db_path, blob_path) =
+        cli::data_root::resolve_db_and_blob_paths(opts.db_path).map_err(CliError::Usage)?;
 
     let repo_id = source_root
         .file_name()

@@ -9,10 +9,14 @@ use rusqlite::Connection;
 use crate::StoreError;
 
 /// Current schema version (latest migration number).
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// All migrations in order. Each entry is `(version, up_sql, down_sql)`.
-const MIGRATIONS: &[(u32, &str, &str)] = &[(1, V1_UP, V1_DOWN), (2, V2_UP, V2_DOWN)];
+const MIGRATIONS: &[(u32, &str, &str)] = &[
+    (1, V1_UP, V1_DOWN),
+    (2, V2_UP, V2_DOWN),
+    (3, V3_UP, V3_DOWN),
+];
 
 // ---------------------------------------------------------------------------
 // V1: baseline schema
@@ -134,6 +138,40 @@ DROP TRIGGER IF EXISTS symbols_au;
 DROP TRIGGER IF EXISTS symbols_ad;
 DROP TRIGGER IF EXISTS symbols_ai;
 DROP TABLE IF EXISTS symbols_fts;
+"#;
+
+// ---------------------------------------------------------------------------
+// V3: repo catalog metadata for persistent service model
+// ---------------------------------------------------------------------------
+
+const V3_UP: &str = r#"
+-- Repo catalog metadata for persistent service model.
+ALTER TABLE repos ADD COLUMN registered_at TEXT;
+ALTER TABLE repos ADD COLUMN indexing_status TEXT NOT NULL DEFAULT 'ready';
+ALTER TABLE repos ADD COLUMN freshness_status TEXT NOT NULL DEFAULT 'fresh';
+
+-- Migrate existing symbol IDs to the repo-prefixed format
+-- ({repo_id}//{old_id}) so all symbols have globally unique IDs
+-- in a shared store.
+UPDATE symbols SET id = repo_id || '//' || id
+    WHERE id NOT LIKE '%//%';
+
+-- FTS content is synced via triggers on INSERT/UPDATE/DELETE, but a
+-- bulk UPDATE bypasses content-sync triggers for the *old* row shape
+-- (the trigger fires with the new values). Rebuild to ensure the FTS
+-- index reflects the updated IDs.
+INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');
+"#;
+
+const V3_DOWN: &str = r#"
+-- Strip repo_id prefix from symbol IDs to restore the old format.
+UPDATE symbols SET id = SUBSTR(id, INSTR(id, '//') + 2)
+    WHERE id LIKE '%//%';
+INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');
+
+ALTER TABLE repos DROP COLUMN freshness_status;
+ALTER TABLE repos DROP COLUMN indexing_status;
+ALTER TABLE repos DROP COLUMN registered_at;
 "#;
 
 // ---------------------------------------------------------------------------
@@ -290,5 +328,58 @@ mod tests {
         rollback_to(&conn, 0).unwrap();
         apply_all(&conn).unwrap();
         assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v3_migration_rewrites_legacy_symbol_ids() {
+        let conn = memory_conn();
+
+        // Apply V1 + V2 only.
+        for &(version, up_sql, _) in MIGRATIONS.iter().take(2) {
+            ensure_meta_table(&conn).unwrap();
+            conn.execute_batch(up_sql).unwrap();
+            set_version(&conn, version).unwrap();
+        }
+        assert_eq!(current_version(&conn).unwrap(), 2);
+
+        // Insert a repo, file, and symbol with old-format ID.
+        conn.execute_batch(
+            r#"
+            INSERT INTO repos (repo_id, display_name, source_root, indexed_at, index_version)
+                VALUES ('my-app', 'My App', '/repos/my-app', '2025-01-01T00:00:00Z', '1.0.0');
+            INSERT INTO files (repo_id, file_path, language, file_hash, updated_at)
+                VALUES ('my-app', 'src/lib.rs', 'rust', 'abc', '2025-01-01T00:00:00Z');
+            INSERT INTO symbols (id, repo_id, file_path, language, kind, name, qualified_name,
+                    signature, start_line, end_line, start_byte, byte_length,
+                    content_hash, quality_level, confidence_score, source_adapter, indexed_at)
+                VALUES ('src/lib.rs::Config#class', 'my-app', 'src/lib.rs', 'rust', 'class',
+                    'Config', 'Config', 'struct Config', 1, 10, 0, 100,
+                    'sha256:abc', 'syntax', 0.7, 'treesitter', '2025-01-01T00:00:00Z');
+            "#,
+        )
+        .unwrap();
+
+        // Verify old-format ID exists.
+        let old_id: String = conn
+            .query_row("SELECT id FROM symbols", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(old_id, "src/lib.rs::Config#class");
+
+        // Apply V3.
+        apply_all(&conn).unwrap();
+        assert_eq!(current_version(&conn).unwrap(), 3);
+
+        // Symbol ID is now repo-prefixed.
+        let new_id: String = conn
+            .query_row("SELECT id FROM symbols", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(new_id, "my-app//src/lib.rs::Config#class");
+
+        // Rollback V3 strips the prefix.
+        rollback_to(&conn, 2).unwrap();
+        let reverted_id: String = conn
+            .query_row("SELECT id FROM symbols", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(reverted_id, "src/lib.rs::Config#class");
     }
 }

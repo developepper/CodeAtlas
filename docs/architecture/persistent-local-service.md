@@ -353,13 +353,14 @@ service-oriented metadata. Ticket #150 will add:
 | Field | Type | Purpose |
 |-------|------|---------|
 | `registered_at` | TEXT (ISO 8601) | When the repo was added to the catalog |
-| `last_indexed_at` | TEXT (ISO 8601) | Last successful index completion |
+| `indexed_at` | TEXT (ISO 8601) | Last successful index completion |
 | `indexing_status` | TEXT | `pending`, `indexing`, `ready`, `failed` |
+| `freshness_status` | TEXT | `fresh`, `stale` |
 | `source_root` | TEXT | Absolute path to the repository on disk |
 
-The existing `indexed_at` field on the `repos` table may be repurposed or
-replaced by `last_indexed_at` depending on implementation convenience. The
-schema migration strategy is documented in ticket #150.
+The existing `indexed_at` field on the `repos` table serves as the persisted
+last-successful-index timestamp. `freshness_status` is the explicit catalog
+signal used by lifecycle and operator workflows.
 
 ## What This Document Does Not Decide
 

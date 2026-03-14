@@ -1,0 +1,30 @@
+{
+  "id": "repo-1//src/main.rs::crate::run#function",
+  "repo_id": "repo-1",
+  "file_path": "src/main.rs",
+  "language": "rust",
+  "kind": "function",
+  "name": "run",
+  "qualified_name": "crate::run",
+  "signature": "fn run()",
+  "start_line": 10,
+  "end_line": 12,
+  "start_byte": 120,
+  "byte_length": 25,
+  "content_hash": "abc123",
+  "quality_level": "semantic",
+  "confidence_score": 0.95,
+  "source_adapter": "semantic-rust-v1",
+  "indexed_at": "2026-03-09T00:00:00Z",
+  "docstring": "Executes the app.",
+  "summary": "Entry point",
+  "parent_symbol_id": null,
+  "keywords": [
+    "entrypoint",
+    "startup"
+  ],
+  "decorators_or_attributes": null,
+  "semantic_refs": [
+    "crate::Config"
+  ]
+}

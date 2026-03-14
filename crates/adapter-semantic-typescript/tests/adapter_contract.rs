@@ -354,19 +354,26 @@ fn fixture_symbol_ids_match_expected_canonical_form() {
 
     // Assert exact expected IDs for every fixture symbol.
     let expected: &[(&str, &str)] = &[
-        ("Config", "src/config.ts::Config#type"),
-        ("create", "src/config.ts::create#function"),
-        ("Processor", "src/config.ts::Processor#class"),
-        ("process", "src/config.ts::Processor::process#method"),
-        ("Mode", "src/config.ts::Mode#type"),
-        ("MAX_SIZE", "src/config.ts::MAX_SIZE#constant"),
+        ("Config", "test-repo//src/config.ts::Config#type"),
+        ("create", "test-repo//src/config.ts::create#function"),
+        ("Processor", "test-repo//src/config.ts::Processor#class"),
+        (
+            "process",
+            "test-repo//src/config.ts::Processor::process#method",
+        ),
+        ("Mode", "test-repo//src/config.ts::Mode#type"),
+        ("MAX_SIZE", "test-repo//src/config.ts::MAX_SIZE#constant"),
     ];
 
     for (name, expected_id) in expected {
         let sym = find_symbol(&symbols, name);
-        let actual_id =
-            core_model::symbol_id::build_symbol_id(file_path, &sym.qualified_name, sym.kind)
-                .unwrap_or_else(|e| panic!("symbol '{name}' failed ID construction: {e}"));
+        let actual_id = core_model::symbol_id::build_symbol_id(
+            "test-repo",
+            file_path,
+            &sym.qualified_name,
+            sym.kind,
+        )
+        .unwrap_or_else(|e| panic!("symbol '{name}' failed ID construction: {e}"));
         assert_eq!(
             &actual_id, expected_id,
             "symbol '{name}' produced wrong canonical ID"
@@ -387,10 +394,20 @@ fn fixture_symbol_ids_are_stable_across_runs() {
     assert_eq!(symbols1.len(), symbols2.len());
 
     for (a, b) in symbols1.iter().zip(symbols2.iter()) {
-        let id_a =
-            core_model::symbol_id::build_symbol_id(file_path, &a.qualified_name, a.kind).unwrap();
-        let id_b =
-            core_model::symbol_id::build_symbol_id(file_path, &b.qualified_name, b.kind).unwrap();
+        let id_a = core_model::symbol_id::build_symbol_id(
+            "test-repo",
+            file_path,
+            &a.qualified_name,
+            a.kind,
+        )
+        .unwrap();
+        let id_b = core_model::symbol_id::build_symbol_id(
+            "test-repo",
+            file_path,
+            &b.qualified_name,
+            b.kind,
+        )
+        .unwrap();
         assert_eq!(
             id_a, id_b,
             "symbol ID not stable for '{}': '{}' vs '{}'",

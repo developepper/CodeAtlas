@@ -82,21 +82,22 @@ Expected output includes:
 
 ## 3. Query the Local Index
 
-All query commands require `--db <path>` to locate the index database. Commands
-that scope results to a repository also require `--repo <repo-id>`.
+Query commands default to the shared store at `~/.codeatlas/metadata.db`.
+Use `--db <path>` to override. Commands that scope results to a repository
+require `--repo <repo-id>`.
 
 Examples:
 
 ```bash
-cargo run -p cli -- search-symbols <query> --db <db-path> --repo <repo-id>
-cargo run -p cli -- get-symbol <symbol-id> --db <db-path>
-cargo run -p cli -- file-outline <path> --db <db-path> --repo <repo-id>
-cargo run -p cli -- file-tree --db <db-path> --repo <repo-id>
-cargo run -p cli -- repo-outline --db <db-path> --repo <repo-id>
+cargo run -p cli -- search-symbols <query> --repo <repo-id>
+cargo run -p cli -- get-symbol <symbol-id>
+cargo run -p cli -- file-outline <path> --repo <repo-id>
+cargo run -p cli -- file-tree --repo <repo-id>
+cargo run -p cli -- repo-outline --repo <repo-id>
 ```
 
-Note: `get-symbol` does not require `--repo` — it looks up the symbol by ID
-directly.
+Note: `get-symbol` does not require `--repo` — symbol IDs include the repo
+prefix (e.g. `my-app//src/lib.rs::Config#class`) so they are globally unique.
 
 Use the MCP server path when integrating with agent clients instead of direct
 CLI query commands.
@@ -106,7 +107,7 @@ CLI query commands.
 ### Start the server
 
 ```bash
-codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+codeatlas mcp serve --db ~/.codeatlas/metadata.db
 ```
 
 The server reads newline-delimited JSON-RPC from stdin and writes responses to
@@ -115,7 +116,7 @@ stdout. All diagnostics go to stderr.
 ### Verify it works
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db /path/to/repo/.codeatlas/index.db
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' | codeatlas mcp serve --db ~/.codeatlas/metadata.db
 ```
 
 Expected: a JSON response with `"protocolVersion":"2025-11-25"`.
@@ -131,7 +132,7 @@ for the currently documented interoperability shims and rationale.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `database not found` | DB path does not exist | Run `codeatlas index <repo>` first |
+| `database not found` | DB path does not exist | Run `codeatlas index <repo>` first (default: `~/.codeatlas/metadata.db`) |
 | `database is not readable` | Permission denied | Check file permissions |
 | `failed to open database` | Corrupt or non-SQLite file | Re-run `codeatlas index <repo>` |
 | `database path is a directory` | Path points to directory | Use the `.db` file path |
@@ -259,8 +260,8 @@ Operator guidance:
 
 Recommended clean rebuild path:
 
-1. remove or relocate the existing `.codeatlas/` directory for the repo
-2. rerun `codeatlas index <repo-path>`
+1. remove or relocate the shared database (default: `~/.codeatlas/metadata.db`)
+2. rerun `codeatlas index <repo-path>` for each repository
 3. verify query commands against the rebuilt index
 
 Do not manually edit SQLite schema state.

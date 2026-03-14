@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use adapter_api::{AdapterError, AdapterOutput, SourceFile};
 use core_model::{
-    build_symbol_id, current_index_schema_version, FileRecord, QualityLevel, QualityMix,
-    RepoRecord, SymbolRecord, Validate,
+    build_symbol_id, current_index_schema_version, FileRecord, FreshnessStatus, IndexingStatus,
+    QualityLevel, QualityMix, RepoRecord, SymbolRecord, Validate,
 };
 use repo_walker::{detect_language, walk_repository, WalkerOptions};
 use time::format_description::well_known::Rfc3339;
@@ -325,12 +325,14 @@ pub fn persist(
         // Validate all symbol IDs upfront — any failure is fatal.
         for sym in &parsed.output.symbols {
             let file_path_str = parsed.relative_path.to_string_lossy();
-            build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind).map_err(|e| {
-                PipelineError::Validation(format!(
-                    "invalid symbol ID for '{}' in {}: {e}",
-                    sym.name, file_path_str
-                ))
-            })?;
+            build_symbol_id(&ctx.repo_id, &file_path_str, &sym.qualified_name, sym.kind).map_err(
+                |e| {
+                    PipelineError::Validation(format!(
+                        "invalid symbol ID for '{}' in {}: {e}",
+                        sym.name, file_path_str
+                    ))
+                },
+            )?;
         }
 
         let semantic = parsed
@@ -363,6 +365,9 @@ pub fn persist(
         } else {
             None
         },
+        registered_at: Some(now.clone()),
+        indexing_status: IndexingStatus::Ready,
+        freshness_status: FreshnessStatus::Fresh,
     };
 
     if let Err(e) = provisional_repo.validate() {
@@ -477,13 +482,14 @@ pub fn persist(
                 .unwrap_or(provenance.default_confidence);
 
             // Symbol ID was pre-validated in pass 1.
-            let symbol_id = build_symbol_id(&file_path_str, &sym.qualified_name, sym.kind)
-                .map_err(|e| {
-                    PipelineError::Validation(format!(
-                        "invalid symbol ID for '{}' in {}: {e}",
-                        sym.name, file_path_str
-                    ))
-                })?;
+            let symbol_id =
+                build_symbol_id(&ctx.repo_id, &file_path_str, &sym.qualified_name, sym.kind)
+                    .map_err(|e| {
+                        PipelineError::Validation(format!(
+                            "invalid symbol ID for '{}' in {}: {e}",
+                            sym.name, file_path_str
+                        ))
+                    })?;
 
             let keywords = enrich::extract_keywords(sym);
             let record = SymbolRecord {

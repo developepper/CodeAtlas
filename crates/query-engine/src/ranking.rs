@@ -152,7 +152,7 @@ mod tests {
         let file_path = "src/lib.rs";
         let qualified_name = format!("crate::{name}");
         SymbolRecord {
-            id: build_symbol_id(file_path, &qualified_name, kind).expect("build id"),
+            id: build_symbol_id("repo-1", file_path, &qualified_name, kind).expect("build id"),
             repo_id: "repo-1".into(),
             file_path: file_path.into(),
             language: "rust".into(),

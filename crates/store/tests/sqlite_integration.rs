@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use core_model::{FileRecord, QualityLevel, QualityMix, RepoRecord, SymbolKind, SymbolRecord};
+use core_model::{
+    FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+    SymbolRecord,
+};
 use store::MetadataStore;
 use tempfile::TempDir;
 
@@ -24,6 +27,9 @@ fn test_repo() -> RepoRecord {
         file_count: 3,
         symbol_count: 42,
         git_head: Some("deadbeef".to_string()),
+        registered_at: Some("2025-01-15T10:30:00Z".to_string()),
+        indexing_status: IndexingStatus::Ready,
+        freshness_status: FreshnessStatus::Fresh,
     }
 }
 
@@ -45,7 +51,7 @@ fn test_file(file_path: &str) -> FileRecord {
 
 fn test_symbol(file_path: &str, name: &str, kind: SymbolKind) -> SymbolRecord {
     SymbolRecord {
-        id: format!("{file_path}::{name}#{}", kind.as_str()),
+        id: format!("integration-repo//{file_path}::{name}#{}", kind.as_str()),
         repo_id: "integration-repo".to_string(),
         file_path: file_path.to_string(),
         language: "rust".to_string(),
@@ -149,7 +155,7 @@ fn full_lifecycle_create_read_update_delete() {
     store.symbols().upsert(&sym).unwrap();
     let loaded = store
         .symbols()
-        .get("src/lib.rs::Config#class")
+        .get("integration-repo//src/lib.rs::Config#class")
         .unwrap()
         .unwrap();
     assert!((loaded.confidence_score - 0.95).abs() < f32::EPSILON);
@@ -241,7 +247,7 @@ fn transaction_commit_persists_all_writes() {
         .is_some());
     assert!(store
         .symbols()
-        .get("src/lib.rs::Config#class")
+        .get("integration-repo//src/lib.rs::Config#class")
         .unwrap()
         .is_some());
 }
@@ -272,7 +278,7 @@ fn transaction_drop_without_commit_rolls_back() {
         .is_none());
     assert!(store
         .symbols()
-        .get("src/lib.rs::Config#class")
+        .get("integration-repo//src/lib.rs::Config#class")
         .unwrap()
         .is_none());
 }
@@ -364,4 +370,336 @@ fn upsert_rejects_invalid_symbol_record() {
 
     let err = store.symbols().upsert(&sym).unwrap_err();
     assert!(err.to_string().contains("validation"), "{err}");
+}
+
+// ---------------------------------------------------------------------------
+// Multi-repo isolation in shared store
+// ---------------------------------------------------------------------------
+
+fn test_repo_with_id(repo_id: &str, source_root: &str) -> RepoRecord {
+    RepoRecord {
+        repo_id: repo_id.to_string(),
+        display_name: repo_id.to_string(),
+        source_root: source_root.to_string(),
+        indexed_at: "2025-01-15T10:30:00Z".to_string(),
+        index_version: "1.0.0".to_string(),
+        language_counts: BTreeMap::new(),
+        file_count: 0,
+        symbol_count: 0,
+        git_head: None,
+        registered_at: Some("2025-01-15T10:30:00Z".to_string()),
+        indexing_status: IndexingStatus::Ready,
+        freshness_status: FreshnessStatus::Fresh,
+    }
+}
+
+fn test_file_for_repo(repo_id: &str, file_path: &str) -> FileRecord {
+    FileRecord {
+        repo_id: repo_id.to_string(),
+        file_path: file_path.to_string(),
+        language: "rust".to_string(),
+        file_hash: format!("sha256:{repo_id}:{file_path}"),
+        summary: format!("Summary for {file_path} in {repo_id}"),
+        symbol_count: 1,
+        quality_mix: QualityMix {
+            semantic_percent: 0.0,
+            syntax_percent: 100.0,
+        },
+        updated_at: "2025-01-15T10:30:00Z".to_string(),
+    }
+}
+
+fn test_symbol_for_repo(
+    repo_id: &str,
+    file_path: &str,
+    name: &str,
+    kind: SymbolKind,
+) -> SymbolRecord {
+    SymbolRecord {
+        id: format!("{repo_id}//{file_path}::{name}#{}", kind.as_str()),
+        repo_id: repo_id.to_string(),
+        file_path: file_path.to_string(),
+        language: "rust".to_string(),
+        kind,
+        name: name.to_string(),
+        qualified_name: name.to_string(),
+        signature: format!("fn {name}()"),
+        start_line: 1,
+        end_line: 5,
+        start_byte: 0,
+        byte_length: 50,
+        content_hash: "sha256:content".to_string(),
+        quality_level: QualityLevel::Syntax,
+        confidence_score: 0.7,
+        source_adapter: "syntax-treesitter-rust".to_string(),
+        indexed_at: "2025-01-15T10:30:00Z".to_string(),
+        docstring: None,
+        summary: None,
+        parent_symbol_id: None,
+        keywords: None,
+        decorators_or_attributes: None,
+        semantic_refs: None,
+    }
+}
+
+#[test]
+fn multiple_repos_coexist_in_shared_store() {
+    let store = MetadataStore::open_in_memory().unwrap();
+
+    let repo_a = test_repo_with_id("alpha", "/repos/alpha");
+    let repo_b = test_repo_with_id("beta", "/repos/beta");
+    store.repos().upsert(&repo_a).unwrap();
+    store.repos().upsert(&repo_b).unwrap();
+
+    // Both repos are listed.
+    let ids = store.repos().list_ids().unwrap();
+    assert_eq!(ids, vec!["alpha", "beta"]);
+
+    // Files in different repos are independent.
+    store
+        .files()
+        .upsert(&test_file_for_repo("alpha", "src/lib.rs"))
+        .unwrap();
+    store
+        .files()
+        .upsert(&test_file_for_repo("beta", "src/lib.rs"))
+        .unwrap();
+    store
+        .files()
+        .upsert(&test_file_for_repo("beta", "src/main.rs"))
+        .unwrap();
+
+    assert_eq!(store.files().list_paths("alpha").unwrap().len(), 1);
+    assert_eq!(store.files().list_paths("beta").unwrap().len(), 2);
+}
+
+#[test]
+fn symbols_with_same_path_and_name_are_unique_across_repos() {
+    let store = MetadataStore::open_in_memory().unwrap();
+
+    store
+        .repos()
+        .upsert(&test_repo_with_id("alpha", "/repos/alpha"))
+        .unwrap();
+    store
+        .repos()
+        .upsert(&test_repo_with_id("beta", "/repos/beta"))
+        .unwrap();
+
+    store
+        .files()
+        .upsert(&test_file_for_repo("alpha", "src/lib.rs"))
+        .unwrap();
+    store
+        .files()
+        .upsert(&test_file_for_repo("beta", "src/lib.rs"))
+        .unwrap();
+
+    // Both repos have the same file path and symbol name, but symbol IDs
+    // include repo_id so they are globally unique.
+    let mut sym_alpha = test_symbol_for_repo("alpha", "src/lib.rs", "run", SymbolKind::Function);
+    sym_alpha.confidence_score = 0.5;
+    store.symbols().upsert(&sym_alpha).unwrap();
+
+    let mut sym_beta = test_symbol_for_repo("beta", "src/lib.rs", "run", SymbolKind::Function);
+    sym_beta.confidence_score = 0.9;
+    store.symbols().upsert(&sym_beta).unwrap();
+
+    // Both symbols exist and are independently retrievable by their unique IDs.
+    let alpha_loaded = store
+        .symbols()
+        .get("alpha//src/lib.rs::run#function")
+        .unwrap()
+        .unwrap();
+    assert!((alpha_loaded.confidence_score - 0.5).abs() < f32::EPSILON);
+    assert_eq!(alpha_loaded.repo_id, "alpha");
+
+    let beta_loaded = store
+        .symbols()
+        .get("beta//src/lib.rs::run#function")
+        .unwrap()
+        .unwrap();
+    assert!((beta_loaded.confidence_score - 0.9).abs() < f32::EPSILON);
+    assert_eq!(beta_loaded.repo_id, "beta");
+
+    // Repo-scoped listing shows one per repo.
+    assert_eq!(
+        store
+            .symbols()
+            .list_ids_for_file("alpha", "src/lib.rs")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .symbols()
+            .list_ids_for_file("beta", "src/lib.rs")
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn deleting_one_repo_does_not_affect_another() {
+    let store = MetadataStore::open_in_memory().unwrap();
+
+    store
+        .repos()
+        .upsert(&test_repo_with_id("alpha", "/repos/alpha"))
+        .unwrap();
+    store
+        .repos()
+        .upsert(&test_repo_with_id("beta", "/repos/beta"))
+        .unwrap();
+
+    store
+        .files()
+        .upsert(&test_file_for_repo("alpha", "src/lib.rs"))
+        .unwrap();
+    store
+        .files()
+        .upsert(&test_file_for_repo("beta", "src/lib.rs"))
+        .unwrap();
+
+    store
+        .symbols()
+        .upsert(&test_symbol_for_repo(
+            "alpha",
+            "src/lib.rs",
+            "run",
+            SymbolKind::Function,
+        ))
+        .unwrap();
+    store
+        .symbols()
+        .upsert(&test_symbol_for_repo(
+            "beta",
+            "src/lib.rs",
+            "run",
+            SymbolKind::Function,
+        ))
+        .unwrap();
+
+    // Delete alpha — cascade removes its files and symbols.
+    store.repos().delete("alpha").unwrap();
+
+    // Alpha is gone.
+    assert!(store.repos().get("alpha").unwrap().is_none());
+    assert!(store.files().list_paths("alpha").unwrap().is_empty());
+    assert!(store
+        .symbols()
+        .get("alpha//src/lib.rs::run#function")
+        .unwrap()
+        .is_none());
+
+    // Beta is unaffected — its files and symbols survive.
+    let beta = store.repos().get("beta").unwrap().unwrap();
+    assert_eq!(beta.repo_id, "beta");
+    assert_eq!(store.files().list_paths("beta").unwrap().len(), 1);
+    assert!(store
+        .symbols()
+        .get("beta//src/lib.rs::run#function")
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn repo_catalog_metadata_round_trips() {
+    let store = MetadataStore::open_in_memory().unwrap();
+
+    let mut repo = test_repo_with_id("catalog-test", "/repos/catalog");
+    repo.registered_at = Some("2025-06-01T00:00:00Z".to_string());
+    repo.indexing_status = IndexingStatus::Indexing;
+    repo.freshness_status = FreshnessStatus::Stale;
+
+    store.repos().upsert(&repo).unwrap();
+    let loaded = store.repos().get("catalog-test").unwrap().unwrap();
+
+    assert_eq!(
+        loaded.registered_at,
+        Some("2025-06-01T00:00:00Z".to_string())
+    );
+    assert_eq!(loaded.indexing_status, IndexingStatus::Indexing);
+    assert_eq!(loaded.freshness_status, FreshnessStatus::Stale);
+}
+
+#[test]
+fn ensure_and_update_preserves_registered_at() {
+    let mut store = MetadataStore::open_in_memory().unwrap();
+
+    // First index: sets registered_at.
+    let mut repo = test_repo_with_id("preserve-test", "/repos/preserve");
+    repo.registered_at = Some("2025-01-01T00:00:00Z".to_string());
+    repo.indexing_status = IndexingStatus::Ready;
+    repo.freshness_status = FreshnessStatus::Fresh;
+
+    {
+        let tx = store.transaction().unwrap();
+        tx.repos().ensure_and_update(&repo).unwrap();
+        tx.commit().unwrap();
+    }
+
+    // Second index: ensure_and_update with a different registered_at.
+    // The original registered_at should be preserved.
+    repo.registered_at = Some("2025-06-01T00:00:00Z".to_string());
+    repo.indexed_at = "2025-06-01T12:00:00Z".to_string();
+
+    {
+        let tx = store.transaction().unwrap();
+        tx.repos().ensure_and_update(&repo).unwrap();
+        tx.commit().unwrap();
+    }
+
+    let loaded = store.repos().get("preserve-test").unwrap().unwrap();
+    // registered_at stays at the original value (INSERT OR IGNORE kept the
+    // original row, and UPDATE does not touch registered_at).
+    assert_eq!(
+        loaded.registered_at,
+        Some("2025-01-01T00:00:00Z".to_string())
+    );
+    // indexed_at is updated.
+    assert_eq!(loaded.indexed_at, "2025-06-01T12:00:00Z");
+}
+
+#[test]
+fn shared_store_on_disk_supports_multiple_repos() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("shared.db");
+
+    // First session: add repo alpha.
+    {
+        let store = MetadataStore::open(&db_path).unwrap();
+        store
+            .repos()
+            .upsert(&test_repo_with_id("alpha", "/repos/alpha"))
+            .unwrap();
+        store
+            .files()
+            .upsert(&test_file_for_repo("alpha", "src/lib.rs"))
+            .unwrap();
+    }
+
+    // Second session: add repo beta to the same store.
+    {
+        let store = MetadataStore::open(&db_path).unwrap();
+        store
+            .repos()
+            .upsert(&test_repo_with_id("beta", "/repos/beta"))
+            .unwrap();
+        store
+            .files()
+            .upsert(&test_file_for_repo("beta", "src/main.rs"))
+            .unwrap();
+    }
+
+    // Third session: both repos are present.
+    {
+        let store = MetadataStore::open(&db_path).unwrap();
+        let ids = store.repos().list_ids().unwrap();
+        assert_eq!(ids, vec!["alpha", "beta"]);
+        assert_eq!(store.files().list_paths("alpha").unwrap().len(), 1);
+        assert_eq!(store.files().list_paths("beta").unwrap().len(), 1);
+    }
 }

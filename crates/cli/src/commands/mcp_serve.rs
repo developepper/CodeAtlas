@@ -30,7 +30,7 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     }
 }
 
-/// `codeatlas mcp serve --db <path>`
+/// `codeatlas mcp serve [--db <path>]`
 ///
 /// Validates the database path, opens the store, creates the tool
 /// registry, and runs the stdio JSON-RPC server loop. All diagnostics
@@ -136,9 +136,10 @@ fn parse_serve_args(args: &[String]) -> Result<ServeOpts, CliError> {
         i += 1;
     }
 
-    let db_path = db_path.ok_or_else(|| {
-        CliError::Usage("--db <path> is required\n\nUsage: codeatlas mcp serve --db <path>".into())
-    })?;
+    let db_path = match db_path {
+        Some(p) => p,
+        None => cli::data_root::default_db_path().map_err(CliError::Usage)?,
+    };
 
     Ok(ServeOpts { db_path })
 }
@@ -155,13 +156,13 @@ fn print_mcp_help() {
 }
 
 fn print_serve_help() {
-    eprintln!("Usage: codeatlas mcp serve --db <path>");
+    eprintln!("Usage: codeatlas mcp serve [--db <path>]");
     eprintln!();
     eprintln!("Start the MCP tool server over stdio (newline-delimited JSON-RPC).");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --db <path>    Path to the CodeAtlas index database (required)");
-    eprintln!("                 Typically: <repo>/.codeatlas/index.db");
+    eprintln!("  --db <path>    Path to the CodeAtlas index database");
+    eprintln!("                 Default: ~/.codeatlas/metadata.db");
     eprintln!();
     eprintln!("Repository-scoped tools accept repo_id as a parameter in each tool");
     eprintln!("call. The repo_id is derived from the indexed directory name (e.g.,");
@@ -187,10 +188,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_missing_db_flag() {
+    fn parse_missing_db_flag_uses_default() {
         let a: Vec<String> = vec![];
-        let err = parse_serve_args(&a).unwrap_err();
-        assert!(err.to_string().contains("--db <path> is required"));
+        let opts = parse_serve_args(&a).unwrap();
+        // Falls back to the shared store default path.
+        assert!(opts.db_path.to_string_lossy().contains("metadata.db"));
     }
 
     #[test]
