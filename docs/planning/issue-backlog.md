@@ -93,12 +93,12 @@ schemas, and compatibility notes. Workspace quality gates are green (`fmt`,
 - ~~Ticket: Kotlin semantic runtime integration and symbol extraction baseline~~ (#66)
 - ~~Ticket: Semantic adapter quality regression suite and gating criteria~~ (#67)
 
-## Epic 10: V1 Readiness
+## Epic 10: V1 Readiness (complete)
 
-- Ticket: Publish architecture and operations docs
-- Ticket: Add benchmark corpus and quality KPI report pipeline
-- Ticket: Add compatibility policy docs (N-1 API, schema migration)
-- Manual: Release readiness checklist and go/no-go review
+- ~~Ticket: Publish architecture and operations docs~~
+- ~~Ticket: Add benchmark corpus and quality KPI report pipeline~~
+- ~~Ticket: Add compatibility policy docs (N-1 API, schema migration)~~
+- ~~Manual: Release readiness checklist and go/no-go review~~
 
 ## Epic 11: First-Class Local MCP Server for AI Clients (complete)
 

@@ -25,9 +25,8 @@ databases, or production alerting.
 
 ### Install CodeAtlas
 
-See the [README Installation section](../../README.md#installation) for
-supported install paths (`cargo install`, GitHub Release binaries, or building
-from source).
+See the [README Installation section](../../README.md#installation) for the
+current supported install paths (`cargo install` or building from source).
 
 ### Required baseline tools (for building from source)
 

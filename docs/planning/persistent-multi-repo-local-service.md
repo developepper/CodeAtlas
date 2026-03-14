@@ -1,6 +1,6 @@
 # Persistent Multi-Repo Local Service Plan
 
-Status: Approved planning baseline; tracked in GitHub issues #148-#154
+Status: Complete — Epic 13 (#148-#154) delivered and closed
 
 Owner intent: make CodeAtlas usable as one persistent local code-intelligence
 backend across many repositories and AI clients, while preserving a clean path
