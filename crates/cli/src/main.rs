@@ -10,6 +10,7 @@ use tracing_subscriber::EnvFilter;
 mod commands;
 mod error;
 pub mod logging;
+pub mod mcp_bridge;
 pub mod mcp_stdio;
 mod router;
 

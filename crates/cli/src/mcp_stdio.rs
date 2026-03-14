@@ -360,7 +360,7 @@ fn handle_tools_call(
     }))
 }
 
-fn tool_description(name: &str) -> &'static str {
+pub(crate) fn tool_description(name: &str) -> &'static str {
     match name {
         "search_symbols" => "Search for symbols by name with optional filters",
         "get_symbol" => "Get a symbol by its unique ID",
@@ -382,7 +382,7 @@ fn tool_description(name: &str) -> &'static str {
 /// `crates/server-mcp/src/tools.rs`. Required fields mirror non-`Option`
 /// struct fields; optional fields and those with `#[serde(default)]` are
 /// listed only in `properties`.
-fn tool_input_schema(name: &str) -> Value {
+pub(crate) fn tool_input_schema(name: &str) -> Value {
     match name {
         "search_symbols" => serde_json::json!({
             "type": "object",

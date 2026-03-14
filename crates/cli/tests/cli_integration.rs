@@ -1817,3 +1817,155 @@ fn serve_status_endpoint_returns_json() {
     assert!(json["uptime_secs"].is_number());
     assert!(json["repo_count"].is_number());
 }
+
+// ---------------------------------------------------------------------------
+// MCP bridge tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mcp_bridge_help_shows_usage() {
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "bridge", "--help"])
+        .output()
+        .expect("bridge help");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--service-url"));
+    assert!(stderr.contains("codeatlas mcp bridge"));
+}
+
+/// Helper: send MCP messages to a bridge subprocess and collect responses.
+fn run_bridge_with_messages(service_addr: &str, mcp_messages: &[&str]) -> Vec<serde_json::Value> {
+    let mut input = String::new();
+    for msg in mcp_messages {
+        input.push_str(msg);
+        input.push('\n');
+    }
+
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "bridge", "--service-url", service_addr])
+        .env("CODEATLAS_LOG_FORMAT", "compact")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes()).ok();
+                // Close stdin to signal EOF so the bridge exits.
+                drop(stdin);
+            }
+            child.wait_with_output()
+        })
+        .expect("run bridge");
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).expect("parse bridge response"))
+        .collect()
+}
+
+#[test]
+fn mcp_bridge_end_to_end_with_service() {
+    let db_dir = TempDir::new().expect("temp dir");
+    let (mut service_child, service_addr) = start_serve(&db_dir);
+
+    let responses = run_bridge_with_messages(
+        &service_addr,
+        &[
+            // initialize
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+            // tools/list
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            // tools/call list_repos (proxied to service)
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_repos","arguments":{}}}"#,
+        ],
+    );
+
+    let _ = service_child.kill();
+    let _ = service_child.wait();
+
+    assert_eq!(responses.len(), 3, "expected 3 responses: {responses:?}");
+
+    // Initialize response.
+    assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(responses[0]["result"]["serverInfo"]["name"], "codeatlas");
+
+    // Tools list.
+    let tools = responses[1]["result"]["tools"].as_array().unwrap();
+    assert!(tools.len() >= 10, "should list all tools");
+
+    // Tools call (proxied through service).
+    let content = responses[2]["result"]["content"]
+        .as_array()
+        .expect("content array");
+    assert_eq!(content[0]["type"], "text");
+
+    // Parse the inner MCP response envelope.
+    let mcp_text = content[0]["text"].as_str().unwrap();
+    let mcp_resp: serde_json::Value = serde_json::from_str(mcp_text).expect("parse MCP envelope");
+    assert_eq!(mcp_resp["status"], "success");
+}
+
+#[test]
+fn mcp_bridge_service_unreachable_fails_at_startup() {
+    // Point bridge at a port nothing is listening on.
+    let output = Command::new(codeatlas_bin())
+        .args(["mcp", "bridge", "--service-url", "127.0.0.1:1"])
+        .env("CODEATLAS_LOG_FORMAT", "compact")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("run bridge");
+
+    assert!(
+        !output.status.success(),
+        "bridge should fail when service is unreachable"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot reach CodeAtlas service"),
+        "stderr should explain the failure: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_bridge_stdout_is_protocol_only() {
+    let db_dir = TempDir::new().expect("temp dir");
+    let (mut service_child, service_addr) = start_serve(&db_dir);
+
+    let mut bridge_child = Command::new(codeatlas_bin())
+        .args(["mcp", "bridge", "--service-url", &service_addr])
+        .env("CODEATLAS_LOG_FORMAT", "compact")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn bridge");
+
+    // Send initialize then close stdin.
+    if let Some(mut stdin) = bridge_child.stdin.take() {
+        stdin
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+            .ok();
+        drop(stdin);
+    }
+
+    let output = bridge_child.wait_with_output().expect("bridge output");
+
+    let _ = service_child.kill();
+    let _ = service_child.wait();
+
+    // Stdout should contain only valid JSON-RPC lines.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        assert!(
+            serde_json::from_str::<serde_json::Value>(line).is_ok(),
+            "stdout line is not valid JSON: {line}"
+        );
+    }
+}
