@@ -37,7 +37,9 @@ pub fn default_blob_path() -> Result<PathBuf, String> {
 
 /// Resolves the `(db_path, blob_path)` pair from an optional `--db`
 /// override. When `db_override` is `None`, uses the shared storage root.
-pub fn resolve_db_and_blob_paths(db_override: Option<PathBuf>) -> Result<(PathBuf, PathBuf), String> {
+pub fn resolve_db_and_blob_paths(
+    db_override: Option<PathBuf>,
+) -> Result<(PathBuf, PathBuf), String> {
     if let Some(p) = db_override {
         let blobs = p
             .parent()
