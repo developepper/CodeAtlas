@@ -1,12 +1,11 @@
 # Persistent Local Service Architecture
 
-Status: Active architecture baseline for Epic 13 (#148)
+Status: Complete — Epic 13 (#148) delivered and closed
 
 This document defines the canonical architecture for the persistent multi-repo
 local CodeAtlas service. It finalizes the decisions outlined in the planning
-document (`docs/planning/persistent-multi-repo-local-service.md`) and provides
-the concrete technical direction needed to unblock implementation tickets
-#150-#154.
+document (`docs/planning/persistent-multi-repo-local-service.md`) and records
+the technical direction that governed implementation tickets #150-#154.
 
 ## Purpose
 
@@ -127,7 +126,7 @@ Current model (one process per repo):
 }
 ```
 
-Service model (one bridge to shared service, exact args TBD in ticket #153):
+Service model (one bridge to shared service):
 ```json
 {
   "mcpServers": {
@@ -147,14 +146,12 @@ An explicit flag or environment variable can override it.
 **Decision:** The persistent service owns one shared storage root directory,
 not per-repo `.codeatlas/` DB paths.
 
-**Direction:** The service should use a user-scoped data directory (e.g.
-`~/.codeatlas/` on Unix/macOS, or a platform-appropriate equivalent). The
-exact default path, environment variable override, and cross-platform
-conventions should be finalized during implementation (ticket #150/#152).
+**Direction:** The service uses a user-scoped data directory at `~/.codeatlas/`
+by default. Override with `--data-root <path>` or `CODEATLAS_DATA_ROOT`.
 
-**Proposed layout:**
+**Layout:**
 ```
-<data-root>/
+~/.codeatlas/
   metadata.db          # shared SQLite database for all repos
   blobs/               # content-addressed blob storage
 ```
@@ -163,12 +160,6 @@ conventions should be finalized during implementation (ticket #150/#152).
 - A shared storage root is the natural home for a multi-repo catalog.
 - Per-repo `.codeatlas/` directories remain usable for direct-store workflows
   but are not the service-path default.
-
-**Open detail for implementation tickets:**
-- Exact default path and platform conventions (ticket #150).
-- Whether and how `codeatlas index` defaults change to point at the shared
-  root, or whether only service-mode commands use it (ticket #150).
-- Service runtime files (PID, logs) and their location (ticket #152).
 
 ### DR-4: Repo identity
 
@@ -203,13 +194,16 @@ configuration, not auto-detection.
 - Clients (bridge, CLI) use the same default or an explicit override.
 - No auto-detection or service discovery in the first slice.
 
+**Resolved defaults:**
+- Default port: `52337`.
+- Override via `--port` flag or `CODEATLAS_PORT` environment variable.
+- Override bind address via `--host` flag or `CODEATLAS_HOST` environment
+  variable.
+- The MCP bridge uses `--service-url` or the same environment variables.
+
 **Rationale:**
 - A fixed default address simplifies zero-config local usage.
 - Explicit configuration avoids the operational ambiguity of auto-detect.
-
-**Open detail for implementation tickets:**
-- Exact default port number (ticket #152).
-- Exact flag and environment variable names (tickets #152/#153).
 
 ### DR-6: CLI migration model
 
@@ -234,8 +228,11 @@ explicit service-oriented commands and flags. No auto-detection.
 - A future cleanup ticket may simplify or remove direct-store entrypoints once
   the service model is proven.
 
-**Open detail for implementation tickets:**
-- Exact CLI command names and flag shapes (tickets #151/#152/#153).
+**Resolved commands:**
+- `codeatlas serve` — start the persistent service.
+- `codeatlas repo add/list/status/refresh/remove` — repo lifecycle.
+- `codeatlas mcp bridge` — MCP bridge to the service.
+- All direct-store commands remain unchanged.
 
 ### DR-7: Refactor-first policy
 
@@ -273,8 +270,8 @@ The API should cover three categories:
    response envelopes. The MCP bridge translates MCP `tools/call` requests
    into the corresponding HTTP query call.
 
-Exact endpoint paths, request/response schemas, and error conventions are
-implementation details for tickets #151 and #152.
+The implemented HTTP API surface is documented in the README
+(`Service Architecture` section) and the operations runbook.
 
 ## Relationship to Hosted/Centralized Deployment
 
@@ -326,9 +323,9 @@ The service HTTP handlers call into `QueryService` methods synchronously (or
 via `spawn_blocking` if needed). This preserves the existing synchronous
 contract across all core crates.
 
-## New Crate Structure
+## Crate Structure
 
-The implementation will likely add one or two new crates:
+The implementation added the `service` crate:
 
 ```
 crates/
@@ -336,19 +333,16 @@ crates/
                      # Repo catalog management APIs
                      # Health/status endpoints
                      # Service lifecycle (startup, shutdown, PID)
-  mcp-bridge/        # MCP-to-HTTP bridge process (optional separate crate,
-                     # could also live as a module in cli or server-mcp)
 ```
 
-Whether `mcp-bridge` is a separate crate or a module in `cli` is an
-implementation detail to be decided in ticket #153. The important constraint is
+The MCP bridge logic lives in the `cli` crate. The important constraint is
 that the bridge logic does not pull `axum`/`tokio` server dependencies into
 unrelated crates.
 
 ## Repo Catalog Metadata
 
-The existing `repos` table schema supports multi-repo storage but lacks
-service-oriented metadata. Ticket #150 will add:
+The repo catalog includes the following service-oriented metadata (added in
+#150):
 
 | Field | Type | Purpose |
 |-------|------|---------|
@@ -364,12 +358,6 @@ signal used by lifecycle and operator workflows.
 
 ## What This Document Does Not Decide
 
-- Exact default storage root path and cross-platform conventions (ticket #150).
-- Exact HTTP endpoint paths, request/response schemas, and error conventions
-  (tickets #151/#152).
-- Exact CLI command names, flag shapes, and help text (tickets #151/#152/#153).
-- Exact default port number and environment variable names (ticket #152).
-- Repo registration semantics for moved/renamed source roots (ticket #151).
 - Whether direct MCP-to-service transport (e.g., streamable HTTP MCP) is needed
   later beyond the bridge model.
 - Docker packaging (explicitly deferred per planning doc).
