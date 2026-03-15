@@ -90,6 +90,7 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
 
     println!("files_discovered: {}", result.metrics.files_discovered);
     println!("files_parsed: {}", result.metrics.files_parsed);
+    println!("files_file_only: {}", result.metrics.files_file_only);
     println!("files_unchanged: {}", result.metrics.files_unchanged);
     println!("files_deleted: {}", result.metrics.files_deleted);
     println!("files_errored: {}", result.metrics.files_errored);

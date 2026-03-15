@@ -101,8 +101,11 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     // Repository overview
     println!("Repository: {repo_id}");
     println!(
-        "Files:      {} discovered, {} parsed, {} errored",
-        result.metrics.files_discovered, result.metrics.files_parsed, result.metrics.files_errored,
+        "Files:      {} discovered, {} parsed ({} file-only), {} errored",
+        result.metrics.files_discovered,
+        result.metrics.files_parsed,
+        result.metrics.files_file_only,
+        result.metrics.files_errored,
     );
     println!("Symbols:    {}", result.metrics.symbols_extracted);
     println!();

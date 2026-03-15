@@ -21,6 +21,8 @@ pub struct IndexMetrics {
     pub files_unchanged: usize,
     /// Files removed from the index because they were deleted from disk.
     pub files_deleted: usize,
+    /// Files indexed at file level only (no symbols extracted).
+    pub files_file_only: usize,
     /// Semantic coverage metrics computed from parse output.
     pub coverage: SemanticCoverageMetrics,
 }
@@ -151,9 +153,19 @@ pub fn run(
     // changed/new files for upserts.
     stage::persist(ctx, store, blob_store, &discovery, &parse_output)?;
 
+    let files_file_only = parse_output
+        .parsed_files
+        .iter()
+        .filter(|f| f.output.symbols.is_empty())
+        .count();
+
+    // files_parsed means files that produced symbol-bearing adapter output.
+    // File-only records are tracked separately via files_file_only.
+    let files_parsed = parse_output.parsed_files.len() - files_file_only;
+
     let metrics = IndexMetrics {
         files_discovered: discovery.metrics.files_discovered,
-        files_parsed: parse_output.parsed_files.len(),
+        files_parsed,
         files_errored: parse_output
             .file_errors
             .iter()
@@ -163,12 +175,14 @@ pub fn run(
         symbols_extracted,
         files_unchanged,
         files_deleted,
+        files_file_only,
         coverage,
     };
 
     info!(
         files_discovered = metrics.files_discovered,
         files_parsed = metrics.files_parsed,
+        files_file_only = metrics.files_file_only,
         files_errored = metrics.files_errored,
         files_unchanged = metrics.files_unchanged,
         files_deleted = metrics.files_deleted,
