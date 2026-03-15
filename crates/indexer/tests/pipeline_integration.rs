@@ -386,37 +386,42 @@ fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
 
-    // Rust file parsed successfully.
+    // Rust file produced symbols (files_parsed), Python is file-only.
     assert_eq!(result.metrics.files_parsed, 1);
+    assert_eq!(result.metrics.files_file_only, 1);
 
-    // Python file recorded as an error (no adapter available).
+    // Python file is NOT an error — missing adapter produces a file-only record.
     let py_errors: Vec<_> = result
         .file_errors
         .iter()
         .filter(|e| e.path.to_string_lossy().contains("script.py"))
         .collect();
     assert!(
-        !py_errors.is_empty(),
-        "expected error for unsupported Python file"
-    );
-    assert!(
-        py_errors[0].error.contains("no adapter"),
-        "error should indicate no adapter: {}",
-        py_errors[0].error
-    );
-    // No adapter was tried, so adapter_id should be None.
-    assert!(
-        py_errors[0].adapter_id.is_none(),
-        "adapter_id should be None when no adapters available"
+        py_errors.is_empty(),
+        "missing adapter should not produce a file error"
     );
 
-    // Repo still persisted with the successful file.
+    // Repo persisted with both files.
     let repo = db
         .repos()
         .get("mixed-repo")
         .expect("query repo")
         .expect("repo record");
-    assert_eq!(repo.file_count, 1);
+    assert_eq!(repo.file_count, 2);
+
+    // Python file has a file record with zero symbols.
+    let py_file = db
+        .files()
+        .get("mixed-repo", "script.py")
+        .expect("query file")
+        .expect("Python file record should exist");
+    assert_eq!(py_file.language, "python");
+    assert_eq!(py_file.symbol_count, 0);
+
+    // Python file blob was persisted.
+    let py_content = std::fs::read(repo_dir.path().join("script.py")).expect("read py");
+    let py_hash = store::content_hash(&py_content);
+    assert!(blob_store.exists(&py_hash).expect("blob exists"));
 }
 
 // ---------------------------------------------------------------------------
@@ -571,10 +576,12 @@ fn adapter_error_carries_adapter_id_provenance() {
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
 
-    // No files parsed.
+    // Adapter failed — file gets a file-only record, not counted as "parsed".
     assert_eq!(result.metrics.files_parsed, 0);
+    assert_eq!(result.metrics.files_file_only, 1);
 
-    // Error carries the adapter ID for provenance.
+    // Error carries the adapter ID for provenance — real adapter failures
+    // are still recorded in file_errors even though the file gets a record.
     let rs_errors: Vec<_> = result
         .file_errors
         .iter()
@@ -591,6 +598,19 @@ fn adapter_error_carries_adapter_id_provenance() {
         "error message should contain adapter error: {}",
         rs_errors[0].error
     );
+
+    // File record still exists with zero symbols.
+    let file = db
+        .files()
+        .get("fail-repo", "src/main.rs")
+        .expect("query file")
+        .expect("file record should exist despite adapter failure");
+    assert_eq!(file.symbol_count, 0);
+
+    // Blob was persisted.
+    let content = std::fs::read(repo_dir.path().join("src/main.rs")).expect("read file");
+    let hash = store::content_hash(&content);
+    assert!(blob_store.exists(&hash).expect("blob exists"));
 }
 
 // ---------------------------------------------------------------------------
@@ -689,16 +709,30 @@ fn parse_stage_handles_no_adapter() {
     let discovery = stage::discover(&ctx).expect("discovery ok");
     let parse_output = stage::parse(&ctx, &discovery);
 
-    // The Python file should appear in file_errors.
+    // The Python file should NOT appear in file_errors — missing adapter
+    // is not an error, it produces a file-only record.
     let py_errors: Vec<_> = parse_output
         .file_errors
         .iter()
         .filter(|e| e.path.to_string_lossy().contains("script.py"))
         .collect();
     assert!(
-        !py_errors.is_empty(),
-        "expected error for unsupported Python file"
+        py_errors.is_empty(),
+        "missing adapter should not produce a file error"
     );
+
+    // The Python file should appear in parsed_files as file-only.
+    let py_parsed: Vec<_> = parse_output
+        .parsed_files
+        .iter()
+        .filter(|f| f.relative_path.to_string_lossy().contains("script.py"))
+        .collect();
+    assert!(
+        !py_parsed.is_empty(),
+        "Python file should be in parsed_files as file-only"
+    );
+    assert_eq!(py_parsed[0].output.symbols.len(), 0);
+    assert_eq!(py_parsed[0].output.source_adapter, "file-only");
 }
 
 #[test]
@@ -2104,4 +2138,290 @@ fn git_diff_first_run_indexes_all_files() {
         "all files should be parsed on first run"
     );
     assert_eq!(r.metrics.files_unchanged, 0);
+}
+
+// ---------------------------------------------------------------------------
+// File-only indexing: recognized files without symbol adapters (#166)
+// ---------------------------------------------------------------------------
+
+/// A recognized-language repo with no adapters at all should produce file
+/// records and blobs for all discovered files (non-empty index).
+#[test]
+fn file_only_indexing_recognized_repo_no_adapters() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("app.py"), "print('hello')\n").expect("write py");
+    std::fs::write(repo_dir.path().join("lib.go"), "package main\n").expect("write go");
+    std::fs::write(repo_dir.path().join("index.js"), "console.log('hi');\n").expect("write js");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    // TreeSitterRouter only has Rust adapters — no adapters for Python/Go/JS.
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "no-adapter-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // All 3 files indexed as file-only — no symbol-bearing adapter output.
+    assert_eq!(result.metrics.files_parsed, 0);
+    assert_eq!(result.metrics.files_file_only, 3);
+    assert_eq!(result.metrics.symbols_extracted, 0);
+    assert!(
+        result.file_errors.is_empty(),
+        "no errors expected for missing adapters"
+    );
+
+    // Repo has all 3 file records.
+    let repo = db
+        .repos()
+        .get("no-adapter-repo")
+        .expect("query repo")
+        .expect("repo record");
+    assert_eq!(repo.file_count, 3);
+    assert_eq!(repo.symbol_count, 0);
+
+    // Each file has a file record with zero symbols.
+    for (path, lang) in &[
+        ("app.py", "python"),
+        ("lib.go", "go"),
+        ("index.js", "javascript"),
+    ] {
+        let file = db
+            .files()
+            .get("no-adapter-repo", path)
+            .expect("query file")
+            .unwrap_or_else(|| panic!("file record for {} should exist", path));
+        assert_eq!(file.language, *lang);
+        assert_eq!(file.symbol_count, 0);
+    }
+
+    // Blobs were persisted for all files.
+    for name in &["app.py", "lib.go", "index.js"] {
+        let content = std::fs::read(repo_dir.path().join(name)).expect("read file");
+        let hash = store::content_hash(&content);
+        assert!(
+            blob_store.exists(&hash).expect("blob exists"),
+            "blob for {} should be persisted",
+            name
+        );
+    }
+}
+
+/// A mixed repo with both symbol-bearing and file-only files should persist
+/// both correctly.
+#[test]
+fn file_only_indexing_mixed_repo() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+
+    // Rust file — will get symbols from tree-sitter.
+    std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("write rs");
+    // Python file — no adapter, will be file-only.
+    std::fs::write(repo_dir.path().join("script.py"), "import sys\n").expect("write py");
+    // SQL file — recognized language, no adapter.
+    std::fs::write(
+        repo_dir.path().join("schema.sql"),
+        "CREATE TABLE t (id INT);\n",
+    )
+    .expect("write sql");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "mixed-file-only".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // 1 with symbols (Rust), 2 file-only (Python, SQL).
+    assert_eq!(result.metrics.files_parsed, 1);
+    assert_eq!(result.metrics.files_file_only, 2);
+    assert!(
+        result.metrics.symbols_extracted >= 1,
+        "Rust should have symbols"
+    );
+
+    // Repo aggregates.
+    let repo = db
+        .repos()
+        .get("mixed-file-only")
+        .expect("query repo")
+        .expect("repo record");
+    assert_eq!(repo.file_count, 3);
+    assert!(repo.symbol_count >= 1);
+
+    // Rust file has symbols.
+    let rs_file = db
+        .files()
+        .get("mixed-file-only", "src/main.rs")
+        .expect("query file")
+        .expect("Rust file record");
+    assert!(rs_file.symbol_count >= 1);
+
+    // Python file is file-only.
+    let py_file = db
+        .files()
+        .get("mixed-file-only", "script.py")
+        .expect("query file")
+        .expect("Python file record");
+    assert_eq!(py_file.symbol_count, 0);
+}
+
+/// Stale file cleanup should not delete file-only indexed entries on
+/// re-index when the file is still present on disk.
+#[test]
+fn file_only_stale_cleanup_preserves_file_only_records() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("app.py"), "print('v1')\n").expect("write py");
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "stale-test".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    // First index: 1 symbol-bearing (Rust), 1 file-only (Python).
+    let r1 = run(&ctx, &mut db, &blob_store).expect("first run");
+    assert_eq!(r1.metrics.files_parsed, 1);
+    assert_eq!(r1.metrics.files_file_only, 1);
+
+    // Re-index without changes: file-only record should survive.
+    let _r2 = run(&ctx, &mut db, &blob_store).expect("second run");
+
+    let repo = db
+        .repos()
+        .get("stale-test")
+        .expect("query repo")
+        .expect("repo record");
+    assert_eq!(repo.file_count, 2, "both files should still be in index");
+
+    let py_file = db
+        .files()
+        .get("stale-test", "app.py")
+        .expect("query file")
+        .expect("Python file record should survive re-index");
+    assert_eq!(py_file.symbol_count, 0);
+}
+
+/// Verify that file-only records use the same content_hash contract as
+/// symbol-bearing files (store::content_hash SHA-256).
+#[test]
+fn file_only_uses_same_content_hash_contract() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    std::fs::write(repo_dir.path().join("app.py"), "x = 1\n").expect("write py");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = TreeSitterRouter::new();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "hash-test".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    let content = std::fs::read(repo_dir.path().join("app.py")).expect("read file");
+    let expected_hash = store::content_hash(&content);
+
+    let file = db
+        .files()
+        .get("hash-test", "app.py")
+        .expect("query file")
+        .expect("file record");
+    assert_eq!(
+        file.file_hash, expected_hash,
+        "file-only record should use the same content_hash as blob store"
+    );
+
+    // Blob retrievable by that hash.
+    let blob = blob_store
+        .get(&expected_hash)
+        .expect("get blob")
+        .expect("blob should exist");
+    assert_eq!(blob, content);
+}
+
+/// Missing-adapter and adapter-failure produce different diagnostic states.
+#[test]
+fn file_only_distinguishes_missing_adapter_from_adapter_failure() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    // Python — no adapter at all (missing adapter).
+    std::fs::write(repo_dir.path().join("script.py"), "print('hi')\n").expect("write py");
+    // Rust — adapter exists but fails (adapter failure).
+    std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let router = FailOnlyRouter::new(); // Only returns FailingAdapter for Rust.
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "diag-test".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        router: &router,
+        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // Both files get file-only records — neither produced symbols.
+    assert_eq!(result.metrics.files_parsed, 0);
+    assert_eq!(result.metrics.files_file_only, 2);
+
+    // Missing adapter (Python): no file_error.
+    let py_errors: Vec<_> = result
+        .file_errors
+        .iter()
+        .filter(|e| e.path.to_string_lossy().contains("script.py"))
+        .collect();
+    assert!(
+        py_errors.is_empty(),
+        "missing adapter should not produce a file error"
+    );
+
+    // Adapter failure (Rust): file_error WITH adapter_id.
+    let rs_errors: Vec<_> = result
+        .file_errors
+        .iter()
+        .filter(|e| e.path.to_string_lossy().contains("main.rs"))
+        .collect();
+    assert!(
+        !rs_errors.is_empty(),
+        "adapter failure should still produce a file error"
+    );
+    assert_eq!(rs_errors[0].adapter_id.as_deref(), Some("failing-adapter"));
 }

@@ -167,12 +167,24 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
             debug!(
                 path = %file.relative_path.display(),
                 language = %file.language,
-                "no adapter available, skipping"
+                "no adapter available, indexing file-only"
             );
-            file_errors.push(FileError {
-                path: file.relative_path.clone(),
-                adapter_id: None,
-                error: format!("no adapter for language '{}'", file.language),
+
+            // File-only fallback: persist file record and blob even without
+            // symbols. This is not an error — it is an expected capability
+            // boundary for recognized languages without adapters.
+            let content_hash = file_content_hash(&file.content);
+            parsed_files.push(ParsedFile {
+                relative_path: file.relative_path.clone(),
+                language: file.language.clone(),
+                output: AdapterOutput {
+                    symbols: vec![],
+                    source_adapter: "file-only".to_string(),
+                    quality_level: QualityLevel::Syntax,
+                },
+                symbol_provenance: vec![],
+                content_hash,
+                content: file.content.clone(),
             });
             continue;
         }
@@ -236,14 +248,33 @@ pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOut
             // Do not append them to file_errors when the file was
             // successfully parsed — file_errors drives the files_errored
             // metric and should only contain files with no usable output.
-        } else if per_file_errors.is_empty() {
-            file_errors.push(FileError {
-                path: file.relative_path.clone(),
-                adapter_id: None,
-                error: "all adapters returned unsupported".to_string(),
-            });
         } else {
-            file_errors.append(&mut per_file_errors);
+            // No adapter produced symbols. Record real adapter failures
+            // as file_errors (distinct from the missing-adapter path above)
+            // but still persist a file-only record so the file does not
+            // disappear from the index.
+            if per_file_errors.is_empty() {
+                debug!(
+                    path = %file.relative_path.display(),
+                    "all adapters returned unsupported, indexing file-only"
+                );
+            } else {
+                file_errors.append(&mut per_file_errors);
+            }
+
+            let content_hash = file_content_hash(&file.content);
+            parsed_files.push(ParsedFile {
+                relative_path: file.relative_path.clone(),
+                language: file.language.clone(),
+                output: AdapterOutput {
+                    symbols: vec![],
+                    source_adapter: "file-only".to_string(),
+                    quality_level: QualityLevel::Syntax,
+                },
+                symbol_provenance: vec![],
+                content_hash,
+                content: file.content.clone(),
+            });
         }
     }
 
