@@ -10,7 +10,12 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     let (db_path, symbol_id) = parse_args(args)?;
 
     let db = store::MetadataStore::open(&db_path)?;
-    let svc = StoreQueryService::new(&db);
+    let blob_path = db_path
+        .parent()
+        .map(|p| p.join("blobs"))
+        .unwrap_or_else(|| PathBuf::from("blobs"));
+    let blob_store = store::BlobStore::open(&blob_path)?;
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     let record = svc.get_symbol(&symbol_id)?;
 

@@ -8,8 +8,9 @@ use core_model::{
 };
 use query_engine::{QueryError, QueryFilters, QueryService, StoreQueryService, TextQuery};
 use store::MetadataStore;
+use tempfile::TempDir;
 
-fn seed_store() -> MetadataStore {
+fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
     let store = MetadataStore::open_in_memory().unwrap();
 
     store
@@ -96,7 +97,9 @@ fn seed_store() -> MetadataStore {
         store.symbols().upsert(sym).unwrap();
     }
 
-    store
+    let blob_dir = TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+    (store, blob_store, blob_dir)
 }
 
 fn make_symbol(
@@ -150,8 +153,8 @@ fn query(pattern: &str) -> TextQuery {
 
 #[test]
 fn search_text_matches_by_name() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("parse_config")).unwrap();
     assert!(!result.items.is_empty());
@@ -163,8 +166,8 @@ fn search_text_matches_by_name() {
 
 #[test]
 fn search_text_matches_by_docstring() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("TOML configuration")).unwrap();
     assert!(!result.items.is_empty());
@@ -176,8 +179,8 @@ fn search_text_matches_by_docstring() {
 
 #[test]
 fn search_text_matches_by_keyword() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("networking")).unwrap();
     assert!(!result.items.is_empty());
@@ -189,8 +192,8 @@ fn search_text_matches_by_keyword() {
 
 #[test]
 fn search_text_matches_by_signature() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("Request Response")).unwrap();
     assert!(!result.items.is_empty());
@@ -198,8 +201,8 @@ fn search_text_matches_by_signature() {
 
 #[test]
 fn search_text_matches_by_qualified_name() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("crate validate_input")).unwrap();
     assert!(!result.items.is_empty());
@@ -213,8 +216,8 @@ fn search_text_matches_by_qualified_name() {
 
 #[test]
 fn search_text_empty_query_rejected() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let err = svc
         .search_text(&TextQuery {
@@ -231,8 +234,8 @@ fn search_text_empty_query_rejected() {
 
 #[test]
 fn search_text_no_match_returns_empty() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc
         .search_text(&query("xyzzy_completely_unrelated"))
@@ -244,8 +247,8 @@ fn search_text_no_match_returns_empty() {
 
 #[test]
 fn search_text_wrong_repo_returns_empty() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc
         .search_text(&TextQuery {
@@ -264,8 +267,8 @@ fn search_text_wrong_repo_returns_empty() {
 
 #[test]
 fn search_text_results_carry_symbol_record() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("HttpServer")).unwrap();
     assert!(!result.items.is_empty());
@@ -281,8 +284,8 @@ fn search_text_results_carry_symbol_record() {
 
 #[test]
 fn search_text_results_include_line_number() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("parse_config")).unwrap();
     assert!(!result.items.is_empty());
@@ -292,8 +295,8 @@ fn search_text_results_include_line_number() {
 
 #[test]
 fn search_text_results_include_signature_as_line_content() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("parse_config")).unwrap();
     let hit = result
@@ -308,8 +311,8 @@ fn search_text_results_include_signature_as_line_content() {
 
 #[test]
 fn search_text_truncation_metadata() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     // "http" appears in keywords of both HttpServer and handle_request.
     let result = svc
@@ -329,8 +332,8 @@ fn search_text_truncation_metadata() {
 
 #[test]
 fn search_text_offset_pagination() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let full = svc.search_text(&query("http")).unwrap();
 
@@ -351,8 +354,8 @@ fn search_text_offset_pagination() {
 
 #[test]
 fn search_text_deterministic_ordering() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let r1 = svc.search_text(&query("http")).unwrap();
     let r2 = svc.search_text(&query("http")).unwrap();
@@ -411,7 +414,9 @@ fn fts_index_updated_on_symbol_insert() {
         })
         .unwrap();
 
-    let svc = StoreQueryService::new(&store);
+    let blob_dir2 = TempDir::new().unwrap();
+    let blob_store2 = store::BlobStore::open(&blob_dir2.path().join("blobs")).unwrap();
+    let svc = StoreQueryService::new(&store, &blob_store2);
 
     // Before insert: no results.
     let before = svc.search_text(&TextQuery {
@@ -474,8 +479,8 @@ fn fts_index_updated_on_symbol_insert() {
 
 #[test]
 fn fts_index_updated_on_symbol_delete() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     // Confirm match exists before delete.
     let before = svc.search_text(&query("parse_config")).unwrap();
@@ -493,8 +498,8 @@ fn fts_index_updated_on_symbol_delete() {
 
 #[test]
 fn search_text_malformed_fts_syntax_does_not_error() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     // FTS5 operators and special chars are normalized, not passed raw.
     // This must not produce an FTS5 syntax error.
@@ -511,8 +516,8 @@ fn search_text_malformed_fts_syntax_does_not_error() {
 
 #[test]
 fn search_text_only_special_chars_returns_empty() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.search_text(&query("*** ---")).unwrap();
     assert!(result.items.is_empty());
@@ -520,8 +525,8 @@ fn search_text_only_special_chars_returns_empty() {
 
 #[test]
 fn search_text_bare_fts_operator_does_not_error() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     // Bare FTS5 operators are lowercased to plain terms, not syntax errors.
     for op in ["OR", "AND", "NOT", "NEAR", "AND NOT"] {
@@ -605,7 +610,7 @@ struct HttpServer {
         assert!(result.metrics.symbols_extracted >= 2);
 
         // 3. Query via search_text and verify FTS index was populated.
-        let svc = StoreQueryService::new(&db);
+        let svc = StoreQueryService::new(&db, &blob_store);
 
         let config_results = svc
             .search_text(&TextQuery {

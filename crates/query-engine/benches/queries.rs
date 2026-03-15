@@ -54,6 +54,7 @@ impl AdapterRouter for TreeSitterRouter {
 
 struct BenchFixture {
     db: store::MetadataStore,
+    blob_store: store::BlobStore,
     _repo_dir: TempDir,
     _blob_dir: TempDir,
 }
@@ -96,6 +97,7 @@ fn create_populated_store(file_count: usize) -> BenchFixture {
 
     BenchFixture {
         db,
+        blob_store,
         _repo_dir: repo_dir,
         _blob_dir: blob_dir,
     }
@@ -110,7 +112,7 @@ fn bench_search_symbols(c: &mut Criterion) {
     group.sample_size(50);
 
     let fixture = create_populated_store(50);
-    let svc = StoreQueryService::new(&fixture.db);
+    let svc = StoreQueryService::new(&fixture.db, &fixture.blob_store);
 
     group.bench_function("exact_match", |b| {
         b.iter(|| {
@@ -161,7 +163,7 @@ fn bench_get_symbol(c: &mut Criterion) {
     group.sample_size(50);
 
     let fixture = create_populated_store(50);
-    let svc = StoreQueryService::new(&fixture.db);
+    let svc = StoreQueryService::new(&fixture.db, &fixture.blob_store);
 
     // Find a real symbol ID to query.
     let query = SymbolQuery {
@@ -194,7 +196,7 @@ fn bench_file_outline(c: &mut Criterion) {
     group.sample_size(50);
 
     let fixture = create_populated_store(50);
-    let svc = StoreQueryService::new(&fixture.db);
+    let svc = StoreQueryService::new(&fixture.db, &fixture.blob_store);
 
     group.bench_function("single_file", |b| {
         b.iter(|| {
@@ -215,7 +217,7 @@ fn bench_file_tree(c: &mut Criterion) {
     group.sample_size(50);
 
     let fixture = create_populated_store(50);
-    let svc = StoreQueryService::new(&fixture.db);
+    let svc = StoreQueryService::new(&fixture.db, &fixture.blob_store);
 
     group.bench_function("full_tree", |b| {
         b.iter(|| {
@@ -235,7 +237,7 @@ fn bench_repo_outline(c: &mut Criterion) {
     group.sample_size(50);
 
     let fixture = create_populated_store(50);
-    let svc = StoreQueryService::new(&fixture.db);
+    let svc = StoreQueryService::new(&fixture.db, &fixture.blob_store);
 
     group.bench_function("full_outline", |b| {
         b.iter(|| {
@@ -255,7 +257,7 @@ fn bench_search_text(c: &mut Criterion) {
     group.sample_size(50);
 
     let fixture = create_populated_store(50);
-    let svc = StoreQueryService::new(&fixture.db);
+    let svc = StoreQueryService::new(&fixture.db, &fixture.blob_store);
 
     group.bench_function("fts_query", |b| {
         b.iter(|| {

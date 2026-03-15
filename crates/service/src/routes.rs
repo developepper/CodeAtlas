@@ -8,7 +8,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use query_engine::{QueryService, StoreQueryService};
+use query_engine::StoreQueryService;
 use server_mcp::ToolRegistry;
 
 use crate::state::SharedState;
@@ -97,10 +97,7 @@ pub fn repo_routes() -> Router<SharedState> {
 }
 
 async fn list_repos(State(state): State<SharedState>) -> impl IntoResponse {
-    let result = state.with_db(|db| {
-        let svc = StoreQueryService::new(db);
-        svc.list_repos()
-    });
+    let result = state.with_db(|db| db.repos().list_all());
 
     match result {
         Ok(repos) => {
@@ -267,8 +264,13 @@ async fn tools_call(
     State(state): State<SharedState>,
     Json(req): Json<ToolCallRequest>,
 ) -> impl IntoResponse {
+    let blob_store = store::BlobStore::open(&state.config.blob_path());
     let result = state.with_db(|db| {
-        let svc = StoreQueryService::new(db);
+        let bs = blob_store.as_ref().map_err(|e| store::StoreError::Blob {
+            path: None,
+            reason: format!("failed to open blob store: {e}"),
+        })?;
+        let svc = StoreQueryService::new(db, bs);
         let registry = ToolRegistry::new(&svc);
         Ok::<_, store::StoreError>(registry.call(&req.name, req.arguments.clone()))
     });

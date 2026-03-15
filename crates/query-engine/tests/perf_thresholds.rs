@@ -52,7 +52,9 @@ impl AdapterRouter for TreeSitterRouter {
 // Fixture setup
 // ---------------------------------------------------------------------------
 
-fn setup_populated_store(file_count: usize) -> (store::MetadataStore, TempDir, TempDir) {
+fn setup_populated_store(
+    file_count: usize,
+) -> (store::MetadataStore, store::BlobStore, TempDir, TempDir) {
     let repo_dir = TempDir::new().expect("create temp dir");
     let src = repo_dir.path().join("src");
     fs::create_dir_all(&src).expect("create src dir");
@@ -88,7 +90,7 @@ fn setup_populated_store(file_count: usize) -> (store::MetadataStore, TempDir, T
 
     run(&ctx, &mut db, &blob_store).expect("index should succeed");
 
-    (db, repo_dir, blob_dir)
+    (db, blob_store, repo_dir, blob_dir)
 }
 
 /// Runs `op` `n` times, returning all durations sorted.
@@ -115,8 +117,8 @@ fn p95(sorted: &[std::time::Duration]) -> std::time::Duration {
 
 #[test]
 fn search_symbols_p95_under_threshold() {
-    let (db, _repo, _blob) = setup_populated_store(50);
-    let svc = StoreQueryService::new(&db);
+    let (db, blob_store, _repo, _blob) = setup_populated_store(50);
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     // Warm-up.
     for _ in 0..5 {
@@ -157,8 +159,8 @@ fn search_symbols_p95_under_threshold() {
 
 #[test]
 fn get_symbol_p95_under_threshold() {
-    let (db, _repo, _blob) = setup_populated_store(50);
-    let svc = StoreQueryService::new(&db);
+    let (db, blob_store, _repo, _blob) = setup_populated_store(50);
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     // Find a real symbol ID.
     let result = svc
@@ -198,8 +200,8 @@ fn get_symbol_p95_under_threshold() {
 
 #[test]
 fn file_outline_p95_under_threshold() {
-    let (db, _repo, _blob) = setup_populated_store(50);
-    let svc = StoreQueryService::new(&db);
+    let (db, blob_store, _repo, _blob) = setup_populated_store(50);
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     let latencies = measure_latencies(
         || {
@@ -226,8 +228,8 @@ fn file_outline_p95_under_threshold() {
 
 #[test]
 fn file_tree_p95_under_threshold() {
-    let (db, _repo, _blob) = setup_populated_store(50);
-    let svc = StoreQueryService::new(&db);
+    let (db, blob_store, _repo, _blob) = setup_populated_store(50);
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     let latencies = measure_latencies(
         || {
@@ -254,8 +256,8 @@ fn file_tree_p95_under_threshold() {
 
 #[test]
 fn repo_outline_p95_under_threshold() {
-    let (db, _repo, _blob) = setup_populated_store(50);
-    let svc = StoreQueryService::new(&db);
+    let (db, blob_store, _repo, _blob) = setup_populated_store(50);
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     let latencies = measure_latencies(
         || {
@@ -281,8 +283,8 @@ fn repo_outline_p95_under_threshold() {
 
 #[test]
 fn search_text_p95_under_threshold() {
-    let (db, _repo, _blob) = setup_populated_store(50);
-    let svc = StoreQueryService::new(&db);
+    let (db, blob_store, _repo, _blob) = setup_populated_store(50);
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     let latencies = measure_latencies(
         || {

@@ -705,10 +705,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let db = store::MetadataStore::open(&db_path).unwrap();
-        // Leak dir to keep the temp directory alive for the test duration.
+        let blob_dir = tempfile::tempdir().unwrap();
+        let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+        // Leak dirs and blob store to keep them alive for the test duration.
         std::mem::forget(dir);
-        (db, |db: &store::MetadataStore| {
-            let svc = Box::new(query_engine::StoreQueryService::new(db));
+        std::mem::forget(blob_dir);
+        let blob_store_ref: &'static store::BlobStore = Box::leak(Box::new(blob_store));
+        (db, move |db: &store::MetadataStore| {
+            let svc = Box::new(query_engine::StoreQueryService::new(db, blob_store_ref));
             let svc_ptr = Box::into_raw(svc);
             // SAFETY: the heap allocation is intentionally leaked so the
             // ToolRegistry reference remains valid for the test duration.
