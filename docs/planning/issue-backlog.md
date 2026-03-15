@@ -2,16 +2,17 @@
 
 This backlog is designed for one-PR-per-issue execution.
 
-Progress (updated 2026-03-12): Milestones M0-M11 are complete. The platform now
-includes indexing pipeline, query engine, MCP serving contracts, local CLI
-commands, incremental indexing with git-diff acceleration and determinism
-regression coverage, plus tracing, redacted structured logging, security
-regression coverage, performance threshold enforcement, TypeScript and Kotlin
-semantic adapters, confidence-aware merge, semantic regression gating, semantic
-coverage/win-rate metrics, a built-in newline-delimited stdio MCP server,
-documented client setup, packaging guidance, diagnostics coverage, tool
-schemas, and compatibility notes. Workspace quality gates are green (`fmt`,
-`clippy -D warnings`, full workspace tests).
+Progress (updated 2026-03-15): Milestones M0-M11 and Epics 13 and 16 are
+complete. The platform now includes indexing pipeline, query engine, MCP serving
+contracts, local CLI commands, incremental indexing with git-diff acceleration
+and determinism regression coverage, plus tracing, redacted structured logging,
+security regression coverage, performance threshold enforcement, TypeScript and
+Kotlin semantic adapters, confidence-aware merge, semantic regression gating,
+semantic coverage/win-rate metrics, a built-in newline-delimited stdio MCP
+server, documented client setup, packaging guidance, diagnostics coverage, tool
+schemas, compatibility notes, persistent multi-repo local service, and
+file-level indexing baseline for recognized languages. Workspace quality gates
+are green (`fmt`, `clippy -D warnings`, full workspace tests).
 
 ## Epic 0: Repository Governance and CI Foundation (complete)
 
@@ -147,24 +148,27 @@ Deferred from the first slice:
 - remote connectors
 - hosted/team controls
 
-### Epic 16: Non-Empty Index Baseline For Recognized Files (next)
+### Epic 16: Non-Empty Index Baseline For Recognized Files (complete)
 
 Planning artifact:
 `docs/planning/recognized-language-file-indexing.md`.
 
-Reviewed issue docs for the next issue-creation pass:
+GitHub epic and tickets (all complete):
 
-- `docs/planning/github-issues/file-indexing-epic.md`
-- `docs/planning/github-issues/file-indexing-ticket-pipeline-store.md`
-- `docs/planning/github-issues/file-indexing-ticket-query-content.md`
-- `docs/planning/github-issues/file-indexing-ticket-docs-metrics.md`
+- ~~#164 Epic 16: Non-Empty Index Baseline For Recognized Files~~
+- ~~#166 Ticket: Persist file records and blobs for recognized files without symbol adapters~~
+- ~~#167 Ticket: Wire file-content retrieval and file-level query behavior to the fallback model~~
+- ~~#165 Ticket: Update metrics, docs, and benchmark guidance for file-level indexing coverage~~
 
-Planned deliverables:
+What was delivered:
 
 - recognized files persist as file-level index entries even without symbols
-- blob-backed file content retrieval works for indexed files
-- file tree and repo outline remain useful on non-symbol-bearing repos
-- docs and benchmark guidance explain file-level indexing as a first-class baseline
+- blob-backed file content retrieval wired to production query/service path
+- file tree, file outline, and repo outline work on file-only indexed repos
+- missing-adapter and adapter-failure paths are diagnostically distinct
+- `files_file_only` metric tracks file-level indexed files separately from `files_parsed`
+- quality report returns `NOT APPLICABLE` for repos with zero symbol coverage
+- docs, runbook, benchmark guidance, and CLI output updated for file-level baseline
 
 ## Manual Setup Issues to Create Immediately
 
