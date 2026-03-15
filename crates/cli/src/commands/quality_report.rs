@@ -101,13 +101,23 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     // Repository overview
     println!("Repository: {repo_id}");
     println!(
-        "Files:      {} discovered, {} parsed ({} file-only), {} errored",
+        "Files:      {} discovered, {} with symbols, {} file-only, {} errored",
         result.metrics.files_discovered,
         result.metrics.files_parsed,
         result.metrics.files_file_only,
         result.metrics.files_errored,
     );
     println!("Symbols:    {}", result.metrics.symbols_extracted);
+    let total_indexed = result.metrics.files_parsed + result.metrics.files_file_only;
+    if total_indexed > 0 {
+        println!(
+            "Index coverage: {} of {} discovered files indexed ({} with symbols, {} file-only)",
+            total_indexed,
+            result.metrics.files_discovered,
+            result.metrics.files_parsed,
+            result.metrics.files_file_only,
+        );
+    }
     println!();
 
     // Semantic coverage
@@ -163,43 +173,55 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     println!("KPI Status");
     println!("----------");
 
-    let mut all_pass = true;
-
+    // Symbol quality KPIs are not applicable when no symbols were extracted.
+    // File-only indexing is useful but should not masquerade as a passing
+    // symbol quality gate.
     if c.total_symbols == 0 {
-        println!("[WARN] No symbols extracted");
-        all_pass = false;
+        if result.metrics.files_file_only > 0 {
+            println!(
+                "[INFO] No symbols extracted ({} files indexed at file level only)",
+                result.metrics.files_file_only
+            );
+            println!("[INFO] Symbol quality KPIs are not applicable for file-only repos");
+        } else {
+            println!("[WARN] No symbols extracted and no files indexed");
+        }
+        println!();
+        println!("Result: NOT APPLICABLE");
     } else {
+        let mut all_pass = true;
+
         println!("[PASS] Symbols extracted: {}", c.total_symbols);
-    }
 
-    if c.avg_confidence >= 0.85 {
-        println!("[PASS] Avg confidence: {:.3} (>= 0.850)", c.avg_confidence);
-    } else if c.total_symbols > 0 {
-        println!(
-            "[WARN] Avg confidence: {:.3} (below 0.850)",
-            c.avg_confidence
-        );
-    }
+        if c.avg_confidence >= 0.85 {
+            println!("[PASS] Avg confidence: {:.3} (>= 0.850)", c.avg_confidence);
+        } else {
+            println!(
+                "[WARN] Avg confidence: {:.3} (below 0.850)",
+                c.avg_confidence
+            );
+        }
 
-    if c.losses == 0 {
-        println!("[PASS] No semantic-vs-syntax losses");
-    } else {
-        println!("[FAIL] {} semantic-vs-syntax losses", c.losses);
-        all_pass = false;
-    }
+        if c.losses == 0 {
+            println!("[PASS] No semantic-vs-syntax losses");
+        } else {
+            println!("[FAIL] {} semantic-vs-syntax losses", c.losses);
+            all_pass = false;
+        }
 
-    if overlap_total > 0 && c.win_rate >= 0.8 {
-        println!("[PASS] Win rate: {:.1}% (>= 80.0%)", c.win_rate * 100.0);
-    } else if overlap_total > 0 {
-        println!("[FAIL] Win rate: {:.1}% (below 80.0%)", c.win_rate * 100.0);
-        all_pass = false;
-    }
+        if overlap_total > 0 && c.win_rate >= 0.8 {
+            println!("[PASS] Win rate: {:.1}% (>= 80.0%)", c.win_rate * 100.0);
+        } else if overlap_total > 0 {
+            println!("[FAIL] Win rate: {:.1}% (below 80.0%)", c.win_rate * 100.0);
+            all_pass = false;
+        }
 
-    println!();
-    if all_pass {
-        println!("Result: PASS");
-    } else {
-        println!("Result: FAIL");
+        println!();
+        if all_pass {
+            println!("Result: PASS");
+        } else {
+            println!("Result: FAIL");
+        }
     }
 
     if !result.file_errors.is_empty() {

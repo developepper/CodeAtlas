@@ -18,12 +18,13 @@ Use this kit to collect evidence for:
 
 ## Recommended Repo Matrix
 
-Use 4-6 repositories with distinct characteristics:
+Use 4-7 repositories with distinct characteristics:
 
-- Rust-heavy repo
-- TypeScript repo with `tsserver` available
-- Kotlin repo with JVM bridge available
-- mixed-language application repo
+- Rust-heavy repo (syntax adapter coverage)
+- TypeScript repo with `tsserver` available (semantic adapter coverage)
+- Kotlin repo with JVM bridge available (semantic adapter coverage)
+- mixed-language application repo (mix of symbol-bearing and file-only files)
+- recognized-language repo with no current adapter (e.g. Python, Go — file-level only)
 - medium/large service or app repo
 - repo with frequent small edits for incremental-refresh demos
 
@@ -58,8 +59,9 @@ The script writes CSV outputs under a timestamped directory.
 Collected from `codeatlas quality-report`:
 
 - files discovered
-- files parsed
-- files errored
+- files with symbols (symbol-bearing adapter output)
+- files file-only (indexed without symbols)
+- files errored (real adapter failures)
 - symbols extracted
 - semantic symbols
 - syntax symbols
@@ -69,6 +71,12 @@ Collected from `codeatlas quality-report`:
 - semantic win rate
 - wins, losses, ties
 - final KPI result (`PASS` / `FAIL`)
+
+File-level coverage is a first-class metric. Index coverage
+(`files_with_symbols + files_file_only` as a fraction of `files_discovered`)
+can be derived from the collected columns. A repository can have high index
+coverage (most files indexed) but low symbol coverage (few files have symbol
+adapters). Both numbers are useful for understanding the quality of the index.
 
 ### Query timing metrics
 
@@ -177,14 +185,18 @@ The prompt pair should answer the same question with different context shapes.
 - local-first, not hosted
 - exact token counts vary by model
 - semantic quality depends on adapter availability
+- most recognized languages are currently file-level only (no symbol extraction)
+- symbol search is only useful on languages with working adapters (Rust, TypeScript, Kotlin)
 
 ## Example Claims You Can Back With Data
 
 - "One CodeAtlas service handled N repos with one MCP configuration."
 - "Semantic coverage reached X% on repo Y."
+- "File-level index coverage reached X% on repo Z (a Python/Go repo with no symbol adapter)."
 - "A repo refresh after a small edit was X times faster than a fresh index."
 - "The CodeAtlas-assisted prompt was X% smaller by estimated token count."
 - "Symbol lookup and file-outline queries stayed below X ms on repo Y."
+- "File tree and file content retrieval worked on repo Z even with zero symbol coverage."
 
 ## Run Flow
 

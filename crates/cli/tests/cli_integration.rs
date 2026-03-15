@@ -58,7 +58,7 @@ fn index_command_succeeds_on_valid_repo() {
         "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
     );
     assert!(stdout.contains("files_discovered:"));
-    assert!(stdout.contains("files_parsed:"));
+    assert!(stdout.contains("files_with_symbols:"));
     assert!(stdout.contains("symbols_extracted:"));
 }
 

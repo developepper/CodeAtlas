@@ -30,8 +30,10 @@ CodeAtlas gives you:
 
 - Fast symbol search across indexed repositories.
 - File and repository structure views.
+- File content retrieval from the local index.
 - Semantic-first extraction where language-native analysis is available.
 - Syntax fallback where semantic runtimes are unavailable.
+- File-level indexing baseline for recognized languages even without symbol adapters.
 - Deterministic outputs suitable for automation and AI tooling.
 
 Today, this repository provides:
@@ -193,8 +195,10 @@ codeatlas repo remove my-app
 
 ## Semantic Adapter Setup
 
-Semantic coverage is optional. Indexing still works without it. For detailed
-diagnosis steps, see the [operations runbook](docs/operations/runbook.md#5-diagnose-semantic-adapter-availability).
+Semantic coverage is optional. Indexing still works without it — recognized
+files are always indexed at the file level (file tree, file content retrieval,
+repo outline) even when no symbol adapter is available. For detailed diagnosis
+steps, see the [operations runbook](docs/operations/runbook.md#5-diagnose-semantic-adapter-availability).
 
 ### TypeScript semantic adapter
 
@@ -516,10 +520,29 @@ Milestones M0-M9 are complete:
 - Security regression coverage for malicious inputs, traversal/symlink escape, malformed files, and resource limits.
 - Benchmark and threshold coverage in CI for discovery, indexing, and query latency regressions.
 
+### Language coverage
+
+CodeAtlas recognizes many languages during discovery (Rust, TypeScript,
+JavaScript, Kotlin, Java, Python, PHP, Go, Ruby, C, C++, C#, Swift, Shell,
+JSON, YAML, TOML, Markdown, SQL, Dockerfile). The indexing depth depends on
+adapter availability:
+
+| Level | Languages | What works |
+|-------|-----------|------------|
+| Semantic + syntax | TypeScript, Kotlin (when runtimes are available) | Symbol search, file outline, file tree, file content, repo outline |
+| Syntax only | Rust | Symbol search, file outline, file tree, file content, repo outline |
+| File-level only | All other recognized languages | File tree, file content, repo outline (zero symbols) |
+| Not indexed | Unrecognized files (`Language::Unknown`) | Excluded at discovery |
+
+File-level indexing is the baseline — every recognized file gets a file record,
+stored content blob, and appears in file tree and repo outline queries. Symbol
+extraction is additive on top of that baseline when adapters are available.
+
 ### What does not exist yet
 
 - Watcher/local file-system triggered update mode.
 - Semantic adapters beyond the current TypeScript and Kotlin implementations.
+- Syntax adapters beyond Rust (other recognized languages are file-level only).
 - Docker packaging for the persistent service.
 - Hosted auth, quotas, and multi-tenant controls.
 - Production observability dashboards and hosted telemetry/export integrations beyond the local CLI baseline.
@@ -538,9 +561,10 @@ dependencies are available, and otherwise fall back to syntax-only parsing.
   - `KOTLIN_BRIDGE_JAR`
   - repo-local `.codeatlas/kotlin-bridge.jar`
 
-If those dependencies are not present, indexing still succeeds with syntax
-adapters and the router keeps the semantic-preferred policy behavior where
-available.
+If those dependencies are not present, indexing still succeeds. Languages with
+syntax adapters fall back to syntax-only extraction. Recognized languages
+without any adapter are still indexed at the file level — file tree, file
+content retrieval, and repo outline remain useful even with zero symbols.
 
 ## Design Principles
 

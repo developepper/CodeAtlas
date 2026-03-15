@@ -163,7 +163,7 @@ fn run_add(args: &[String]) -> Result<(), CliError> {
 
     println!("registered: {repo_id}");
     println!("files_discovered: {}", result.metrics.files_discovered);
-    println!("files_parsed: {}", result.metrics.files_parsed);
+    println!("files_with_symbols: {}", result.metrics.files_parsed);
     println!("files_file_only: {}", result.metrics.files_file_only);
     println!("symbols_extracted: {}", result.metrics.symbols_extracted);
 
@@ -391,7 +391,7 @@ fn run_refresh(args: &[String]) -> Result<(), CliError> {
 
     println!("refreshed: {repo_id}");
     println!("files_discovered: {}", result.metrics.files_discovered);
-    println!("files_parsed: {}", result.metrics.files_parsed);
+    println!("files_with_symbols: {}", result.metrics.files_parsed);
     println!("files_file_only: {}", result.metrics.files_file_only);
     println!("files_unchanged: {}", result.metrics.files_unchanged);
     println!("files_deleted: {}", result.metrics.files_deleted);
