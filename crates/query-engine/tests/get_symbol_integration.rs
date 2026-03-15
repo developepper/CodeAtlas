@@ -8,8 +8,9 @@ use core_model::{
 };
 use query_engine::{QueryError, QueryService, StoreQueryService};
 use store::MetadataStore;
+use tempfile::TempDir;
 
-fn seed_store() -> (MetadataStore, Vec<SymbolRecord>) {
+fn seed_store() -> (MetadataStore, store::BlobStore, TempDir, Vec<SymbolRecord>) {
     let store = MetadataStore::open_in_memory().unwrap();
 
     store
@@ -57,7 +58,9 @@ fn seed_store() -> (MetadataStore, Vec<SymbolRecord>) {
         store.symbols().upsert(sym).unwrap();
     }
 
-    (store, symbols)
+    let blob_dir = TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+    (store, blob_store, blob_dir, symbols)
 }
 
 fn make_symbol(
@@ -100,8 +103,8 @@ fn make_symbol(
 
 #[test]
 fn get_symbol_returns_matching_record() {
-    let (store, symbols) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, symbols) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.get_symbol(&symbols[0].id).unwrap();
     assert_eq!(result.id, symbols[0].id);
@@ -111,8 +114,8 @@ fn get_symbol_returns_matching_record() {
 
 #[test]
 fn get_symbol_returns_all_fields() {
-    let (store, symbols) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, symbols) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc.get_symbol(&symbols[1].id).unwrap();
     assert_eq!(result.id, symbols[1].id);
@@ -129,8 +132,8 @@ fn get_symbol_returns_all_fields() {
 
 #[test]
 fn get_symbol_not_found_returns_error() {
-    let (store, _) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, _) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let err = svc.get_symbol("nonexistent::id#function").unwrap_err();
     match err {
@@ -141,8 +144,8 @@ fn get_symbol_not_found_returns_error() {
 
 #[test]
 fn get_symbol_empty_id_returns_not_found() {
-    let (store, _) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, _) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let err = svc.get_symbol("").unwrap_err();
     assert!(matches!(err, QueryError::NotFound { .. }));
@@ -152,8 +155,8 @@ fn get_symbol_empty_id_returns_not_found() {
 
 #[test]
 fn get_symbols_returns_all_found() {
-    let (store, symbols) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, symbols) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let ids: Vec<&str> = symbols.iter().map(|s| s.id.as_str()).collect();
     let results = svc.get_symbols(&ids).unwrap();
@@ -162,8 +165,8 @@ fn get_symbols_returns_all_found() {
 
 #[test]
 fn get_symbols_skips_missing_ids() {
-    let (store, symbols) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, symbols) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let ids = vec![symbols[0].id.as_str(), "missing::id#function"];
     let results = svc.get_symbols(&ids).unwrap();
@@ -173,8 +176,8 @@ fn get_symbols_skips_missing_ids() {
 
 #[test]
 fn get_symbols_empty_input_returns_empty() {
-    let (store, _) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, _) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let results = svc.get_symbols(&[]).unwrap();
     assert!(results.is_empty());
@@ -182,8 +185,8 @@ fn get_symbols_empty_input_returns_empty() {
 
 #[test]
 fn get_symbols_all_missing_returns_empty() {
-    let (store, _) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, _) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let results = svc
         .get_symbols(&["missing::a#function", "missing::b#type"])
@@ -193,8 +196,8 @@ fn get_symbols_all_missing_returns_empty() {
 
 #[test]
 fn get_symbols_preserves_request_order() {
-    let (store, symbols) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, symbols) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     // Request in reverse order.
     let ids = vec![symbols[2].id.as_str(), symbols[0].id.as_str()];
@@ -206,8 +209,8 @@ fn get_symbols_preserves_request_order() {
 
 #[test]
 fn get_symbols_duplicate_ids_returns_duplicates() {
-    let (store, symbols) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, symbols) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let ids = vec![symbols[0].id.as_str(), symbols[0].id.as_str()];
     let results = svc.get_symbols(&ids).unwrap();
@@ -217,8 +220,8 @@ fn get_symbols_duplicate_ids_returns_duplicates() {
 
 #[test]
 fn get_symbol_deterministic_across_calls() {
-    let (store, symbols) = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir, symbols) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let r1 = svc.get_symbol(&symbols[0].id).unwrap();
     let r2 = svc.get_symbol(&symbols[0].id).unwrap();

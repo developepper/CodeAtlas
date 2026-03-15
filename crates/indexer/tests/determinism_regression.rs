@@ -570,7 +570,7 @@ pub fn run_delta() {}
 
     // Run 1.
     run(&ctx, &mut db, &blob_store).expect("run 1");
-    let svc = StoreQueryService::new(&db);
+    let svc = StoreQueryService::new(&db, &blob_store);
     let query = SymbolQuery {
         repo_id: "tie-repo".into(),
         text: "run".into(),
@@ -595,7 +595,7 @@ pub fn run_delta() {}
 
     // Run 2.
     run(&ctx, &mut db, &blob_store).expect("run 2");
-    let svc = StoreQueryService::new(&db);
+    let svc = StoreQueryService::new(&db, &blob_store);
     let r2 = svc.search_symbols(&query).unwrap();
     let ids2: Vec<&str> = r2.items.iter().map(|s| s.record.id.as_str()).collect();
 

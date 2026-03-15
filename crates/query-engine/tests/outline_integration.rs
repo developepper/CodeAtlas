@@ -11,8 +11,9 @@ use query_engine::{
     RepoOutlineRequest, StoreQueryService,
 };
 use store::MetadataStore;
+use tempfile::TempDir;
 
-fn seed_store() -> MetadataStore {
+fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
     let store = MetadataStore::open_in_memory().unwrap();
 
     store
@@ -33,21 +34,26 @@ fn seed_store() -> MetadataStore {
         })
         .unwrap();
 
+    let blob_dir = TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+
     let files = vec![
-        ("src/lib.rs", "rust", 3),
-        ("src/server.rs", "rust", 2),
-        ("src/util/helpers.rs", "rust", 0),
-        ("Cargo.toml", "toml", 0),
+        ("src/lib.rs", "rust", 3, "pub fn run() {}\n"),
+        ("src/server.rs", "rust", 2, "pub fn handle() {}\n"),
+        ("src/util/helpers.rs", "rust", 0, "// helpers\n"),
+        ("Cargo.toml", "toml", 0, "[package]\nname = \"test\"\n"),
     ];
 
-    for (path, lang, sym_count) in &files {
+    for (path, lang, sym_count, content) in &files {
+        let hash = store::content_hash(content.as_bytes());
+        blob_store.put(content.as_bytes()).unwrap();
         store
             .files()
             .upsert(&FileRecord {
                 repo_id: "repo-1".into(),
                 file_path: (*path).into(),
                 language: (*lang).into(),
-                file_hash: format!("sha256:{path}"),
+                file_hash: hash,
                 summary: format!("{path} source file"),
                 symbol_count: *sym_count,
                 quality_mix: QualityMix {
@@ -82,7 +88,7 @@ fn seed_store() -> MetadataStore {
             .unwrap();
     }
 
-    store
+    (store, blob_store, blob_dir)
 }
 
 fn make_symbol(name: &str, kind: SymbolKind, file_path: &str) -> SymbolRecord {
@@ -119,8 +125,8 @@ fn make_symbol(name: &str, kind: SymbolKind, file_path: &str) -> SymbolRecord {
 
 #[test]
 fn file_outline_returns_file_and_symbols() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let outline = svc
         .get_file_outline(&FileOutlineRequest {
@@ -136,8 +142,8 @@ fn file_outline_returns_file_and_symbols() {
 
 #[test]
 fn file_outline_symbols_belong_to_requested_file() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let outline = svc
         .get_file_outline(&FileOutlineRequest {
@@ -154,8 +160,8 @@ fn file_outline_symbols_belong_to_requested_file() {
 
 #[test]
 fn file_outline_empty_file_returns_no_symbols() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let outline = svc
         .get_file_outline(&FileOutlineRequest {
@@ -170,8 +176,8 @@ fn file_outline_empty_file_returns_no_symbols() {
 
 #[test]
 fn file_outline_not_found() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let err = svc
         .get_file_outline(&FileOutlineRequest {
@@ -188,8 +194,8 @@ fn file_outline_not_found() {
 
 #[test]
 fn file_outline_wrong_repo_not_found() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let err = svc
         .get_file_outline(&FileOutlineRequest {
@@ -203,8 +209,8 @@ fn file_outline_wrong_repo_not_found() {
 
 #[test]
 fn file_outline_deterministic_across_calls() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let req = FileOutlineRequest {
         repo_id: "repo-1".into(),
         file_path: "src/lib.rs".into(),
@@ -221,9 +227,9 @@ fn file_outline_deterministic_across_calls() {
 // ── get_file_content ───────────────────────────────────────────────────
 
 #[test]
-fn file_content_returns_file_record() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+fn file_content_returns_file_record_and_content() {
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let result = svc
         .get_file_content(&FileContentRequest {
@@ -234,12 +240,16 @@ fn file_content_returns_file_record() {
 
     assert_eq!(result.file.file_path, "src/lib.rs");
     assert_eq!(result.file.language, "rust");
+    assert!(
+        result.content.contains("pub fn run()"),
+        "content should contain actual source code"
+    );
 }
 
 #[test]
 fn file_content_not_found() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let err = svc
         .get_file_content(&FileContentRequest {
@@ -255,8 +265,8 @@ fn file_content_not_found() {
 
 #[test]
 fn file_tree_returns_all_files() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let tree = svc
         .get_file_tree(&FileTreeRequest {
@@ -270,8 +280,8 @@ fn file_tree_returns_all_files() {
 
 #[test]
 fn file_tree_filters_by_prefix() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let tree = svc
         .get_file_tree(&FileTreeRequest {
@@ -288,8 +298,8 @@ fn file_tree_filters_by_prefix() {
 
 #[test]
 fn file_tree_nested_prefix() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let tree = svc
         .get_file_tree(&FileTreeRequest {
@@ -304,8 +314,8 @@ fn file_tree_nested_prefix() {
 
 #[test]
 fn file_tree_no_match_prefix_returns_empty() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let tree = svc
         .get_file_tree(&FileTreeRequest {
@@ -319,8 +329,8 @@ fn file_tree_no_match_prefix_returns_empty() {
 
 #[test]
 fn file_tree_wrong_repo_returns_empty() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let tree = svc
         .get_file_tree(&FileTreeRequest {
@@ -334,8 +344,8 @@ fn file_tree_wrong_repo_returns_empty() {
 
 #[test]
 fn file_tree_entries_carry_language_and_symbol_count() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let tree = svc
         .get_file_tree(&FileTreeRequest {
@@ -355,8 +365,8 @@ fn file_tree_entries_carry_language_and_symbol_count() {
 
 #[test]
 fn file_tree_order_is_deterministic() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let req = FileTreeRequest {
         repo_id: "repo-1".into(),
         path_prefix: None,
@@ -374,8 +384,8 @@ fn file_tree_order_is_deterministic() {
 
 #[test]
 fn repo_outline_returns_repo_and_all_files() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let outline = svc
         .get_repo_outline(&RepoOutlineRequest {
@@ -391,8 +401,8 @@ fn repo_outline_returns_repo_and_all_files() {
 
 #[test]
 fn repo_outline_carries_language_counts() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let outline = svc
         .get_repo_outline(&RepoOutlineRequest {
@@ -406,8 +416,8 @@ fn repo_outline_carries_language_counts() {
 
 #[test]
 fn repo_outline_not_found() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let err = svc
         .get_repo_outline(&RepoOutlineRequest {
@@ -423,8 +433,8 @@ fn repo_outline_not_found() {
 
 #[test]
 fn repo_outline_deterministic_across_calls() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let req = RepoOutlineRequest {
         repo_id: "repo-1".into(),
     };

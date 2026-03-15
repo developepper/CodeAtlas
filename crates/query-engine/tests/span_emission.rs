@@ -98,7 +98,9 @@ fn store_query_service_emits_spans() {
     let subscriber = tracing_subscriber::registry().with(layer);
 
     let db = store::MetadataStore::open_in_memory().unwrap();
-    let svc = StoreQueryService::new(&db);
+    let blob_dir = tempfile::TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     tracing::subscriber::with_default(subscriber, || {
         // These will return errors/empty results but still emit spans.
@@ -163,7 +165,9 @@ fn query_spans_nest_under_caller_parent() {
     let subscriber = tracing_subscriber::registry().with(layer);
 
     let db = store::MetadataStore::open_in_memory().unwrap();
-    let svc = StoreQueryService::new(&db);
+    let blob_dir = tempfile::TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     tracing::subscriber::with_default(subscriber, || {
         // Simulate an outer request span (like mcp_tool_call).
@@ -207,7 +211,9 @@ fn each_query_call_gets_independent_span() {
     let subscriber = tracing_subscriber::registry().with(layer);
 
     let db = store::MetadataStore::open_in_memory().unwrap();
-    let svc = StoreQueryService::new(&db);
+    let blob_dir = tempfile::TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     tracing::subscriber::with_default(subscriber, || {
         let _ = svc.get_symbol("id-1");
@@ -240,7 +246,9 @@ fn query_spans_do_not_capture_raw_query_text() {
     let subscriber = tracing_subscriber::registry().with(layer);
 
     let db = store::MetadataStore::open_in_memory().unwrap();
-    let svc = StoreQueryService::new(&db);
+    let blob_dir = tempfile::TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+    let svc = StoreQueryService::new(&db, &blob_store);
 
     tracing::subscriber::with_default(subscriber, || {
         let _ = svc.search_symbols(&SymbolQuery {

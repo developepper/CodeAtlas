@@ -90,7 +90,15 @@ fn run_serve(args: &[String]) -> Result<(), CliError> {
             )));
         }
     };
-    let svc = StoreQueryService::new(&db);
+    // Open blob store for file-content retrieval. The blob directory is a
+    // sibling of the metadata database file (same data-root convention).
+    let blob_path = opts
+        .db_path
+        .parent()
+        .map(|p| p.join("blobs"))
+        .unwrap_or_else(|| PathBuf::from("blobs"));
+    let blob_store = store::BlobStore::open(&blob_path)?;
+    let svc = StoreQueryService::new(&db, &blob_store);
     let registry = ToolRegistry::new(&svc);
 
     eprintln!(

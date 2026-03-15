@@ -8,8 +8,9 @@ use core_model::{
 };
 use query_engine::{QueryError, QueryFilters, QueryService, StoreQueryService, SymbolQuery};
 use store::MetadataStore;
+use tempfile::TempDir;
 
-fn seed_store() -> MetadataStore {
+fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
     let store = MetadataStore::open_in_memory().unwrap();
 
     store
@@ -101,7 +102,9 @@ fn seed_store() -> MetadataStore {
         store.symbols().upsert(sym).unwrap();
     }
 
-    store
+    let blob_dir = TempDir::new().unwrap();
+    let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
+    (store, blob_store, blob_dir)
 }
 
 fn make_symbol(
@@ -144,8 +147,8 @@ fn make_symbol(
 
 #[test]
 fn empty_query_is_rejected() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let err = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -160,8 +163,8 @@ fn empty_query_is_rejected() {
 
 #[test]
 fn exact_name_match_ranks_first() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -181,8 +184,8 @@ fn exact_name_match_ranks_first() {
 
 #[test]
 fn exact_match_scores_higher_than_partial() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -213,8 +216,8 @@ fn exact_match_scores_higher_than_partial() {
 
 #[test]
 fn filter_by_kind() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -236,8 +239,8 @@ fn filter_by_kind() {
 
 #[test]
 fn filter_by_file_path() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -259,8 +262,8 @@ fn filter_by_file_path() {
 
 #[test]
 fn filter_by_quality_level() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -282,8 +285,8 @@ fn filter_by_quality_level() {
 
 #[test]
 fn truncation_metadata_when_limit_exceeded() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -301,8 +304,8 @@ fn truncation_metadata_when_limit_exceeded() {
 
 #[test]
 fn no_truncation_when_all_fit() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -318,8 +321,8 @@ fn no_truncation_when_all_fit() {
 
 #[test]
 fn deterministic_ordering_on_ties() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let query = SymbolQuery {
         repo_id: "repo-1".into(),
         text: "run".into(),
@@ -338,8 +341,8 @@ fn deterministic_ordering_on_ties() {
 
 #[test]
 fn no_match_returns_empty() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -357,8 +360,8 @@ fn no_match_returns_empty() {
 
 #[test]
 fn wrong_repo_returns_empty() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "nonexistent-repo".into(),
@@ -374,8 +377,8 @@ fn wrong_repo_returns_empty() {
 
 #[test]
 fn keyword_match_surfaces_symbol() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -398,8 +401,8 @@ fn keyword_match_surfaces_symbol() {
 
 #[test]
 fn results_carry_quality_and_confidence() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -420,8 +423,8 @@ fn results_carry_quality_and_confidence() {
 
 #[test]
 fn semantic_quality_boosts_ranking() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
         .search_symbols(&SymbolQuery {
             repo_id: "repo-1".into(),
@@ -441,8 +444,8 @@ fn semantic_quality_boosts_ranking() {
 
 #[test]
 fn offset_skips_results() {
-    let store = seed_store();
-    let svc = StoreQueryService::new(&store);
+    let (store, blob_store, _blob_dir) = seed_store();
+    let svc = StoreQueryService::new(&store, &blob_store);
 
     let full = svc
         .search_symbols(&SymbolQuery {

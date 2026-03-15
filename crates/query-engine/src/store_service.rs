@@ -1,6 +1,7 @@
-//! [`QueryService`] implementation backed by [`MetadataStore`].
+//! [`QueryService`] implementation backed by [`MetadataStore`] and
+//! [`BlobStore`].
 
-use store::MetadataStore;
+use store::{BlobStore, MetadataStore};
 use tracing::info_span;
 
 use crate::ranking::{score_symbol, sort_scored};
@@ -11,14 +12,16 @@ use crate::{
 };
 use core_model::SymbolRecord;
 
-/// Production [`QueryService`] implementation backed by a [`MetadataStore`].
+/// Production [`QueryService`] implementation backed by a [`MetadataStore`]
+/// and a [`BlobStore`] for file content retrieval.
 pub struct StoreQueryService<'a> {
     store: &'a MetadataStore,
+    blob_store: &'a BlobStore,
 }
 
 impl<'a> StoreQueryService<'a> {
-    pub fn new(store: &'a MetadataStore) -> Self {
-        Self { store }
+    pub fn new(store: &'a MetadataStore, blob_store: &'a BlobStore) -> Self {
+        Self { store, blob_store }
     }
 }
 
@@ -139,12 +142,22 @@ impl QueryService for StoreQueryService<'_> {
                 id: request.file_path.clone(),
             })?;
 
-        // File content retrieval is delegated to BlobStore in production.
-        // For now, return a placeholder indicating content is not yet wired.
-        Ok(FileContent {
-            file,
-            content: String::new(),
-        })
+        let bytes = self
+            .blob_store
+            .get(&file.file_hash)
+            .map_err(QueryError::Store)?
+            .ok_or_else(|| {
+                QueryError::Store(store::StoreError::Blob {
+                    path: None,
+                    reason: format!(
+                        "blob missing for file '{}' (hash {})",
+                        request.file_path, file.file_hash
+                    ),
+                })
+            })?;
+        let content = String::from_utf8_lossy(&bytes).into_owned();
+
+        Ok(FileContent { file, content })
     }
 
     fn get_file_tree(&self, request: &FileTreeRequest) -> Result<Vec<FileTreeEntry>, QueryError> {
