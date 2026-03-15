@@ -16,6 +16,13 @@ Current planned post-v1 issue set:
 - `persistent-service-ticket-mcp-bridge.md` -> #153
 - `persistent-service-ticket-docs.md` -> #154
 
+Next reviewed post-v1 issue set to create:
+
+- `file-indexing-epic.md`
+- `file-indexing-ticket-pipeline-store.md`
+- `file-indexing-ticket-query-content.md`
+- `file-indexing-ticket-docs-metrics.md`
+
 Use these labels first:
 
 ```bash

@@ -192,6 +192,24 @@ Planning note:
 - Add benchmark scorecards, SLO reporting, and audit-facing operations docs.
 - Add privacy-preserving local/private model enrichment options where useful.
 
+### Epic 16: Non-Empty Index Baseline For Recognized Files
+
+- Ensure recognized-language repositories produce non-empty file-level indexes
+  even when symbol adapters are missing or incomplete.
+- Persist file records and content blobs for recognized files without symbols.
+- Make file tree, repo outline, and file-content retrieval useful on
+  file-only indexed repositories.
+- Update metrics and docs so file-level indexing is a first-class baseline.
+
+Planning note:
+
+- This is the next intended execution slice after Epic 13's first completed
+  local-service implementation.
+- Planning artifact:
+  `docs/planning/recognized-language-file-indexing.md`
+- Reviewed issue-body drafts live under:
+  `docs/planning/github-issues/file-indexing-*.md`
+
 ## Commercial Model Principles
 
 CodeAtlas can remain open source and still support a healthy business model if
