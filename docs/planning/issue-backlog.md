@@ -147,6 +147,25 @@ Deferred from the first slice:
 - remote connectors
 - hosted/team controls
 
+### Epic 16: Non-Empty Index Baseline For Recognized Files (next)
+
+Planning artifact:
+`docs/planning/recognized-language-file-indexing.md`.
+
+Reviewed issue docs for the next issue-creation pass:
+
+- `docs/planning/github-issues/file-indexing-epic.md`
+- `docs/planning/github-issues/file-indexing-ticket-pipeline-store.md`
+- `docs/planning/github-issues/file-indexing-ticket-query-content.md`
+- `docs/planning/github-issues/file-indexing-ticket-docs-metrics.md`
+
+Planned deliverables:
+
+- recognized files persist as file-level index entries even without symbols
+- blob-backed file content retrieval works for indexed files
+- file tree and repo outline remain useful on non-symbol-bearing repos
+- docs and benchmark guidance explain file-level indexing as a first-class baseline
+
 ## Manual Setup Issues to Create Immediately
 
 - Configure repository labels.
