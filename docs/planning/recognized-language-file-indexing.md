@@ -1,6 +1,6 @@
 # Recognized-Language File Indexing Plan
 
-Status: Reviewed planning baseline for the next post-v1 execution slice
+Status: Complete — all tickets merged (#166, #167, #165)
 
 Owner intent: ensure CodeAtlas produces a useful, non-empty index for any
 repository containing files in recognized languages, even when symbol adapters
@@ -242,14 +242,14 @@ file-level index coverage.
    - zero symbols must not imply "zero index value" when file-level indexing is
      present
 
-## Proposed Issue Breakdown
+## Issue Breakdown
 
-Tracked GitHub issues: next reviewed issue set, not yet created
+All issues created and merged:
 
-- Epic 16: Non-Empty Index Baseline For Recognized Files
-- Ticket 1: Persist file records and blobs for recognized files without symbol adapters
-- Ticket 2: Wire file-content retrieval and file-level query behavior to the fallback model
-- Ticket 3: Update metrics, docs, and benchmark guidance for file-level indexing coverage
+- ~~#164 Epic 16: Non-Empty Index Baseline For Recognized Files~~
+- ~~#166 Ticket 1: Persist file records and blobs for recognized files without symbol adapters~~
+- ~~#167 Ticket 2: Wire file-content retrieval and file-level query behavior to the fallback model~~
+- ~~#165 Ticket 3: Update metrics, docs, and benchmark guidance for file-level indexing coverage~~
 
 ## Epic Draft
 

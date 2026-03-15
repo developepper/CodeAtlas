@@ -214,7 +214,7 @@ collect_repo_metrics() {
     wins=$(extract_value_after_colon "Wins:" "$repo_tmp")
     losses=$(extract_value_after_colon "Losses:" "$repo_tmp")
     ties=$(extract_value_after_colon "Ties:" "$repo_tmp")
-    kpi_result=$(grep -F "Result:" "$repo_tmp" | head -n 1 | awk '{print $2}' || true)
+    kpi_result=$(grep -F "Result:" "$repo_tmp" | head -n 1 | sed 's/.*Result:[[:space:]]*//' || true)
 
     printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
       "$(timestamp_utc)" \

@@ -70,7 +70,7 @@ Collected from `codeatlas quality-report`:
 - files with semantic support
 - semantic win rate
 - wins, losses, ties
-- final KPI result (`PASS` / `FAIL`)
+- final KPI result (`PASS` / `FAIL` / `NOT APPLICABLE` for file-only repos with zero symbols)
 
 File-level coverage is a first-class metric. Index coverage
 (`files_with_symbols + files_file_only` as a fraction of `files_discovered`)

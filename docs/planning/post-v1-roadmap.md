@@ -192,7 +192,7 @@ Planning note:
 - Add benchmark scorecards, SLO reporting, and audit-facing operations docs.
 - Add privacy-preserving local/private model enrichment options where useful.
 
-### Epic 16: Non-Empty Index Baseline For Recognized Files
+### Epic 16: Non-Empty Index Baseline For Recognized Files (complete)
 
 - Ensure recognized-language repositories produce non-empty file-level indexes
   even when symbol adapters are missing or incomplete.
@@ -203,12 +203,9 @@ Planning note:
 
 Planning note:
 
-- This is the next intended execution slice after Epic 13's first completed
-  local-service implementation.
+- Complete. All tickets merged (#166, #167, #165).
 - Planning artifact:
   `docs/planning/recognized-language-file-indexing.md`
-- Reviewed issue-body drafts live under:
-  `docs/planning/github-issues/file-indexing-*.md`
 
 ## Commercial Model Principles
 
