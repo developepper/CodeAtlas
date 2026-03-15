@@ -137,7 +137,7 @@ collect_repo_metrics() {
   local repo_metrics_csv="$out_dir/repo_metrics.csv"
   local summary_file="$out_dir/summary.txt"
 
-  printf "timestamp,repo_id,repo_path,git_sha,file_count,line_count,files_discovered,files_parsed,files_errored,symbols_extracted,total_symbols,semantic_symbols,syntax_symbols,semantic_coverage_percent,avg_confidence,files_with_semantic,total_files,win_rate,wins,losses,ties,kpi_result,notes\n" >"$repo_metrics_csv"
+  printf "timestamp,repo_id,repo_path,git_sha,file_count,line_count,files_discovered,files_with_symbols,files_file_only,files_errored,symbols_extracted,total_symbols,semantic_symbols,syntax_symbols,semantic_coverage_percent,avg_confidence,files_with_semantic,total_files,win_rate,wins,losses,ties,kpi_result,notes\n" >"$repo_metrics_csv"
 
   local delimiter
   delimiter=$(manifest_delimiter "$repos_csv")
@@ -180,12 +180,14 @@ collect_repo_metrics() {
     symbols_line=$(grep -F "Symbols:" "$repo_tmp" | head -n 1 || true)
 
     local files_discovered
-    local files_parsed
+    local files_with_symbols
+    local files_file_only
     local files_errored
     local symbols_extracted
     files_discovered=$(printf "%s\n" "$files_line" | sed -E 's/.*Files:[[:space:]]*([0-9]+) discovered.*/\1/' )
-    files_parsed=$(printf "%s\n" "$files_line" | sed -E 's/.*discovered, ([0-9]+) parsed.*/\1/' )
-    files_errored=$(printf "%s\n" "$files_line" | sed -E 's/.*parsed, ([0-9]+) errored.*/\1/' )
+    files_with_symbols=$(printf "%s\n" "$files_line" | sed -E 's/.*discovered, ([0-9]+) with symbols.*/\1/' )
+    files_file_only=$(printf "%s\n" "$files_line" | sed -E 's/.*with symbols, ([0-9]+) file-only.*/\1/' )
+    files_errored=$(printf "%s\n" "$files_line" | sed -E 's/.*file-only, ([0-9]+) errored.*/\1/' )
     symbols_extracted=$(printf "%s\n" "$symbols_line" | sed -E 's/.*Symbols:[[:space:]]*([0-9]+).*/\1/' )
 
     local total_symbols
@@ -214,7 +216,7 @@ collect_repo_metrics() {
     ties=$(extract_value_after_colon "Ties:" "$repo_tmp")
     kpi_result=$(grep -F "Result:" "$repo_tmp" | head -n 1 | awk '{print $2}' || true)
 
-    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
       "$(timestamp_utc)" \
       "$(csv_escape "$repo_id")" \
       "$(csv_escape "$repo_path")" \
@@ -222,7 +224,8 @@ collect_repo_metrics() {
       "$file_count" \
       "$line_count" \
       "${files_discovered:-0}" \
-      "${files_parsed:-0}" \
+      "${files_with_symbols:-0}" \
+      "${files_file_only:-0}" \
       "${files_errored:-0}" \
       "${symbols_extracted:-0}" \
       "${total_symbols:-0}" \

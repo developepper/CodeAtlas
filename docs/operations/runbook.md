@@ -207,12 +207,18 @@ cargo run -p cli -- quality-report <repo-path> --db <db-path> --git-diff
 
 The report includes:
 
+- index coverage: files with symbols vs file-only indexed files
 - semantic vs syntax symbol counts
 - semantic coverage percentage
 - average confidence
 - semantic-vs-syntax win rate from merge outcomes
 - per-adapter contribution breakdown
 - pass/fail summary against KPI thresholds
+
+Note: a repository with zero symbols is not necessarily broken. Recognized
+languages without symbol adapters are indexed at the file level — file tree,
+file content retrieval, and repo outline remain useful. The quality report
+distinguishes file-only indexed files from files with symbol extraction.
 
 ## 7. Diagnose Semantic Adapter Availability
 
@@ -240,6 +246,11 @@ If Kotlin semantic coverage is unexpectedly absent:
 
 If semantic runtimes are missing, indexing should still succeed with syntax
 adapters where policy allows fallback.
+
+If no adapter exists at all for a recognized language, the file is still indexed
+at the file level — it receives a file record and stored content blob, and
+appears in file tree and repo outline queries. This is not an error; it is an
+expected capability boundary.
 
 ## 8. Run the Main Quality Gates Locally
 
@@ -342,10 +353,15 @@ CODEATLAS_OTEL=1 cargo run -p cli -- index <repo-path>
 
 ### No symbols extracted
 
-Check:
+This is expected for repositories in recognized languages that lack symbol
+adapters (e.g. Python, Go, Java without semantic runtimes). File-level indexing
+still provides file tree, file content retrieval, and repo outline.
+
+If you expected symbols, check:
 
 - repo path is valid
 - files are supported by current language detection and adapters
+- the quality report's "files with symbols" vs "file-only" breakdown
 - file errors printed by the CLI
 
 ### Semantic coverage unexpectedly zero
@@ -358,9 +374,11 @@ Check:
 
 ### High file error count
 
+File errors indicate real adapter failures, not missing adapters. Missing
+adapters produce file-only indexed records instead of errors.
+
 Check:
 
-- unsupported languages
 - malformed inputs
 - adapter subprocess startup failures
 - resource or timeout failures

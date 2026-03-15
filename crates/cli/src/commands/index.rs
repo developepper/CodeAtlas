@@ -89,7 +89,7 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     let result = indexer::run(&ctx, &mut db, &blob_store)?;
 
     println!("files_discovered: {}", result.metrics.files_discovered);
-    println!("files_parsed: {}", result.metrics.files_parsed);
+    println!("files_with_symbols: {}", result.metrics.files_parsed);
     println!("files_file_only: {}", result.metrics.files_file_only);
     println!("files_unchanged: {}", result.metrics.files_unchanged);
     println!("files_deleted: {}", result.metrics.files_deleted);
