@@ -1,0 +1,6 @@
+repo_id,query_type,query_value,notes
+codeatlas,search-symbols,run_service,Service startup lookup
+codeatlas,file-outline,crates/service/src/lib.rs,Service file outline
+codeatlas,get-symbol,codeatlas//crates/service/src/lib.rs::run_service#function,Exact symbol lookup
+ts-app,search-symbols,Service,TypeScript semantic symbol search
+kotlin-app,search-symbols,Service,Kotlin semantic symbol search

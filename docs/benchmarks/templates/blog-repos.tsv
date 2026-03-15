@@ -1,0 +1,4 @@
+repo_id	repo_path	notes
+codeatlas	/absolute/path/to/CodeAtlas	Rust core repo
+ts-app	/absolute/path/to/typescript-repo	TypeScript repo with tsserver available
+kotlin-app	/absolute/path/to/kotlin-repo	Kotlin repo with JVM bridge available
