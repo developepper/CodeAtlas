@@ -11,41 +11,49 @@ static RUST_DEFINITIONS: &[NodeMapping] = &[
         node_type: "function_item",
         kind: SymbolKind::Function,
         name_field: "name",
+        requires_modifiers: &[],
     },
     NodeMapping {
         node_type: "function_signature_item",
         kind: SymbolKind::Function,
         name_field: "name",
+        requires_modifiers: &[],
     },
     NodeMapping {
         node_type: "struct_item",
         kind: SymbolKind::Class,
         name_field: "name",
+        requires_modifiers: &[],
     },
     NodeMapping {
         node_type: "enum_item",
         kind: SymbolKind::Type,
         name_field: "name",
+        requires_modifiers: &[],
     },
     NodeMapping {
         node_type: "trait_item",
         kind: SymbolKind::Type,
         name_field: "name",
+        requires_modifiers: &[],
     },
     NodeMapping {
         node_type: "type_item",
         kind: SymbolKind::Type,
         name_field: "name",
+        requires_modifiers: &[],
     },
     NodeMapping {
         node_type: "const_item",
         kind: SymbolKind::Constant,
         name_field: "name",
+        requires_modifiers: &[],
     },
     NodeMapping {
         node_type: "static_item",
         kind: SymbolKind::Constant,
         name_field: "name",
+        requires_modifiers: &[],
     },
 ];
 
