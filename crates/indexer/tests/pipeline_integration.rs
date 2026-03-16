@@ -12,8 +12,8 @@ use indexer::{
     SyntaxPolicy,
 };
 use syntax_platform::{
-    PhpSyntaxBackend, PreparedFile, RustSyntaxBackend, SyntaxBackend, SyntaxCapability,
-    SyntaxError, SyntaxExtraction, SyntaxSymbol,
+    PhpSyntaxBackend, PreparedFile, PythonSyntaxBackend, RustSyntaxBackend, SyntaxBackend,
+    SyntaxCapability, SyntaxError, SyntaxExtraction, SyntaxSymbol,
 };
 use tempfile::TempDir;
 
@@ -2499,6 +2499,174 @@ fn pipeline_php_mixed_language_repo() {
     assert!(rs_file.symbol_count >= 1);
     assert_eq!(
         rs_file.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Python syntax backend integration tests
+// ---------------------------------------------------------------------------
+
+fn make_registry_with_python() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry.register_syntax(
+        PythonSyntaxBackend::backend_id(),
+        Box::new(PythonSyntaxBackend::new()),
+    );
+    registry
+}
+
+#[test]
+fn pipeline_python_django_model_end_to_end() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let models = repo_dir.path().join("app");
+    std::fs::create_dir_all(&models).expect("create app dir");
+
+    std::fs::write(
+        models.join("models.py"),
+        r#"
+class Article:
+    """Represents an article."""
+
+    def __init__(self, title: str, body: str) -> None:
+        """Initialize an article."""
+        self.title = title
+        self.body = body
+
+    def publish(self) -> None:
+        """Mark the article as published."""
+        self.published = True
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Article":
+        return cls(data["title"], data["body"])
+
+def create_article(title: str, body: str) -> "Article":
+    """Factory function for articles."""
+    return Article(title, body)
+"#,
+    )
+    .expect("write models.py");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_python();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "python-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    assert!(
+        result.metrics.files_parsed >= 1,
+        "expected Python file to be parsed, files_parsed={}",
+        result.metrics.files_parsed
+    );
+    assert!(result.file_errors.is_empty(), "no file errors expected");
+
+    let file = db
+        .files()
+        .get("python-repo", "app/models.py")
+        .expect("query file")
+        .expect("models.py file record");
+    assert_eq!(file.language, "python");
+    // Article class + __init__ + publish + from_dict + create_article = 5 minimum
+    assert!(
+        file.symbol_count >= 5,
+        "expected at least 5 symbols, got {}",
+        file.symbol_count
+    );
+    assert_eq!(file.capability_tier, core_model::CapabilityTier::SyntaxOnly);
+
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("python-repo", "app/models.py")
+        .expect("list symbols");
+    let all_syms: Vec<_> = symbol_ids
+        .iter()
+        .filter_map(|id| db.symbols().get(id).ok().flatten())
+        .collect();
+
+    let article = all_syms
+        .iter()
+        .find(|s| s.name == "Article")
+        .expect("Article should exist");
+    assert_eq!(article.kind, SymbolKind::Class);
+    assert!(article.source_backend.contains("syntax-python"));
+
+    let publish = all_syms
+        .iter()
+        .find(|s| s.name == "publish")
+        .expect("publish should exist");
+    assert_eq!(publish.kind, SymbolKind::Method);
+    assert!(
+        publish.qualified_name.contains("Article::publish"),
+        "expected qualified name, got: {}",
+        publish.qualified_name
+    );
+
+    let factory = all_syms
+        .iter()
+        .find(|s| s.name == "create_article")
+        .expect("create_article should exist");
+    assert_eq!(factory.kind, SymbolKind::Function);
+}
+
+#[test]
+fn pipeline_python_mixed_with_rust() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+
+    std::fs::write(
+        repo_dir.path().join("main.py"),
+        "class App:\n    def run(self) -> None:\n        pass\n",
+    )
+    .expect("write py");
+
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(src.join("lib.rs"), "pub fn greet() {}\n").expect("write rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_python();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "py-rs-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    assert!(
+        result.metrics.files_parsed >= 2,
+        "expected both Python and Rust parsed"
+    );
+
+    let py_file = db
+        .files()
+        .get("py-rs-repo", "main.py")
+        .expect("query py")
+        .expect("main.py record");
+    assert_eq!(py_file.language, "python");
+    assert!(py_file.symbol_count >= 2); // App + run
+    assert_eq!(
+        py_file.capability_tier,
         core_model::CapabilityTier::SyntaxOnly
     );
 }

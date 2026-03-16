@@ -2223,3 +2223,189 @@ fn php_search_symbols_finds_method() {
         "should find publish method.\nstdout: {stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Python integration tests
+// ---------------------------------------------------------------------------
+
+fn setup_python_test_repo() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    std::fs::write(
+        dir.path().join("models.py"),
+        r#"
+class User:
+    """Represents a user."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def get_name(self) -> str:
+        """Return the user's name."""
+        return self.name
+
+class Admin(User):
+    def promote(self) -> None:
+        pass
+
+def create_user(name: str) -> User:
+    """Factory function."""
+    return User(name)
+"#,
+    )
+    .expect("write models.py");
+
+    dir
+}
+
+fn indexed_python_test_repo() -> (TempDir, TempDir, String) {
+    let repo_dir = setup_python_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let index_output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&index_output.stdout);
+    let stderr = String::from_utf8_lossy(&index_output.stderr);
+    assert!(
+        index_output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let repo_id = repo_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    (repo_dir, db_dir, repo_id)
+}
+
+#[test]
+fn python_index_discovers_files_with_symbols() {
+    let repo_dir = setup_python_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("symbols_extracted:"));
+}
+
+#[test]
+fn python_file_outline_shows_symbols() {
+    let (_repo_dir, db_dir, repo_id) = indexed_python_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-outline",
+            "models.py",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-outline");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "file-outline should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("User"),
+        "should show User class.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("get_name"),
+        "should show get_name method.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Admin"),
+        "should show Admin class.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("create_user"),
+        "should show create_user function.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn python_search_symbols_finds_class() {
+    let (_repo_dir, db_dir, repo_id) = indexed_python_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "User",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("User"),
+        "should find User class.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn python_search_symbols_finds_method() {
+    let (_repo_dir, db_dir, repo_id) = indexed_python_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "get_name",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("get_name"),
+        "should find get_name method.\nstdout: {stdout}"
+    );
+}
