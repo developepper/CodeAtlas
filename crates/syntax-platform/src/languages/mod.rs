@@ -1,4 +1,5 @@
 pub mod go;
+pub mod java;
 pub mod php;
 pub mod python;
 pub mod rust;
@@ -10,6 +11,10 @@ pub struct NodeMapping {
     pub node_type: &'static str,
     pub kind: SymbolKind,
     pub name_field: &'static str,
+    /// When non-empty, only match if the parent node has a `modifiers` child
+    /// containing ALL of these keywords. Used to extract Java `static final`
+    /// field declarations as constants while ignoring regular fields.
+    pub requires_modifiers: &'static [&'static str],
 }
 
 /// Describes how to extract scope names from scope-creating nodes.
@@ -78,6 +83,7 @@ impl LanguageProfile {
 pub fn profile_for(language: &str) -> Option<&'static LanguageProfile> {
     match language {
         "go" => Some(&go::GO_PROFILE),
+        "java" => Some(&java::JAVA_PROFILE),
         "php" => Some(&php::PHP_PROFILE),
         "python" => Some(&python::PYTHON_PROFILE),
         "rust" => Some(&rust::RUST_PROFILE),
@@ -87,5 +93,5 @@ pub fn profile_for(language: &str) -> Option<&'static LanguageProfile> {
 
 /// Returns the list of languages with syntax backends on this platform.
 pub fn supported_languages() -> &'static [&'static str] {
-    &["go", "php", "python", "rust"]
+    &["go", "java", "php", "python", "rust"]
 }

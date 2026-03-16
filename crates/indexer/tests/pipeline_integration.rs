@@ -12,8 +12,9 @@ use indexer::{
     SyntaxPolicy,
 };
 use syntax_platform::{
-    GoSyntaxBackend, PhpSyntaxBackend, PreparedFile, PythonSyntaxBackend, RustSyntaxBackend,
-    SyntaxBackend, SyntaxCapability, SyntaxError, SyntaxExtraction, SyntaxSymbol,
+    GoSyntaxBackend, JavaSyntaxBackend, PhpSyntaxBackend, PreparedFile, PythonSyntaxBackend,
+    RustSyntaxBackend, SyntaxBackend, SyntaxCapability, SyntaxError, SyntaxExtraction,
+    SyntaxSymbol,
 };
 use tempfile::TempDir;
 
@@ -2821,6 +2822,164 @@ fn pipeline_go_mixed_with_rust() {
     assert!(go_file.symbol_count >= 1);
     assert_eq!(
         go_file.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Java syntax backend integration tests
+// ---------------------------------------------------------------------------
+
+fn make_registry_with_java() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry.register_syntax(
+        JavaSyntaxBackend::backend_id(),
+        Box::new(JavaSyntaxBackend::new()),
+    );
+    registry
+}
+
+#[test]
+fn pipeline_java_spring_controller_end_to_end() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src/main/java");
+    std::fs::create_dir_all(&src).expect("create java dir");
+
+    std::fs::write(
+        src.join("UserController.java"),
+        r#"
+/**
+ * Handles user HTTP requests.
+ */
+public class UserController {
+    public UserController() {}
+
+    public List<User> index() {
+        return userService.findAll();
+    }
+
+    public User show(Long id) {
+        return userService.findById(id);
+    }
+}
+
+public interface UserService {
+    List<User> findAll();
+}
+
+public enum Role {
+    ADMIN,
+    USER;
+}
+"#,
+    )
+    .expect("write java");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_java();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "java-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+    assert!(result.metrics.files_parsed >= 1);
+    assert!(result.file_errors.is_empty());
+
+    let file = db
+        .files()
+        .get("java-repo", "src/main/java/UserController.java")
+        .expect("query file")
+        .expect("UserController.java file record");
+    assert_eq!(file.language, "java");
+    // UserController class + constructor + index + show + UserService + findAll + Role + ADMIN + USER = 9
+    assert!(
+        file.symbol_count >= 5,
+        "expected at least 5 symbols, got {}",
+        file.symbol_count
+    );
+    assert_eq!(file.capability_tier, core_model::CapabilityTier::SyntaxOnly);
+
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("java-repo", "src/main/java/UserController.java")
+        .expect("list symbols");
+    let all_syms: Vec<_> = symbol_ids
+        .iter()
+        .filter_map(|id| db.symbols().get(id).ok().flatten())
+        .collect();
+
+    let controller = all_syms
+        .iter()
+        .find(|s| s.name == "UserController" && s.kind == SymbolKind::Class)
+        .expect("UserController should exist");
+    assert!(controller.source_backend.contains("syntax-java"));
+
+    let index_method = all_syms
+        .iter()
+        .find(|s| s.name == "index")
+        .expect("index method should exist");
+    assert_eq!(index_method.kind, SymbolKind::Method);
+    assert!(
+        index_method
+            .qualified_name
+            .contains("UserController::index"),
+        "expected qualified name, got: {}",
+        index_method.qualified_name
+    );
+}
+
+#[test]
+fn pipeline_java_mixed_with_rust() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+
+    std::fs::write(
+        repo_dir.path().join("Main.java"),
+        "public class Main {\n    public static void main(String[] args) {}\n}\n",
+    )
+    .expect("write java");
+
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(src.join("lib.rs"), "pub fn greet() {}\n").expect("write rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_java();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "java-rs-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+    assert!(result.metrics.files_parsed >= 2);
+
+    let java_file = db
+        .files()
+        .get("java-rs-repo", "Main.java")
+        .expect("query java")
+        .expect("Main.java record");
+    assert_eq!(java_file.language, "java");
+    assert!(java_file.symbol_count >= 2); // Main + main method
+    assert_eq!(
+        java_file.capability_tier,
         core_model::CapabilityTier::SyntaxOnly
     );
 }

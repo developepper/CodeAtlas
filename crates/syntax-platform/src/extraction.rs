@@ -29,39 +29,46 @@ fn walk_node(
     // Check if this node is a symbol definition.
     if let Some(mapping) = profile.find_definition(node_type) {
         if let Some(name) = child_text(&node, mapping.name_field, source) {
-            let kind = if mapping.kind == SymbolKind::Function && is_method_context(&node) {
-                SymbolKind::Method
+            // Check modifier requirements (e.g. Java `static final` fields).
+            if !mapping.requires_modifiers.is_empty()
+                && !check_ancestor_modifiers(&node, mapping.requires_modifiers, source)
+            {
+                // Modifiers not satisfied — skip this node but continue walking children.
             } else {
-                mapping.kind
-            };
-
-            // Check for receiver-based parent (e.g. Go methods).
-            let receiver_type = profile
-                .find_method_receiver(node_type)
-                .and_then(|rm| extract_receiver_type(&node, rm.receiver_field, source));
-
-            let (qualified_name, parent) = if let Some(ref recv) = receiver_type {
-                let qn = format!("{recv}::{name}");
-                (qn, Some(recv.clone()))
-            } else {
-                let qn = build_qualified_name(scope_stack, &name);
-                let p = if scope_stack.is_empty() {
-                    None
+                let kind = if mapping.kind == SymbolKind::Function && is_method_context(&node) {
+                    SymbolKind::Method
                 } else {
-                    Some(scope_stack.join("::"))
+                    mapping.kind
                 };
-                (qn, p)
-            };
 
-            symbols.push(SyntaxSymbol {
-                name,
-                qualified_name,
-                kind,
-                span: node_to_span(&node),
-                signature: extract_signature(&node, source),
-                docstring: extract_docstring(&node, source),
-                parent_qualified_name: parent,
-            });
+                // Check for receiver-based parent (e.g. Go methods).
+                let receiver_type = profile
+                    .find_method_receiver(node_type)
+                    .and_then(|rm| extract_receiver_type(&node, rm.receiver_field, source));
+
+                let (qualified_name, parent) = if let Some(ref recv) = receiver_type {
+                    let qn = format!("{recv}::{name}");
+                    (qn, Some(recv.clone()))
+                } else {
+                    let qn = build_qualified_name(scope_stack, &name);
+                    let p = if scope_stack.is_empty() {
+                        None
+                    } else {
+                        Some(scope_stack.join("::"))
+                    };
+                    (qn, p)
+                };
+
+                symbols.push(SyntaxSymbol {
+                    name,
+                    qualified_name,
+                    kind,
+                    span: node_to_span(&node),
+                    signature: extract_signature(&node, source),
+                    docstring: extract_docstring(&node, source),
+                    parent_qualified_name: parent,
+                });
+            } // else (modifier check)
         }
     }
 
@@ -88,10 +95,8 @@ fn walk_node(
             // A sticky scope applies to all subsequent siblings. When we
             // encounter a new one, replace the previous sticky scope.
             if let Some(sticky) = profile.find_sticky_scope(child.kind()) {
-                if let Some(name) = child
-                    .child_by_field_name(sticky.name_field)
-                    .and_then(|n| n.utf8_text(source).ok())
-                    .map(normalize_scope_separator)
+                if let Some(name) = child_text(&child, sticky.name_field, source)
+                    .map(|s| normalize_scope_separator(&s))
                 {
                     // Only treat as sticky when the node has no body
                     // (statement form). Braced namespaces with a body are
@@ -129,6 +134,39 @@ fn walk_node(
     if pushed_scope {
         scope_stack.pop();
     }
+}
+
+/// Checks whether a node or its parent has a `modifiers` child containing
+/// all required keywords (e.g. `["static", "final"]` for Java constants).
+fn check_ancestor_modifiers(node: &Node, required: &[&str], source: &[u8]) -> bool {
+    // Check the node itself and its parent for a `modifiers` child.
+    for n in [Some(*node), node.parent()].into_iter().flatten() {
+        if let Some(mods) = n.child_by_field_name("modifiers") {
+            if let Ok(text) = mods.utf8_text(source) {
+                if required.iter().all(|kw| text.contains(kw)) {
+                    return true;
+                }
+            }
+        }
+        // Also check unnamed children of type "modifiers".
+        let mut cursor = n.walk();
+        if cursor.goto_first_child() {
+            loop {
+                let child = cursor.node();
+                if child.kind() == "modifiers" {
+                    if let Ok(text) = child.utf8_text(source) {
+                        if required.iter().all(|kw| text.contains(kw)) {
+                            return true;
+                        }
+                    }
+                }
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Returns `true` if a function node is inside a class, impl, or trait body.
@@ -188,9 +226,11 @@ fn extract_receiver_type(node: &Node, receiver_field: &str, source: &[u8]) -> Op
     }
 }
 
-/// Replaces language-specific namespace separators (e.g. PHP `\`) with `::`.
+/// Replaces language-specific namespace separators with `::`.
+///
+/// Handles PHP `\` and Java `.` separators.
 fn normalize_scope_separator(raw: &str) -> String {
-    raw.replace('\\', "::")
+    raw.replace(['\\', '.'], "::")
 }
 
 fn build_qualified_name(scope_stack: &[String], name: &str) -> String {

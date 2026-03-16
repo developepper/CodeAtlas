@@ -2595,3 +2595,187 @@ fn go_search_symbols_finds_method() {
         "should find Start method.\nstdout: {stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Java integration tests
+// ---------------------------------------------------------------------------
+
+fn setup_java_test_repo() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+    let src = dir.path().join("src/main/java");
+    std::fs::create_dir_all(&src).expect("create java dir");
+
+    std::fs::write(
+        src.join("UserController.java"),
+        r#"
+/**
+ * Handles user HTTP requests.
+ */
+public class UserController {
+    public List<User> index() {
+        return null;
+    }
+
+    public User show(Long id) {
+        return null;
+    }
+}
+
+public enum Role {
+    ADMIN,
+    USER;
+}
+"#,
+    )
+    .expect("write java");
+
+    dir
+}
+
+fn indexed_java_test_repo() -> (TempDir, TempDir, String) {
+    let repo_dir = setup_java_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let index_output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&index_output.stdout);
+    let stderr = String::from_utf8_lossy(&index_output.stderr);
+    assert!(
+        index_output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let repo_id = repo_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    (repo_dir, db_dir, repo_id)
+}
+
+#[test]
+fn java_index_discovers_files_with_symbols() {
+    let repo_dir = setup_java_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("symbols_extracted:"));
+}
+
+#[test]
+fn java_file_outline_shows_symbols() {
+    let (_repo_dir, db_dir, repo_id) = indexed_java_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-outline",
+            "src/main/java/UserController.java",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-outline");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "file-outline should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("UserController"),
+        "should show UserController.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("index"),
+        "should show index method.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Role"),
+        "should show Role enum.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn java_search_symbols_finds_class() {
+    let (_repo_dir, db_dir, repo_id) = indexed_java_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "UserController",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("UserController"),
+        "should find UserController.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn java_search_symbols_finds_method() {
+    let (_repo_dir, db_dir, repo_id) = indexed_java_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "show",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("show"),
+        "should find show method.\nstdout: {stdout}"
+    );
+}

@@ -236,6 +236,88 @@ impl SyntaxBackend for GoSyntaxBackend {
 }
 
 // ---------------------------------------------------------------------------
+// JavaSyntaxBackend
+// ---------------------------------------------------------------------------
+
+/// Tree-sitter-based syntax backend for Java.
+pub struct JavaSyntaxBackend {
+    capability: SyntaxCapability,
+}
+
+impl JavaSyntaxBackend {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            capability: SyntaxCapability {
+                supported_kinds: vec![
+                    SymbolKind::Method,
+                    SymbolKind::Class,
+                    SymbolKind::Type,
+                    SymbolKind::Constant,
+                ],
+                supports_containers: true,
+                supports_docs: true,
+            },
+        }
+    }
+
+    /// Returns the [`BackendId`] for this backend.
+    #[must_use]
+    pub fn backend_id() -> BackendId {
+        BackendId("syntax-java".to_string())
+    }
+}
+
+impl Default for JavaSyntaxBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SyntaxBackend for JavaSyntaxBackend {
+    fn language(&self) -> &str {
+        "java"
+    }
+
+    fn capability(&self) -> &SyntaxCapability {
+        &self.capability
+    }
+
+    fn extract_symbols(&self, file: &PreparedFile) -> Result<SyntaxExtraction, SyntaxError> {
+        if file.language != "java" {
+            return Err(SyntaxError::Unsupported {
+                language: file.language.clone(),
+            });
+        }
+
+        let profile = &languages::java::JAVA_PROFILE;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&(profile.ts_language)())
+            .map_err(|err| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: format!("failed to set language: {err}"),
+            })?;
+
+        let tree = parser
+            .parse(&file.content, None)
+            .ok_or_else(|| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: "tree-sitter parse returned no tree".to_string(),
+            })?;
+
+        let symbols = extraction::extract_symbols(tree.root_node(), &file.content, profile);
+
+        Ok(SyntaxExtraction {
+            language: "java".to_string(),
+            symbols,
+            backend_id: Self::backend_id(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PhpSyntaxBackend
 // ---------------------------------------------------------------------------
 
@@ -1868,6 +1950,421 @@ func helper(x int) int {
         let get_name = find_symbol(&output1.symbols, "GetName");
         assert_eq!(get_name.qualified_name, "Config::GetName");
         assert_eq!(get_name.parent_qualified_name.as_deref(), Some("Config"));
+
+        let config = find_symbol(&output1.symbols, "Config");
+        assert!(config.docstring.is_some());
+    }
+
+    // ===================================================================
+    // Java tests
+    // ===================================================================
+
+    fn extract_java(source: &str) -> SyntaxExtraction {
+        let backend = JavaSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("src/main/java/User.java"),
+            absolute_path: PathBuf::from("/tmp/test/src/main/java/User.java"),
+            language: "java".to_string(),
+            content: source.as_bytes().to_vec(),
+        };
+        backend.extract_symbols(&file).expect("extraction failed")
+    }
+
+    // -- Java backend identity --
+
+    #[test]
+    fn java_backend_id_follows_naming_convention() {
+        let backend = JavaSyntaxBackend::new();
+        assert_eq!(backend.language(), "java");
+        assert_eq!(JavaSyntaxBackend::backend_id().0, "syntax-java");
+    }
+
+    #[test]
+    fn java_capability_reports_expected_kinds() {
+        let backend = JavaSyntaxBackend::new();
+        let cap = backend.capability();
+        assert!(cap.supported_kinds.contains(&SymbolKind::Method));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Class));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Type));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Constant));
+        assert!(cap.supports_containers);
+        assert!(cap.supports_docs);
+    }
+
+    #[test]
+    fn java_unsupported_language_returns_error() {
+        let backend = JavaSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("main.py"),
+            absolute_path: PathBuf::from("/tmp/main.py"),
+            language: "python".to_string(),
+            content: b"def foo(): pass".to_vec(),
+        };
+        let err = backend.extract_symbols(&file).expect_err("wrong language");
+        assert!(err.to_string().contains("unsupported language"));
+    }
+
+    // -- Java extraction output --
+
+    #[test]
+    fn java_extraction_carries_backend_id() {
+        let result = extract_java("public class Foo {}\n");
+        assert_eq!(result.backend_id.0, "syntax-java");
+        assert_eq!(result.language, "java");
+    }
+
+    // -- Java class extraction --
+
+    #[test]
+    fn java_extracts_class() {
+        let result = extract_java("public class User {}\n");
+        let sym = find_symbol(&result.symbols, "User");
+        assert_eq!(sym.kind, SymbolKind::Class);
+        assert_eq!(sym.qualified_name, "User");
+    }
+
+    // -- Java package behavior --
+
+    #[test]
+    fn java_package_qualifies_class() {
+        let source = "package com.example.app;\npublic class User {}\n";
+        let result = extract_java(source);
+        let sym = find_symbol(&result.symbols, "User");
+        assert_eq!(sym.kind, SymbolKind::Class);
+        assert_eq!(sym.qualified_name, "com::example::app::User");
+        assert_eq!(
+            sym.parent_qualified_name.as_deref(),
+            Some("com::example::app")
+        );
+    }
+
+    #[test]
+    fn java_package_qualifies_methods() {
+        let source = "package com.example;\npublic class Svc {\n    public void run() {}\n}\n";
+        let result = extract_java(source);
+        let sym = find_symbol(&result.symbols, "run");
+        assert_eq!(sym.qualified_name, "com::example::Svc::run");
+    }
+
+    #[test]
+    fn java_no_package_produces_unqualified_names() {
+        let result = extract_java("public class User {}\n");
+        let sym = find_symbol(&result.symbols, "User");
+        assert_eq!(sym.qualified_name, "User");
+    }
+
+    // -- Java static final constant extraction --
+
+    #[test]
+    fn java_extracts_static_final_constant() {
+        let source =
+            "public class Config {\n    public static final String APP_NAME = \"myapp\";\n}\n";
+        let result = extract_java(source);
+        let sym = find_symbol(&result.symbols, "APP_NAME");
+        assert_eq!(sym.kind, SymbolKind::Constant);
+        assert_eq!(sym.qualified_name, "Config::APP_NAME");
+    }
+
+    #[test]
+    fn java_extracts_multiple_static_final_constants() {
+        let source = "public class Limits {\n    public static final int MAX = 100;\n    public static final int MIN = 0;\n}\n";
+        let result = extract_java(source);
+        let max = find_symbol(&result.symbols, "MAX");
+        assert_eq!(max.kind, SymbolKind::Constant);
+        let min = find_symbol(&result.symbols, "MIN");
+        assert_eq!(min.kind, SymbolKind::Constant);
+    }
+
+    #[test]
+    fn java_skips_non_constant_fields() {
+        let source = "public class User {\n    private String name;\n    protected int count;\n    public static final String TABLE = \"users\";\n}\n";
+        let result = extract_java(source);
+        // Only TABLE should be a Constant; name and count are regular fields.
+        let constants: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Constant)
+            .collect();
+        assert_eq!(constants.len(), 1);
+        assert_eq!(constants[0].name, "TABLE");
+    }
+
+    // -- Java method extraction --
+
+    #[test]
+    fn java_extracts_methods_with_qualified_names() {
+        let source = "public class User {\n    public String getName() {\n        return this.name;\n    }\n}\n";
+        let result = extract_java(source);
+        let sym = find_symbol(&result.symbols, "getName");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::getName");
+        assert_eq!(sym.parent_qualified_name.as_deref(), Some("User"));
+    }
+
+    #[test]
+    fn java_extracts_constructor() {
+        let source = "public class User {\n    public User(String name) {\n        this.name = name;\n    }\n}\n";
+        let result = extract_java(source);
+        // Both the class and constructor are named "User"
+        let constructors: Vec<_> = result
+            .symbols
+            .iter()
+            .filter(|s| s.name == "User" && s.kind == SymbolKind::Method)
+            .collect();
+        assert_eq!(constructors.len(), 1);
+        assert_eq!(constructors[0].qualified_name, "User::User");
+    }
+
+    #[test]
+    fn java_extracts_static_method() {
+        let source = "public class User {\n    public static User create(String name) {\n        return new User(name);\n    }\n}\n";
+        let result = extract_java(source);
+        let sym = find_symbol(&result.symbols, "create");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::create");
+    }
+
+    // -- Java interface extraction --
+
+    #[test]
+    fn java_extracts_interface() {
+        let source = "public interface Handler {\n    void handle(String input);\n}\n";
+        let result = extract_java(source);
+        let iface = find_symbol(&result.symbols, "Handler");
+        assert_eq!(iface.kind, SymbolKind::Type);
+
+        let method = find_symbol(&result.symbols, "handle");
+        assert_eq!(method.kind, SymbolKind::Method);
+        assert_eq!(method.qualified_name, "Handler::handle");
+    }
+
+    // -- Java enum extraction --
+
+    #[test]
+    fn java_extracts_enum() {
+        let source = "public enum Status {\n    ACTIVE,\n    INACTIVE;\n\n    public String label() {\n        return this.name();\n    }\n}\n";
+        let result = extract_java(source);
+
+        let e = find_symbol(&result.symbols, "Status");
+        assert_eq!(e.kind, SymbolKind::Type);
+
+        let active = find_symbol(&result.symbols, "ACTIVE");
+        assert_eq!(active.kind, SymbolKind::Constant);
+        assert_eq!(active.qualified_name, "Status::ACTIVE");
+
+        let label = find_symbol(&result.symbols, "label");
+        assert_eq!(label.kind, SymbolKind::Method);
+        assert_eq!(label.qualified_name, "Status::label");
+    }
+
+    // -- Java record extraction --
+
+    #[test]
+    fn java_extracts_record() {
+        let source = "public record Point(int x, int y) {\n    public double distance() {\n        return Math.sqrt(x * x + y * y);\n    }\n}\n";
+        let result = extract_java(source);
+
+        let point = find_symbol(&result.symbols, "Point");
+        assert_eq!(point.kind, SymbolKind::Class);
+
+        let distance = find_symbol(&result.symbols, "distance");
+        assert_eq!(distance.kind, SymbolKind::Method);
+        assert_eq!(distance.qualified_name, "Point::distance");
+    }
+
+    // -- Java docstrings --
+
+    #[test]
+    fn java_extracts_javadoc() {
+        let source = "/**\n * Represents a user.\n */\npublic class User {}\n";
+        let result = extract_java(source);
+        let sym = find_symbol(&result.symbols, "User");
+        assert!(sym.docstring.is_some(), "expected Javadoc");
+        assert!(
+            sym.docstring
+                .as_deref()
+                .unwrap()
+                .contains("Represents a user"),
+            "unexpected doc: {:?}",
+            sym.docstring
+        );
+    }
+
+    #[test]
+    fn java_extracts_method_javadoc() {
+        let source = "public class User {\n    /**\n     * Gets the name.\n     */\n    public String getName() {\n        return name;\n    }\n}\n";
+        let result = extract_java(source);
+        let sym = find_symbol(&result.symbols, "getName");
+        assert!(sym.docstring.is_some(), "expected method Javadoc");
+    }
+
+    #[test]
+    fn java_no_docstring_when_absent() {
+        let result = extract_java("public class Bare {}\n");
+        let sym = find_symbol(&result.symbols, "Bare");
+        assert!(sym.docstring.is_none());
+    }
+
+    // -- Java edge cases --
+
+    #[test]
+    fn java_empty_file_produces_no_symbols() {
+        let result = extract_java("");
+        assert!(result.symbols.is_empty());
+    }
+
+    #[test]
+    fn java_nested_class() {
+        let source = "public class Outer {\n    public class Inner {\n        public void method() {}\n    }\n}\n";
+        let result = extract_java(source);
+
+        let outer = find_symbol(&result.symbols, "Outer");
+        assert_eq!(outer.kind, SymbolKind::Class);
+
+        let inner = find_symbol(&result.symbols, "Inner");
+        assert_eq!(inner.kind, SymbolKind::Class);
+        assert_eq!(inner.qualified_name, "Outer::Inner");
+
+        let method = find_symbol(&result.symbols, "method");
+        assert_eq!(method.kind, SymbolKind::Method);
+        assert_eq!(method.qualified_name, "Outer::Inner::method");
+    }
+
+    // -- Java representative fixture --
+
+    #[test]
+    fn java_spring_style_controller_fixture() {
+        let source = r#"
+package com.example.controllers;
+
+/**
+ * Handles user-related HTTP requests.
+ */
+public class UserController {
+    public static final String BASE_PATH = "/users";
+
+    /**
+     * List all users.
+     */
+    public List<User> index() {
+        return userService.findAll();
+    }
+
+    public User show(Long id) {
+        return userService.findById(id);
+    }
+
+    public User create(CreateUserRequest request) {
+        return userService.create(request);
+    }
+}
+"#;
+        let result = extract_java(source);
+
+        let controller = find_symbol(&result.symbols, "UserController");
+        assert_eq!(controller.kind, SymbolKind::Class);
+        assert_eq!(
+            controller.qualified_name,
+            "com::example::controllers::UserController"
+        );
+        assert!(controller.docstring.is_some());
+
+        let index = find_symbol(&result.symbols, "index");
+        assert_eq!(index.kind, SymbolKind::Method);
+        assert_eq!(
+            index.qualified_name,
+            "com::example::controllers::UserController::index"
+        );
+        assert!(index.docstring.is_some());
+
+        let base_path = find_symbol(&result.symbols, "BASE_PATH");
+        assert_eq!(base_path.kind, SymbolKind::Constant);
+        assert_eq!(
+            base_path.qualified_name,
+            "com::example::controllers::UserController::BASE_PATH"
+        );
+
+        let show = find_symbol(&result.symbols, "show");
+        assert_eq!(show.kind, SymbolKind::Method);
+
+        let create = find_symbol(&result.symbols, "create");
+        assert_eq!(create.kind, SymbolKind::Method);
+    }
+
+    #[test]
+    fn java_comprehensive_extraction_is_deterministic() {
+        let source = r#"
+package com.example;
+
+/**
+ * Application configuration.
+ */
+public class Config {
+    public static final int VERSION = 1;
+
+    /**
+     * Creates a new config.
+     */
+    public Config(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return name;
+    }
+}
+
+public interface Service {
+    void start();
+    void stop();
+}
+
+public enum Priority {
+    HIGH,
+    MEDIUM,
+    LOW;
+}
+
+public record Pair(Object first, Object second) {}
+"#;
+
+        let output1 = extract_java(source);
+        let output2 = extract_java(source);
+
+        assert_eq!(output1.symbols.len(), output2.symbols.len());
+        for (a, b) in output1.symbols.iter().zip(output2.symbols.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.qualified_name, b.qualified_name);
+            assert_eq!(a.span, b.span);
+        }
+
+        let names: Vec<(&str, SymbolKind)> = output1
+            .symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind))
+            .collect();
+
+        assert!(names.contains(&("Config", SymbolKind::Class)));
+        assert!(names.contains(&("VERSION", SymbolKind::Constant)));
+        assert!(names.contains(&("getName", SymbolKind::Method)));
+        assert!(names.contains(&("Service", SymbolKind::Type)));
+        assert!(names.contains(&("start", SymbolKind::Method)));
+        assert!(names.contains(&("stop", SymbolKind::Method)));
+        assert!(names.contains(&("Priority", SymbolKind::Type)));
+        assert!(names.contains(&("HIGH", SymbolKind::Constant)));
+        assert!(names.contains(&("Pair", SymbolKind::Class)));
+
+        // Verify package-qualified names.
+        let get_name = find_symbol(&output1.symbols, "getName");
+        assert_eq!(get_name.qualified_name, "com::example::Config::getName");
+        assert_eq!(
+            get_name.parent_qualified_name.as_deref(),
+            Some("com::example::Config")
+        );
+
+        let version = find_symbol(&output1.symbols, "VERSION");
+        assert_eq!(version.qualified_name, "com::example::Config::VERSION");
 
         let config = find_symbol(&output1.symbols, "Config");
         assert!(config.docstring.is_some());
