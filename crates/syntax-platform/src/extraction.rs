@@ -120,11 +120,33 @@ fn walk_node(
     }
 }
 
-/// Returns `true` if a function node is inside an impl or trait body.
+/// Returns `true` if a function node is inside a class, impl, or trait body.
+///
+/// Checks up to three ancestor levels to handle decorated functions:
+/// - Rust:   `function_item` → `declaration_list` → `impl_item`
+/// - Python: `function_definition` → `block` → `class_definition`
+/// - Python decorated: `function_definition` → `decorated_definition` → `block` → `class_definition`
 fn is_method_context(node: &Node) -> bool {
-    node.parent()
-        .and_then(|p| p.parent())
-        .is_some_and(|gp| matches!(gp.kind(), "impl_item" | "trait_item"))
+    let class_like = |kind: &str| {
+        matches!(
+            kind,
+            "impl_item" | "trait_item" | "class_definition" | "class_declaration"
+        )
+    };
+
+    // Check grandparent (normal case).
+    if let Some(gp) = node.parent().and_then(|p| p.parent()) {
+        if class_like(gp.kind()) {
+            return true;
+        }
+        // Check great-grandparent (decorated case in Python).
+        if let Some(ggp) = gp.parent() {
+            if class_like(ggp.kind()) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Replaces language-specific namespace separators (e.g. PHP `\`) with `::`.
@@ -248,10 +270,64 @@ pub fn extract_docstring(node: &Node, source: &[u8]) -> Option<String> {
     }
 
     if doc_lines.is_empty() {
-        return None;
+        // Fallback: Python-style body docstrings (first string literal in body).
+        return extract_body_docstring(node, source);
     }
     doc_lines.reverse();
     Some(doc_lines.join("\n"))
+}
+
+/// Extracts a Python-style docstring from the first statement in a body block.
+///
+/// Python docstrings are string literals appearing as the first expression
+/// statement inside a function or class body:
+///
+/// ```python
+/// def foo():
+///     """This is the docstring."""
+///     pass
+/// ```
+fn extract_body_docstring(node: &Node, source: &[u8]) -> Option<String> {
+    let body = node.child_by_field_name("body")?;
+
+    // Find the first named child of the body block.
+    let mut cursor = body.walk();
+    if !cursor.goto_first_child() {
+        return None;
+    }
+
+    // Skip non-named nodes.
+    while !cursor.node().is_named() {
+        if !cursor.goto_next_sibling() {
+            return None;
+        }
+    }
+
+    let first = cursor.node();
+    if first.kind() != "expression_statement" {
+        return None;
+    }
+
+    // The expression_statement should contain a single string child.
+    let string_node = first.named_child(0)?;
+    if string_node.kind() != "string" {
+        return None;
+    }
+
+    let raw = string_node.utf8_text(source).ok()?;
+
+    // Strip triple-quote delimiters.
+    let inner = raw
+        .strip_prefix("\"\"\"")
+        .and_then(|s| s.strip_suffix("\"\"\""))
+        .or_else(|| raw.strip_prefix("'''").and_then(|s| s.strip_suffix("'''")))
+        .unwrap_or(raw);
+
+    let trimmed = inner.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 /// Cleans a `/** ... */` doc comment, stripping delimiters and leading `*`.

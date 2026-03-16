@@ -237,6 +237,83 @@ impl SyntaxBackend for PhpSyntaxBackend {
 }
 
 // ---------------------------------------------------------------------------
+// PythonSyntaxBackend
+// ---------------------------------------------------------------------------
+
+/// Tree-sitter-based syntax backend for Python.
+pub struct PythonSyntaxBackend {
+    capability: SyntaxCapability,
+}
+
+impl PythonSyntaxBackend {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            capability: SyntaxCapability {
+                supported_kinds: vec![SymbolKind::Function, SymbolKind::Method, SymbolKind::Class],
+                supports_containers: true,
+                supports_docs: true,
+            },
+        }
+    }
+
+    /// Returns the [`BackendId`] for this backend.
+    #[must_use]
+    pub fn backend_id() -> BackendId {
+        BackendId("syntax-python".to_string())
+    }
+}
+
+impl Default for PythonSyntaxBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SyntaxBackend for PythonSyntaxBackend {
+    fn language(&self) -> &str {
+        "python"
+    }
+
+    fn capability(&self) -> &SyntaxCapability {
+        &self.capability
+    }
+
+    fn extract_symbols(&self, file: &PreparedFile) -> Result<SyntaxExtraction, SyntaxError> {
+        if file.language != "python" {
+            return Err(SyntaxError::Unsupported {
+                language: file.language.clone(),
+            });
+        }
+
+        let profile = &languages::python::PYTHON_PROFILE;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&(profile.ts_language)())
+            .map_err(|err| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: format!("failed to set language: {err}"),
+            })?;
+
+        let tree = parser
+            .parse(&file.content, None)
+            .ok_or_else(|| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: "tree-sitter parse returned no tree".to_string(),
+            })?;
+
+        let symbols = extraction::extract_symbols(tree.root_node(), &file.content, profile);
+
+        Ok(SyntaxExtraction {
+            language: "python".to_string(),
+            symbols,
+            backend_id: Self::backend_id(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1035,5 +1112,364 @@ function config(string $key): mixed
 
         let make_doc = find_symbol(&output1.symbols, "make");
         assert!(make_doc.docstring.is_some());
+    }
+
+    // ===================================================================
+    // Python tests
+    // ===================================================================
+
+    fn extract_python(source: &str) -> SyntaxExtraction {
+        let backend = PythonSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("app/models.py"),
+            absolute_path: PathBuf::from("/tmp/test/app/models.py"),
+            language: "python".to_string(),
+            content: source.as_bytes().to_vec(),
+        };
+        backend.extract_symbols(&file).expect("extraction failed")
+    }
+
+    // -- Python backend identity --
+
+    #[test]
+    fn python_backend_id_follows_naming_convention() {
+        let backend = PythonSyntaxBackend::new();
+        assert_eq!(backend.language(), "python");
+        assert_eq!(PythonSyntaxBackend::backend_id().0, "syntax-python");
+    }
+
+    #[test]
+    fn python_capability_reports_expected_kinds() {
+        let backend = PythonSyntaxBackend::new();
+        let cap = backend.capability();
+        assert!(cap.supported_kinds.contains(&SymbolKind::Function));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Method));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Class));
+        assert!(cap.supports_containers);
+        assert!(cap.supports_docs);
+    }
+
+    #[test]
+    fn python_unsupported_language_returns_error() {
+        let backend = PythonSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("main.rs"),
+            absolute_path: PathBuf::from("/tmp/main.rs"),
+            language: "rust".to_string(),
+            content: b"fn main() {}".to_vec(),
+        };
+        let err = backend.extract_symbols(&file).expect_err("wrong language");
+        assert!(err.to_string().contains("unsupported language"));
+    }
+
+    // -- Python extraction output --
+
+    #[test]
+    fn python_extraction_carries_backend_id() {
+        let result = extract_python("def hello():\n    pass\n");
+        assert_eq!(result.backend_id.0, "syntax-python");
+        assert_eq!(result.language, "python");
+    }
+
+    // -- Python function extraction --
+
+    #[test]
+    fn python_extracts_free_function() {
+        let result = extract_python("def hello():\n    pass\n");
+        let sym = find_symbol(&result.symbols, "hello");
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert_eq!(sym.qualified_name, "hello");
+        assert!(sym.parent_qualified_name.is_none());
+    }
+
+    #[test]
+    fn python_extracts_function_signature() {
+        let result = extract_python("def process(x: int, y: str) -> bool:\n    return True\n");
+        let sym = find_symbol(&result.symbols, "process");
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert!(sym.signature.contains("def process"));
+        assert!(sym.signature.contains("x: int"));
+    }
+
+    #[test]
+    fn python_extracts_async_function() {
+        let result = extract_python("async def fetch(url: str) -> dict:\n    return {}\n");
+        let sym = find_symbol(&result.symbols, "fetch");
+        assert_eq!(sym.kind, SymbolKind::Function);
+    }
+
+    // -- Python class extraction --
+
+    #[test]
+    fn python_extracts_class() {
+        let result = extract_python("class User:\n    pass\n");
+        let sym = find_symbol(&result.symbols, "User");
+        assert_eq!(sym.kind, SymbolKind::Class);
+        assert_eq!(sym.qualified_name, "User");
+    }
+
+    #[test]
+    fn python_extracts_class_with_base() {
+        let result = extract_python("class Admin(User):\n    pass\n");
+        let sym = find_symbol(&result.symbols, "Admin");
+        assert_eq!(sym.kind, SymbolKind::Class);
+        assert!(sym.signature.contains("class Admin"));
+    }
+
+    // -- Python method extraction --
+
+    #[test]
+    fn python_extracts_methods_with_qualified_names() {
+        let source = "class User:\n    def get_name(self) -> str:\n        return self.name\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "get_name");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::get_name");
+        assert_eq!(sym.parent_qualified_name.as_deref(), Some("User"));
+    }
+
+    #[test]
+    fn python_extracts_init_as_method() {
+        let source = "class User:\n    def __init__(self, name: str):\n        self.name = name\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "__init__");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::__init__");
+    }
+
+    #[test]
+    fn python_extracts_decorated_method() {
+        let source =
+            "class User:\n    @staticmethod\n    def create(name: str) -> 'User':\n        return User(name)\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "create");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::create");
+    }
+
+    #[test]
+    fn python_extracts_property_as_method() {
+        let source =
+            "class User:\n    @property\n    def display_name(self) -> str:\n        return self.name\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "display_name");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::display_name");
+    }
+
+    // -- Python docstrings --
+
+    #[test]
+    fn python_extracts_function_docstring() {
+        let source =
+            "def helper(x: int) -> int:\n    \"\"\"A helper function.\"\"\"\n    return x + 1\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "helper");
+        assert!(sym.docstring.is_some(), "expected docstring");
+        assert!(
+            sym.docstring
+                .as_deref()
+                .unwrap()
+                .contains("A helper function"),
+            "unexpected doc: {:?}",
+            sym.docstring
+        );
+    }
+
+    #[test]
+    fn python_extracts_class_docstring() {
+        let source = "class User:\n    \"\"\"Represents a user.\"\"\"\n    pass\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "User");
+        assert!(sym.docstring.is_some(), "expected class docstring");
+        assert!(
+            sym.docstring
+                .as_deref()
+                .unwrap()
+                .contains("Represents a user"),
+            "unexpected doc: {:?}",
+            sym.docstring
+        );
+    }
+
+    #[test]
+    fn python_extracts_method_docstring() {
+        let source = "class User:\n    def get_name(self) -> str:\n        \"\"\"Return the user's name.\"\"\"\n        return self.name\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "get_name");
+        assert!(sym.docstring.is_some(), "expected method docstring");
+    }
+
+    #[test]
+    fn python_no_docstring_when_absent() {
+        let result = extract_python("def bare():\n    pass\n");
+        let sym = find_symbol(&result.symbols, "bare");
+        assert!(sym.docstring.is_none());
+    }
+
+    #[test]
+    fn python_single_quote_docstring() {
+        let source = "def helper():\n    '''Single quoted doc.'''\n    pass\n";
+        let result = extract_python(source);
+        let sym = find_symbol(&result.symbols, "helper");
+        assert!(sym.docstring.is_some());
+        assert!(
+            sym.docstring
+                .as_deref()
+                .unwrap()
+                .contains("Single quoted doc"),
+            "unexpected doc: {:?}",
+            sym.docstring
+        );
+    }
+
+    // -- Python edge cases --
+
+    #[test]
+    fn python_empty_file_produces_no_symbols() {
+        let result = extract_python("");
+        assert!(result.symbols.is_empty());
+    }
+
+    #[test]
+    fn python_nested_class() {
+        let source =
+            "class Outer:\n    class Inner:\n        def method(self):\n            pass\n";
+        let result = extract_python(source);
+
+        let outer = find_symbol(&result.symbols, "Outer");
+        assert_eq!(outer.kind, SymbolKind::Class);
+
+        let inner = find_symbol(&result.symbols, "Inner");
+        assert_eq!(inner.kind, SymbolKind::Class);
+        assert_eq!(inner.qualified_name, "Outer::Inner");
+
+        let method = find_symbol(&result.symbols, "method");
+        assert_eq!(method.kind, SymbolKind::Method);
+        assert_eq!(method.qualified_name, "Outer::Inner::method");
+    }
+
+    // -- Python representative fixture --
+
+    #[test]
+    fn python_django_style_model_fixture() {
+        let source = r#"
+class Article:
+    """Represents an article in the system."""
+
+    def __init__(self, title: str, body: str) -> None:
+        """Initialize an article."""
+        self.title = title
+        self.body = body
+
+    def publish(self) -> None:
+        """Mark the article as published."""
+        self.published = True
+
+    @property
+    def summary(self) -> str:
+        return self.body[:100]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Article":
+        return cls(data["title"], data["body"])
+
+class Comment:
+    """A comment on an article."""
+
+    def __init__(self, article: Article, text: str) -> None:
+        self.article = article
+        self.text = text
+
+def create_article(title: str, body: str) -> Article:
+    """Factory function for articles."""
+    return Article(title, body)
+"#;
+        let result = extract_python(source);
+
+        let article = find_symbol(&result.symbols, "Article");
+        assert_eq!(article.kind, SymbolKind::Class);
+        assert!(article.docstring.is_some());
+
+        let init = find_symbol(&result.symbols, "__init__");
+        assert_eq!(init.kind, SymbolKind::Method);
+        assert_eq!(init.qualified_name, "Article::__init__");
+        assert!(init.docstring.is_some());
+
+        let publish = find_symbol(&result.symbols, "publish");
+        assert_eq!(publish.kind, SymbolKind::Method);
+        assert_eq!(publish.qualified_name, "Article::publish");
+
+        let summary = find_symbol(&result.symbols, "summary");
+        assert_eq!(summary.kind, SymbolKind::Method);
+        assert_eq!(summary.qualified_name, "Article::summary");
+
+        let from_dict = find_symbol(&result.symbols, "from_dict");
+        assert_eq!(from_dict.kind, SymbolKind::Method);
+        assert_eq!(from_dict.qualified_name, "Article::from_dict");
+
+        let comment = find_symbol(&result.symbols, "Comment");
+        assert_eq!(comment.kind, SymbolKind::Class);
+        assert!(comment.docstring.is_some());
+
+        let create = find_symbol(&result.symbols, "create_article");
+        assert_eq!(create.kind, SymbolKind::Function);
+        assert!(create.docstring.is_some());
+    }
+
+    #[test]
+    fn python_comprehensive_extraction_is_deterministic() {
+        let source = r#"
+class Base:
+    """Base class."""
+
+    def method(self) -> None:
+        """A method."""
+        pass
+
+class Child(Base):
+    def override_method(self) -> None:
+        pass
+
+    @staticmethod
+    def static_helper() -> int:
+        return 0
+
+def free_function(x: int) -> int:
+    """A free function."""
+    return x
+
+async def async_function() -> None:
+    pass
+"#;
+
+        let output1 = extract_python(source);
+        let output2 = extract_python(source);
+
+        assert_eq!(output1.symbols.len(), output2.symbols.len());
+        for (a, b) in output1.symbols.iter().zip(output2.symbols.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.qualified_name, b.qualified_name);
+            assert_eq!(a.span, b.span);
+        }
+
+        let names: Vec<(&str, SymbolKind)> = output1
+            .symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind))
+            .collect();
+
+        assert!(names.contains(&("Base", SymbolKind::Class)));
+        assert!(names.contains(&("method", SymbolKind::Method)));
+        assert!(names.contains(&("Child", SymbolKind::Class)));
+        assert!(names.contains(&("override_method", SymbolKind::Method)));
+        assert!(names.contains(&("static_helper", SymbolKind::Method)));
+        assert!(names.contains(&("free_function", SymbolKind::Function)));
+        assert!(names.contains(&("async_function", SymbolKind::Function)));
+
+        let method = find_symbol(&output1.symbols, "method");
+        assert_eq!(method.qualified_name, "Base::method");
+        assert!(method.docstring.is_some());
     }
 }

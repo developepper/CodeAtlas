@@ -1,4 +1,5 @@
 pub mod php;
+pub mod python;
 pub mod rust;
 
 use core_model::SymbolKind;
@@ -58,6 +59,7 @@ impl LanguageProfile {
 pub fn profile_for(language: &str) -> Option<&'static LanguageProfile> {
     match language {
         "php" => Some(&php::PHP_PROFILE),
+        "python" => Some(&python::PYTHON_PROFILE),
         "rust" => Some(&rust::RUST_PROFILE),
         _ => None,
     }
@@ -65,5 +67,5 @@ pub fn profile_for(language: &str) -> Option<&'static LanguageProfile> {
 
 /// Returns the list of languages with syntax backends on this platform.
 pub fn supported_languages() -> &'static [&'static str] {
-    &["php", "rust"]
+    &["php", "python", "rust"]
 }
