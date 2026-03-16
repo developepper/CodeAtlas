@@ -31,8 +31,8 @@ CodeAtlas gives you:
 - Fast symbol search across indexed repositories.
 - File and repository structure views.
 - File content retrieval from the local index.
-- Semantic-first extraction where language-native analysis is available.
-- Syntax fallback where semantic runtimes are unavailable.
+- Syntax indexing baseline with semantic enrichment where language-native
+  analysis is available.
 - File-level indexing baseline for recognized languages even without symbol adapters.
 - Deterministic outputs suitable for automation and AI tooling.
 
@@ -538,6 +538,29 @@ File-level indexing is the baseline — every recognized file gets a file record
 stored content blob, and appears in file tree and repo outline queries. Symbol
 extraction is additive on top of that baseline when adapters are available.
 
+### Long-term architecture direction
+
+The current capability table reflects the product as it exists today, not the
+intended end state.
+
+CodeAtlas is now explicitly moving toward:
+
+- file-level persistence as the universal floor for recognized files
+- syntax indexing as the default baseline for most recognized code languages
+- semantic indexing as an enrichment layer on top of syntax
+- file-only indexing as the explicit last fallback rather than the common case
+
+This project is still early enough that clean long-term architecture is favored
+over preserving awkward intermediate interfaces. If the indexing model, schema,
+or crate boundaries need to be refactored to support that direction, those
+refactors are in scope.
+
+The planning artifact for that next major architecture initiative is:
+`docs/planning/universal-syntax-indexing.md`.
+
+The canonical technical design source for that initiative will live in:
+`docs/architecture/universal-syntax-indexing-architecture.md`.
+
 ### What does not exist yet
 
 - Watcher/local file-system triggered update mode.
@@ -568,11 +591,13 @@ content retrieval, and repo outline remain useful even with zero symbols.
 
 ## Design Principles
 
-- Semantic-first, syntax-fallback intelligence.
+- Broad syntax baseline with semantic enrichment.
 - Local-first trust model with hosted-ready architecture.
 - Security by design (treat indexed code as sensitive, untrusted input).
 - Strong determinism and stable API/tool behavior.
 - Observability and quality metrics as first-class requirements.
+- Favor clean long-term architecture over backward compatibility while the
+  project is still early.
 
 ## Roadmap
 
@@ -583,6 +608,7 @@ Planning artifacts:
 - `docs/operations/runbook.md`
 - `docs/planning/issue-backlog.md`
 - `docs/planning/post-v1-roadmap.md`
+- `docs/planning/universal-syntax-indexing.md`
 - `docs/workflow/github-process.md`
 - `docs/engineering-principles.md`
 

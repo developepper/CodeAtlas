@@ -207,6 +207,33 @@ Planning note:
 - Planning artifact:
   `docs/planning/recognized-language-file-indexing.md`
 
+### Epic 17: Universal Syntax Indexing Platform
+
+- Make syntax indexing the default baseline for major recognized code
+  languages, with file-level indexing as the explicit last fallback.
+- Refactor the indexing architecture where needed so syntax and semantic
+  indexing are treated as platform capability layers rather than a sparse set
+  of special-case adapters.
+- Build a multi-language tree-sitter-backed syntax subsystem that can scale
+  across high-value ecosystems, and migrate the current Rust syntax path onto
+  that subsystem.
+- Start with PHP/Laravel as the proving ground, then expand to Python, Go,
+  Java, JavaScript, and other common languages.
+- Update schema, metrics, query expectations, and benchmark methodology to
+  reflect file, syntax, and semantic capability tiers explicitly.
+
+Planning note:
+
+- This is the next intended major architecture epic after Epic 16.
+- Clean long-term architecture is favored over backward compatibility for this
+  initiative.
+- Planning artifact:
+  `docs/planning/universal-syntax-indexing.md`
+- Canonical technical design source:
+  `docs/architecture/universal-syntax-indexing-architecture.md`
+- Reviewed issue-body drafts live under:
+  `docs/planning/github-issues/universal-syntax-*.md`
+
 ## Commercial Model Principles
 
 CodeAtlas can remain open source and still support a healthy business model if
