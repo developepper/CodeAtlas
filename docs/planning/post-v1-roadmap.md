@@ -229,6 +229,8 @@ Planning note:
   initiative.
 - Planning artifact:
   `docs/planning/universal-syntax-indexing.md`
+- Canonical technical design source:
+  `docs/architecture/universal-syntax-indexing-architecture.md`
 - Reviewed issue-body drafts live under:
   `docs/planning/github-issues/universal-syntax-*.md`
 

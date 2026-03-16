@@ -19,6 +19,8 @@ boundaries between syntax backends, semantic backends, and merge policy.
 ## Deliverables
 
 - architecture/planning doc updates
+- canonical technical design doc:
+  `docs/architecture/universal-syntax-indexing-architecture.md`
 - clear subsystem ownership and terminology
 - explicit design decisions for refactor boundaries
 - actual proposed Rust-facing replacement interfaces
@@ -48,5 +50,6 @@ boundaries between syntax backends, semantic backends, and merge policy.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
 - [crates/adapter-api/src/router.rs](crates/adapter-api/src/router.rs)
 - [crates/indexer/src/stage.rs](crates/indexer/src/stage.rs)

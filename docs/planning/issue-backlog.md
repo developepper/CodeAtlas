@@ -176,6 +176,9 @@ What was delivered:
 Planning artifact:
 `docs/planning/universal-syntax-indexing.md`.
 
+Canonical technical design source:
+`docs/architecture/universal-syntax-indexing-architecture.md`.
+
 Reviewed issue docs for the next issue-creation pass:
 
 - `docs/planning/github-issues/universal-syntax-indexing-epic.md`

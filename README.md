@@ -558,6 +558,9 @@ refactors are in scope.
 The planning artifact for that next major architecture initiative is:
 `docs/planning/universal-syntax-indexing.md`.
 
+The canonical technical design source for that initiative will live in:
+`docs/architecture/universal-syntax-indexing-architecture.md`.
+
 ### What does not exist yet
 
 - Watcher/local file-system triggered update mode.

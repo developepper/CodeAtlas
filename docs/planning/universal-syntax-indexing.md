@@ -7,6 +7,9 @@ fallback into a general-purpose code intelligence platform where syntax
 indexing is the default baseline for most recognized code languages and
 semantic indexing is an enrichment layer on top of that baseline.
 
+Canonical technical design source:
+`docs/architecture/universal-syntax-indexing-architecture.md`
+
 ## Why This Exists
 
 CodeAtlas now has a solid file-level baseline for recognized languages, but
