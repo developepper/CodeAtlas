@@ -12,8 +12,8 @@ use indexer::{
     SyntaxPolicy,
 };
 use syntax_platform::{
-    PhpSyntaxBackend, PreparedFile, PythonSyntaxBackend, RustSyntaxBackend, SyntaxBackend,
-    SyntaxCapability, SyntaxError, SyntaxExtraction, SyntaxSymbol,
+    GoSyntaxBackend, PhpSyntaxBackend, PreparedFile, PythonSyntaxBackend, RustSyntaxBackend,
+    SyntaxBackend, SyntaxCapability, SyntaxError, SyntaxExtraction, SyntaxSymbol,
 };
 use tempfile::TempDir;
 
@@ -2667,6 +2667,160 @@ fn pipeline_python_mixed_with_rust() {
     assert!(py_file.symbol_count >= 2); // App + run
     assert_eq!(
         py_file.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Go syntax backend integration tests
+// ---------------------------------------------------------------------------
+
+fn make_registry_with_go() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry.register_syntax(
+        GoSyntaxBackend::backend_id(),
+        Box::new(GoSyntaxBackend::new()),
+    );
+    registry
+}
+
+#[test]
+fn pipeline_go_http_server_end_to_end() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+
+    std::fs::write(
+        repo_dir.path().join("main.go"),
+        r#"package main
+
+// Server holds HTTP server configuration.
+type Server struct {
+    Addr string
+    Port int
+}
+
+// NewServer creates a new server.
+func NewServer(addr string, port int) *Server {
+    return &Server{Addr: addr, Port: port}
+}
+
+// Start starts the server.
+func (s *Server) Start() error {
+    return nil
+}
+
+const DefaultPort = 8080
+"#,
+    )
+    .expect("write main.go");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_go();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "go-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    assert!(
+        result.metrics.files_parsed >= 1,
+        "expected Go file to be parsed"
+    );
+    assert!(result.file_errors.is_empty());
+
+    let file = db
+        .files()
+        .get("go-repo", "main.go")
+        .expect("query file")
+        .expect("main.go file record");
+    assert_eq!(file.language, "go");
+    // Server type + NewServer func + Start method + DefaultPort const = 4
+    assert!(
+        file.symbol_count >= 4,
+        "expected at least 4 symbols, got {}",
+        file.symbol_count
+    );
+    assert_eq!(file.capability_tier, core_model::CapabilityTier::SyntaxOnly);
+
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("go-repo", "main.go")
+        .expect("list symbols");
+    let all_syms: Vec<_> = symbol_ids
+        .iter()
+        .filter_map(|id| db.symbols().get(id).ok().flatten())
+        .collect();
+
+    let server = all_syms
+        .iter()
+        .find(|s| s.name == "Server")
+        .expect("Server should exist");
+    assert_eq!(server.kind, SymbolKind::Type);
+    assert!(server.source_backend.contains("syntax-go"));
+
+    let start = all_syms
+        .iter()
+        .find(|s| s.name == "Start")
+        .expect("Start should exist");
+    assert_eq!(start.kind, SymbolKind::Method);
+    assert!(
+        start.qualified_name.contains("Server::Start"),
+        "expected receiver-qualified name, got: {}",
+        start.qualified_name
+    );
+}
+
+#[test]
+fn pipeline_go_mixed_with_rust() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+
+    std::fs::write(
+        repo_dir.path().join("main.go"),
+        "package main\nfunc Run() error {\n    return nil\n}\n",
+    )
+    .expect("write go");
+
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(src.join("lib.rs"), "pub fn greet() {}\n").expect("write rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_go();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "go-rs-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+    assert!(result.metrics.files_parsed >= 2);
+
+    let go_file = db
+        .files()
+        .get("go-rs-repo", "main.go")
+        .expect("query go")
+        .expect("main.go record");
+    assert_eq!(go_file.language, "go");
+    assert!(go_file.symbol_count >= 1);
+    assert_eq!(
+        go_file.capability_tier,
         core_model::CapabilityTier::SyntaxOnly
     );
 }

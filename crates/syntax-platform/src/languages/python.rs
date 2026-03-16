@@ -32,4 +32,5 @@ pub static PYTHON_PROFILE: LanguageProfile = LanguageProfile {
     definitions: PYTHON_DEFINITIONS,
     scopes: PYTHON_SCOPES,
     sticky_scopes: &[],
+    method_receivers: &[],
 };
