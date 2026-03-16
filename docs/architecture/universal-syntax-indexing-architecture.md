@@ -67,6 +67,37 @@ remain the center of the indexing architecture.
   broad syntax extraction
 - merge policy should be an explicit platform concern
 
+### AD-1a: Replace `AdapterRouter` / `AdapterPolicy` with explicit dispatch
+
+**Decision:** The current routing model built around `AdapterRouter` and
+`AdapterPolicy` should not be preserved as-is.
+
+**Replacement direction:** Introduce an explicit dispatch/planning layer that
+decides, per file:
+
+- whether a syntax backend exists
+- whether a semantic backend exists
+- whether semantic execution is allowed or desired by policy
+- which merge path should run
+
+Suggested responsibility split:
+
+- `BackendRegistry`
+  - knows what syntax and semantic backends are registered for each language
+- `DispatchPlanner`
+  - converts file language + runtime/policy context into an execution plan
+- `ExecutionPlan`
+  - explicit plan for syntax, semantic, merge, or file-only fallback
+
+**Rationale:**
+
+- the old `SemanticPreferred` / `SyntaxOnly` policy model assumes one unified
+  adapter selection path
+- the new architecture has separate syntax and semantic subsystems, so routing
+  must decide how both participate rather than choosing one adapter list
+- dispatch behavior should be explicit and explainable in logs, metrics, and
+  diagnostics
+
 ### AD-2: Build a dedicated syntax subsystem
 
 **Decision:** Create a dedicated multi-language syntax subsystem backed by
@@ -176,8 +207,8 @@ Key properties:
 pub trait MergeEngine {
     fn merge(
         &self,
-        syntax: Option<SyntaxExtraction>,
-        semantic: Option<SemanticExtraction>,
+        syntax: Vec<SyntaxExtraction>,
+        semantic: Vec<SemanticExtraction>,
     ) -> MergeResult;
 }
 ```
@@ -187,12 +218,14 @@ Key properties:
 - deterministic precedence rules
 - explicit provenance
 - no backend-specific policy hidden in extractors
+- merge should remain extensible to multiple syntax or semantic producers over
+  time rather than assuming exactly one backend of each kind per language
 
 ### Capability classifier
 
 ```rust
 pub trait CapabilityClassifier {
-    fn classify(result: &MergeResult) -> CapabilityTier;
+    fn classify(outcome: &ExecutionOutcome) -> CapabilityTier;
 }
 ```
 
@@ -202,10 +235,92 @@ Capability tiers:
 pub enum CapabilityTier {
     FileOnly,
     SyntaxOnly,
-    SemanticOnly,
     SyntaxPlusSemantic,
 }
 ```
+
+`SemanticOnly` is intentionally not a target steady-state tier. In the long-term
+architecture, semantic indexing is enrichment layered on top of a syntax
+baseline. If a semantic backend exists without a syntax backend during a
+temporary migration phase, that should be modeled as a transitional execution
+state or migration exception, not as a durable product capability tier.
+
+### Registry and dispatch layer
+
+```rust
+pub trait BackendRegistry {
+    fn syntax_backends(&self, language: &str) -> Vec<BackendId>;
+    fn semantic_backends(&self, language: &str) -> Vec<BackendId>;
+    fn syntax(&self, id: &BackendId) -> &dyn SyntaxBackend;
+    fn semantic(&self, id: &BackendId) -> &dyn SemanticBackend;
+}
+```
+
+```rust
+pub trait DispatchPlanner {
+    fn plan(
+        &self,
+        file: &PreparedFile,
+        registry: &dyn BackendRegistry,
+        context: &DispatchContext,
+    ) -> ExecutionPlan;
+}
+```
+
+```rust
+pub struct DispatchContext {
+    pub semantic_policy: SemanticPolicy,
+    pub allow_experimental_backends: bool,
+}
+
+pub enum SemanticPolicy {
+    Disabled,
+    EnabledWhenAvailable,
+    Required,
+}
+
+pub enum ExecutionPlan {
+    FileOnly {
+        reason: FileOnlyReason,
+    },
+    Execute {
+        syntax: Vec<BackendId>,
+        semantic: Vec<BackendId>,
+    },
+}
+
+pub struct ExecutionOutcome {
+    pub plan: ExecutionPlan,
+    pub syntax_attempts: Vec<BackendAttempt<SyntaxExtraction, SyntaxError>>,
+    pub semantic_attempts: Vec<BackendAttempt<SemanticExtraction, SemanticError>>,
+    pub merge_result: Option<MergeResult>,
+}
+
+pub enum FileOnlyReason {
+    LanguageUnrecognized,
+    NoSyntaxBackendRegistered,
+    SyntaxDisabledByPolicy,
+}
+
+pub struct BackendAttempt<T, E> {
+    pub backend: BackendId,
+    pub result: Result<T, E>,
+}
+```
+
+Key properties:
+
+- dispatch is explicit, per file
+- syntax and semantic participation are both visible in the plan
+- policy no longer implies “choose one adapter class”; it governs semantic
+  participation on top of a syntax baseline
+- the registry and merge layers are extensible to multiple backends per tier
+  when the platform grows beyond one syntax or one semantic provider per
+  language
+- execution outcomes preserve the difference between “unsupported,”
+  “backend failed,” and “backend produced usable output”
+- diagnostics can report why a file became `FileOnly`, `SyntaxOnly`, or
+  `SyntaxPlusSemantic`
 
 ## Pipeline Direction
 
@@ -219,20 +334,23 @@ The indexing pipeline should evolve toward:
 2. **Persist file baseline**
    - file record + blob remain universal for recognized files
 
-3. **Syntax extraction**
+3. **Dispatch planning**
+   - determine syntax / semantic / merge execution path per file
+
+4. **Syntax extraction**
    - run syntax backend when available
 
-4. **Semantic extraction**
+5. **Semantic extraction**
    - run semantic backend when available
 
-5. **Merge**
+6. **Merge**
    - canonical symbol set
    - provenance + capability classification
 
-6. **Enrich**
+7. **Enrich**
    - summaries / keywords / metadata enrichment where still useful
 
-7. **Persist symbols + aggregates**
+8. **Persist symbols + aggregates**
    - write canonical output
    - update repo/file/symbol aggregates
 
@@ -240,7 +358,7 @@ Important consequence:
 
 - the pipeline should stop thinking of “parse stage” as a single opaque adapter
   action
-- syntax, semantic, and merge become visible stages or sub-stages
+- dispatch, syntax, semantic, and merge become visible stages or sub-stages
 
 ## Core Model Direction
 
@@ -311,6 +429,13 @@ Potential follow-on:
 
 - if `adapter-api` becomes an awkward compatibility shell, replace or remove it
   rather than preserving it for familiarity
+
+### Existing routing model
+
+- `AdapterRouter` and `AdapterPolicy` should be replaced by the new registry and
+  dispatch-planning model
+- no compatibility layer is required unless it makes implementation materially
+  cleaner during the transition
 
 ## Validation Strategy
 

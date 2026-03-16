@@ -13,7 +13,7 @@ boundaries between syntax backends, semantic backends, and merge policy.
 - define the capability model (`file`, `syntax`, `semantic`)
 - define subsystem boundaries for syntax and semantic indexing
 - replace the current unified adapter/routing model with explicit syntax,
-  semantic, and merge roles
+  semantic, merge, registry, and dispatch roles
 - define the compatibility stance for this initiative explicitly
 
 ## Deliverables
@@ -27,6 +27,10 @@ boundaries between syntax backends, semantic backends, and merge policy.
 - explicit crate-boundary and data-flow design
 - explicit migration plan for the current Rust syntax path and current unified
   adapter abstraction
+- explicit replacement design for `AdapterRouter` / `AdapterPolicy`
+- explicit replacement design for routing/dispatch diagnostics, including how
+  unsupported, policy-disabled, and runtime-failed backend paths are
+  distinguished
 
 ## Non-goals
 
@@ -44,6 +48,13 @@ boundaries between syntax backends, semantic backends, and merge policy.
       long-term center of the architecture
 - [ ] the replacement architectural split between syntax backends, semantic
       backends, and merge policy is explicit
+- [ ] the replacement routing/dispatch model for backend invocation is explicit
+- [ ] the replacement registry/dispatch design does not assume exactly one
+      backend per capability tier per language
+- [ ] the capability model makes `semantic-only` a transitional exception, not
+      a durable steady-state tier
+- [ ] the architecture preserves a diagnostic distinction between unsupported
+      paths and backend-failure paths
 - [ ] the ticket produces concrete trait/interface proposals rather than a
       second high-level planning pass
 

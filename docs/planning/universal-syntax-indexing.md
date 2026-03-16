@@ -112,6 +112,8 @@ Decision:
 
 - replace the current unified adapter abstraction with an explicit split between
   syntax backends, semantic backends, and merge policy
+- replace the current unified routing model with an explicit registry and
+  dispatch-planning model
 - treat this refactor as foundational work for the epic, not as optional
   cleanup
 
@@ -224,9 +226,21 @@ Recommended top-level subsystem split:
 - `SemanticBackend`
 - `MergeEngine`
 - `CapabilityClassifier`
+- `BackendRegistry`
+- `DispatchPlanner`
 
 These names are descriptive rather than final API commitments, but the
 architectural split itself is intentional and should drive the refactor.
+
+Capability-tier intent:
+
+- `file-only`
+- `syntax-only`
+- `syntax-plus-semantic`
+
+`semantic-only` should not be treated as a durable steady-state capability
+tier. If it appears during migration, it should be treated as an exception to
+be removed rather than a target product shape.
 
 ### Core model evolution
 
@@ -248,6 +262,12 @@ Areas likely worth promoting to first-class fields:
 - visibility and other common modifiers where available
 - capability/provenance tier
 - stable byte and line ranges as canonical retrieval primitives
+
+The model/metrics design should also preserve diagnostic distinction between:
+
+- file-only because a language or backend is unsupported
+- file-only because execution was intentionally disabled by policy
+- file-only because a backend failed at runtime
 
 The objective is not to expose every field immediately, but to avoid a schema
 that forces repeated incompatible migrations as language coverage expands.
@@ -362,7 +382,7 @@ Scope:
 - define capability tiers (`file`, `syntax`, `semantic`)
 - define subsystem boundaries for syntax backends, semantic backends, and merge
 - replace the current unified adapter/routing abstraction with explicit syntax,
-  semantic, and merge roles
+  semantic, merge, registry, and dispatch roles
 - document compatibility stance and migration expectations
 
 Deliverables:
@@ -371,6 +391,7 @@ Deliverables:
 - actual proposed Rust-facing replacement interfaces
 - actual crate-boundary and data-flow decisions
 - explicit migration plan for existing indexing components
+- explicit replacement design for `AdapterRouter` / `AdapterPolicy`
 
 Non-goals:
 
