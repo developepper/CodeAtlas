@@ -12,8 +12,8 @@ use indexer::{
     SyntaxPolicy,
 };
 use syntax_platform::{
-    PreparedFile, RustSyntaxBackend, SyntaxBackend, SyntaxCapability, SyntaxError,
-    SyntaxExtraction, SyntaxSymbol,
+    PhpSyntaxBackend, PreparedFile, RustSyntaxBackend, SyntaxBackend, SyntaxCapability,
+    SyntaxError, SyntaxExtraction, SyntaxSymbol,
 };
 use tempfile::TempDir;
 
@@ -2197,4 +2197,308 @@ fn file_only_distinguishes_missing_backend_from_backend_failure() {
         "backend failure should still produce a file error"
     );
     assert_eq!(rs_errors[0].backend_id.as_deref(), Some("failing-backend"));
+}
+
+// ---------------------------------------------------------------------------
+// PHP syntax backend integration tests
+// ---------------------------------------------------------------------------
+
+/// Registry with both Rust and PHP syntax backends (production-like setup).
+fn make_registry_with_php() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry.register_syntax(
+        PhpSyntaxBackend::backend_id(),
+        Box::new(PhpSyntaxBackend::new()),
+    );
+    registry
+}
+
+#[test]
+fn pipeline_php_laravel_controller_end_to_end() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let app = repo_dir.path().join("app/Http/Controllers");
+    std::fs::create_dir_all(&app).expect("create controller dir");
+
+    std::fs::write(
+        app.join("UserController.php"),
+        r#"<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\User;
+use Illuminate\Http\Request;
+
+/**
+ * Handles user-related HTTP requests.
+ */
+class UserController extends Controller
+{
+    /**
+     * Display a listing of users.
+     */
+    public function index(): JsonResponse
+    {
+        return response()->json(User::all());
+    }
+
+    public function show(int $id): JsonResponse
+    {
+        return response()->json(User::findOrFail($id));
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        $user = User::create($request->validated());
+        return response()->json($user, 201);
+    }
+}
+"#,
+    )
+    .expect("write controller");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_php();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "laravel-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // PHP file was discovered and parsed.
+    assert!(
+        result.metrics.files_parsed >= 1,
+        "expected PHP file to be parsed, files_parsed={}",
+        result.metrics.files_parsed
+    );
+    assert!(result.file_errors.is_empty(), "no file errors expected");
+
+    // Verify file record exists with symbols.
+    let file = db
+        .files()
+        .get("laravel-repo", "app/Http/Controllers/UserController.php")
+        .expect("query file")
+        .expect("UserController.php file record should exist");
+    assert_eq!(file.language, "php");
+    assert!(
+        file.symbol_count >= 4,
+        "expected at least UserController + 3 methods, got {}",
+        file.symbol_count
+    );
+    assert_eq!(file.capability_tier, core_model::CapabilityTier::SyntaxOnly);
+
+    // Verify symbol records exist with correct provenance.
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("laravel-repo", "app/Http/Controllers/UserController.php")
+        .expect("list symbols");
+    assert!(
+        symbol_ids.len() >= 4,
+        "expected at least 4 symbols, got {}",
+        symbol_ids.len()
+    );
+
+    // Find the UserController symbol and verify it.
+    let all_syms: Vec<_> = symbol_ids
+        .iter()
+        .filter_map(|id| db.symbols().get(id).ok().flatten())
+        .collect();
+
+    let controller = all_syms
+        .iter()
+        .find(|s| s.name == "UserController")
+        .expect("UserController symbol should exist");
+    assert_eq!(controller.kind, SymbolKind::Class);
+    assert!(controller.source_backend.contains("syntax-php"));
+    assert_eq!(
+        controller.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
+
+    // Verify a method has correct qualified name with namespace.
+    let index_method = all_syms
+        .iter()
+        .find(|s| s.name == "index")
+        .expect("index method should exist");
+    assert_eq!(index_method.kind, SymbolKind::Method);
+    assert!(
+        index_method
+            .qualified_name
+            .contains("UserController::index"),
+        "qualified_name should contain UserController::index, got: {}",
+        index_method.qualified_name
+    );
+}
+
+#[test]
+fn pipeline_php_laravel_model_end_to_end() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let models = repo_dir.path().join("app/Models");
+    std::fs::create_dir_all(&models).expect("create models dir");
+
+    std::fs::write(
+        models.join("Post.php"),
+        r#"<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+/**
+ * Eloquent model for the posts table.
+ */
+class Post extends Model
+{
+    const STATUS_DRAFT = 'draft';
+    const STATUS_PUBLISHED = 'published';
+
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class);
+    }
+
+    public function publish(): void
+    {
+        $this->status = self::STATUS_PUBLISHED;
+        $this->save();
+    }
+}
+"#,
+    )
+    .expect("write model");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_php();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "laravel-model-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+    assert!(result.file_errors.is_empty());
+
+    let file = db
+        .files()
+        .get("laravel-model-repo", "app/Models/Post.php")
+        .expect("query file")
+        .expect("Post.php file record");
+    assert_eq!(file.language, "php");
+    // Post class + 2 constants + 2 methods = 5 minimum
+    assert!(
+        file.symbol_count >= 5,
+        "expected at least 5 symbols, got {}",
+        file.symbol_count
+    );
+
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("laravel-model-repo", "app/Models/Post.php")
+        .expect("list symbols");
+    let all_syms: Vec<_> = symbol_ids
+        .iter()
+        .filter_map(|id| db.symbols().get(id).ok().flatten())
+        .collect();
+
+    // Verify class constants exist with qualified names.
+    let draft = all_syms
+        .iter()
+        .find(|s| s.name == "STATUS_DRAFT")
+        .expect("STATUS_DRAFT should exist");
+    assert_eq!(draft.kind, SymbolKind::Constant);
+    assert!(
+        draft.qualified_name.contains("Post::STATUS_DRAFT"),
+        "expected namespaced qualified name, got: {}",
+        draft.qualified_name
+    );
+
+    // Verify methods.
+    let comments = all_syms
+        .iter()
+        .find(|s| s.name == "comments")
+        .expect("comments method should exist");
+    assert_eq!(comments.kind, SymbolKind::Method);
+}
+
+#[test]
+fn pipeline_php_mixed_language_repo() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+
+    // PHP file
+    std::fs::write(
+        repo_dir.path().join("index.php"),
+        "<?php\nfunction main(): void {}\n",
+    )
+    .expect("write php");
+
+    // Rust file
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(src.join("lib.rs"), "pub fn greet() {}\n").expect("write rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_php();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "mixed-lang-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+
+    // Both PHP and Rust files should be parsed with symbols.
+    assert!(
+        result.metrics.files_parsed >= 2,
+        "expected both PHP and Rust parsed, got {}",
+        result.metrics.files_parsed
+    );
+
+    // Verify PHP file.
+    let php_file = db
+        .files()
+        .get("mixed-lang-repo", "index.php")
+        .expect("query php")
+        .expect("index.php record");
+    assert_eq!(php_file.language, "php");
+    assert!(php_file.symbol_count >= 1);
+    assert_eq!(
+        php_file.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
+
+    // Verify Rust file.
+    let rs_file = db
+        .files()
+        .get("mixed-lang-repo", "src/lib.rs")
+        .expect("query rs")
+        .expect("lib.rs record");
+    assert_eq!(rs_file.language, "rust");
+    assert!(rs_file.symbol_count >= 1);
+    assert_eq!(
+        rs_file.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
 }

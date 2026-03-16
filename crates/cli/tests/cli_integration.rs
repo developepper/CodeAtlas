@@ -1969,3 +1969,257 @@ fn mcp_bridge_stdout_is_protocol_only() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// PHP / Laravel integration tests
+// ---------------------------------------------------------------------------
+
+fn setup_php_test_repo() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    let controllers = dir.path().join("app/Http/Controllers");
+    std::fs::create_dir_all(&controllers).expect("create controllers dir");
+    std::fs::write(
+        controllers.join("UserController.php"),
+        r#"<?php
+
+namespace App\Http\Controllers;
+
+/**
+ * Handles user-related HTTP requests.
+ */
+class UserController extends Controller
+{
+    public function index(): JsonResponse
+    {
+        return response()->json([]);
+    }
+
+    public function show(int $id): JsonResponse
+    {
+        return response()->json(null);
+    }
+}
+"#,
+    )
+    .expect("write controller");
+
+    let models = dir.path().join("app/Models");
+    std::fs::create_dir_all(&models).expect("create models dir");
+    std::fs::write(
+        models.join("Post.php"),
+        r#"<?php
+
+namespace App\Models;
+
+class Post
+{
+    const STATUS_DRAFT = 'draft';
+
+    public function publish(): void
+    {
+    }
+}
+"#,
+    )
+    .expect("write model");
+
+    dir
+}
+
+fn indexed_php_test_repo() -> (TempDir, TempDir, String) {
+    let repo_dir = setup_php_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let index_output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&index_output.stdout);
+    let stderr = String::from_utf8_lossy(&index_output.stderr);
+    assert!(
+        index_output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let repo_id = repo_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    (repo_dir, db_dir, repo_id)
+}
+
+#[test]
+fn php_index_discovers_php_files_with_symbols() {
+    let repo_dir = setup_php_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("files_discovered:"),
+        "should report discovered files.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("symbols_extracted:"),
+        "should report extracted symbols.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("files_with_symbols:"),
+        "should report files with symbols.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn php_file_outline_shows_controller_symbols() {
+    let (_repo_dir, db_dir, repo_id) = indexed_php_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-outline",
+            "app/Http/Controllers/UserController.php",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-outline");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "file-outline should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("UserController"),
+        "should show UserController in outline.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("index"),
+        "should show index method in outline.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("show"),
+        "should show show method in outline.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn php_file_outline_shows_model_symbols() {
+    let (_repo_dir, db_dir, repo_id) = indexed_php_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-outline",
+            "app/Models/Post.php",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-outline");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "file-outline should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("Post"),
+        "should show Post class.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("STATUS_DRAFT"),
+        "should show class constant.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("publish"),
+        "should show publish method.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn php_search_symbols_finds_controller_class() {
+    let (_repo_dir, db_dir, repo_id) = indexed_php_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "UserController",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("UserController"),
+        "should find UserController.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn php_search_symbols_finds_method() {
+    let (_repo_dir, db_dir, repo_id) = indexed_php_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "publish",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("publish"),
+        "should find publish method.\nstdout: {stdout}"
+    );
+}

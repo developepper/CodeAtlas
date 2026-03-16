@@ -66,15 +66,53 @@ fn walk_node(
         false
     };
 
-    // Recurse into children.
+    // Recurse into children, tracking sticky scopes across siblings.
     let mut cursor = node.walk();
+    let mut sticky_pushed = false;
     if cursor.goto_first_child() {
         loop {
-            walk_node(cursor.node(), source, profile, symbols, scope_stack);
+            let child = cursor.node();
+
+            // Check for sticky scope (e.g. PHP statement-form namespace).
+            // A sticky scope applies to all subsequent siblings. When we
+            // encounter a new one, replace the previous sticky scope.
+            if let Some(sticky) = profile.find_sticky_scope(child.kind()) {
+                if let Some(name) = child
+                    .child_by_field_name(sticky.name_field)
+                    .and_then(|n| n.utf8_text(source).ok())
+                    .map(normalize_scope_separator)
+                {
+                    // Only treat as sticky when the node has no body
+                    // (statement form). Braced namespaces with a body are
+                    // handled as regular scopes via the child-scope push below.
+                    let has_body = child.child_by_field_name("body").is_some();
+                    if !has_body {
+                        if sticky_pushed {
+                            scope_stack.pop();
+                        }
+                        scope_stack.push(name);
+                        sticky_pushed = true;
+
+                        // Skip recursing into the namespace_definition itself
+                        // — it contains no extractable symbols.
+                        if !cursor.goto_next_sibling() {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            walk_node(child, source, profile, symbols, scope_stack);
             if !cursor.goto_next_sibling() {
                 break;
             }
         }
+    }
+
+    // Pop sticky scope if one was active at this level.
+    if sticky_pushed {
+        scope_stack.pop();
     }
 
     if pushed_scope {
@@ -87,6 +125,11 @@ fn is_method_context(node: &Node) -> bool {
     node.parent()
         .and_then(|p| p.parent())
         .is_some_and(|gp| matches!(gp.kind(), "impl_item" | "trait_item"))
+}
+
+/// Replaces language-specific namespace separators (e.g. PHP `\`) with `::`.
+fn normalize_scope_separator(raw: &str) -> String {
+    raw.replace('\\', "::")
 }
 
 fn build_qualified_name(scope_stack: &[String], name: &str) -> String {
@@ -108,10 +151,35 @@ pub fn node_to_span(node: &Node) -> SourceSpan {
 }
 
 /// Extracts the text of a named child field.
+///
+/// First tries `child_by_field_name` (tree-sitter field). If that returns
+/// nothing, falls back to finding the first child whose node *type* matches
+/// `field_name`. This fallback handles grammars like PHP where some names
+/// are positional children of type `name` rather than named fields.
 pub fn child_text(node: &Node, field_name: &str, source: &[u8]) -> Option<String> {
-    node.child_by_field_name(field_name)
+    // Primary: named field lookup.
+    if let Some(text) = node
+        .child_by_field_name(field_name)
         .and_then(|child| child.utf8_text(source).ok())
         .map(|s| s.to_string())
+    {
+        return Some(text);
+    }
+
+    // Fallback: first child whose node type matches.
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+            if child.kind() == field_name {
+                return child.utf8_text(source).ok().map(|s| s.to_string());
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+    None
 }
 
 /// Extracts a signature by taking text from the node start up to the body.
@@ -163,15 +231,14 @@ pub fn extract_docstring(node: &Node, source: &[u8]) -> Option<String> {
                     break;
                 }
             }
-            "block_comment" => {
+            // Rust: `block_comment`, PHP/others: `comment`
+            "block_comment" | "comment" => {
                 let text = sib.utf8_text(source).unwrap_or("");
                 if text.starts_with("/**") {
-                    let inner = text
-                        .strip_prefix("/**")
-                        .and_then(|s| s.strip_suffix("*/"))
-                        .unwrap_or(text)
-                        .trim();
-                    doc_lines.push(inner.to_string());
+                    let cleaned = clean_block_doc_comment(text);
+                    if !cleaned.is_empty() {
+                        doc_lines.push(cleaned);
+                    }
                 }
                 break;
             }
@@ -185,6 +252,42 @@ pub fn extract_docstring(node: &Node, source: &[u8]) -> Option<String> {
     }
     doc_lines.reverse();
     Some(doc_lines.join("\n"))
+}
+
+/// Cleans a `/** ... */` doc comment, stripping delimiters and leading `*`.
+fn clean_block_doc_comment(text: &str) -> String {
+    let inner = text
+        .strip_prefix("/**")
+        .and_then(|s| s.strip_suffix("*/"))
+        .unwrap_or(text);
+
+    // For multi-line PHPDoc/Javadoc, strip leading ` * ` from each line.
+    let lines: Vec<&str> = inner.lines().collect();
+    if lines.len() <= 1 {
+        return inner.trim().to_string();
+    }
+
+    let cleaned: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            let trimmed = line.trim();
+            trimmed
+                .strip_prefix("* ")
+                .or_else(|| trimmed.strip_prefix('*'))
+                .unwrap_or(trimmed)
+                .to_string()
+        })
+        .collect();
+
+    // Drop empty leading/trailing lines from the stripped block.
+    let start = cleaned.iter().position(|l| !l.is_empty()).unwrap_or(0);
+    let end = cleaned
+        .iter()
+        .rposition(|l| !l.is_empty())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+
+    cleaned[start..end].join("\n")
 }
 
 /// Extracts the scope name from a scope-creating node.

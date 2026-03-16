@@ -9,4 +9,5 @@ repository.workspace = true
 core-model.workspace = true
 thiserror = "2"
 tree-sitter.workspace = true
+tree-sitter-php.workspace = true
 tree-sitter-rust.workspace = true
