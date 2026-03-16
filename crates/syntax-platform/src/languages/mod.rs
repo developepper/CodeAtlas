@@ -1,3 +1,4 @@
+pub mod go;
 pub mod php;
 pub mod python;
 pub mod rust;
@@ -27,6 +28,16 @@ pub struct StickyScopeMapping {
     pub name_field: &'static str,
 }
 
+/// Describes how to extract the receiver type from a method declaration.
+///
+/// Go methods have a receiver parameter (`func (c *Config) GetName()`) that
+/// serves as the parent/container for qualified name construction. The method
+/// is a top-level declaration, not nested inside the struct.
+pub struct MethodReceiverMapping {
+    pub method_node_type: &'static str,
+    pub receiver_field: &'static str,
+}
+
 /// Language-specific configuration for tree-sitter symbol extraction.
 pub struct LanguageProfile {
     pub language_id: &'static str,
@@ -35,6 +46,8 @@ pub struct LanguageProfile {
     scopes: &'static [ScopeMapping],
     /// Scopes that persist across subsequent siblings (e.g. PHP namespaces).
     sticky_scopes: &'static [StickyScopeMapping],
+    /// Method receiver mappings (e.g. Go receiver parameters).
+    method_receivers: &'static [MethodReceiverMapping],
 }
 
 impl LanguageProfile {
@@ -53,11 +66,18 @@ impl LanguageProfile {
     pub fn find_sticky_scope(&self, node_type: &str) -> Option<&StickyScopeMapping> {
         self.sticky_scopes.iter().find(|s| s.node_type == node_type)
     }
+
+    pub fn find_method_receiver(&self, node_type: &str) -> Option<&MethodReceiverMapping> {
+        self.method_receivers
+            .iter()
+            .find(|m| m.method_node_type == node_type)
+    }
 }
 
 /// Returns the language profile for the given language ID, if supported.
 pub fn profile_for(language: &str) -> Option<&'static LanguageProfile> {
     match language {
+        "go" => Some(&go::GO_PROFILE),
         "php" => Some(&php::PHP_PROFILE),
         "python" => Some(&python::PYTHON_PROFILE),
         "rust" => Some(&rust::RUST_PROFILE),
@@ -67,5 +87,5 @@ pub fn profile_for(language: &str) -> Option<&'static LanguageProfile> {
 
 /// Returns the list of languages with syntax backends on this platform.
 pub fn supported_languages() -> &'static [&'static str] {
-    &["php", "python", "rust"]
+    &["go", "php", "python", "rust"]
 }

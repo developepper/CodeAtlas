@@ -87,4 +87,5 @@ pub static PHP_PROFILE: LanguageProfile = LanguageProfile {
     definitions: PHP_DEFINITIONS,
     scopes: PHP_SCOPES,
     sticky_scopes: PHP_STICKY_SCOPES,
+    method_receivers: &[],
 };

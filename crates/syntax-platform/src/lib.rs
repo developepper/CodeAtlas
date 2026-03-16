@@ -154,6 +154,88 @@ impl SyntaxBackend for RustSyntaxBackend {
 }
 
 // ---------------------------------------------------------------------------
+// GoSyntaxBackend
+// ---------------------------------------------------------------------------
+
+/// Tree-sitter-based syntax backend for Go.
+pub struct GoSyntaxBackend {
+    capability: SyntaxCapability,
+}
+
+impl GoSyntaxBackend {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            capability: SyntaxCapability {
+                supported_kinds: vec![
+                    SymbolKind::Function,
+                    SymbolKind::Method,
+                    SymbolKind::Type,
+                    SymbolKind::Constant,
+                ],
+                supports_containers: true,
+                supports_docs: true,
+            },
+        }
+    }
+
+    /// Returns the [`BackendId`] for this backend.
+    #[must_use]
+    pub fn backend_id() -> BackendId {
+        BackendId("syntax-go".to_string())
+    }
+}
+
+impl Default for GoSyntaxBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SyntaxBackend for GoSyntaxBackend {
+    fn language(&self) -> &str {
+        "go"
+    }
+
+    fn capability(&self) -> &SyntaxCapability {
+        &self.capability
+    }
+
+    fn extract_symbols(&self, file: &PreparedFile) -> Result<SyntaxExtraction, SyntaxError> {
+        if file.language != "go" {
+            return Err(SyntaxError::Unsupported {
+                language: file.language.clone(),
+            });
+        }
+
+        let profile = &languages::go::GO_PROFILE;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&(profile.ts_language)())
+            .map_err(|err| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: format!("failed to set language: {err}"),
+            })?;
+
+        let tree = parser
+            .parse(&file.content, None)
+            .ok_or_else(|| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: "tree-sitter parse returned no tree".to_string(),
+            })?;
+
+        let symbols = extraction::extract_symbols(tree.root_node(), &file.content, profile);
+
+        Ok(SyntaxExtraction {
+            language: "go".to_string(),
+            symbols,
+            backend_id: Self::backend_id(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PhpSyntaxBackend
 // ---------------------------------------------------------------------------
 
@@ -1471,5 +1553,323 @@ async def async_function() -> None:
         let method = find_symbol(&output1.symbols, "method");
         assert_eq!(method.qualified_name, "Base::method");
         assert!(method.docstring.is_some());
+    }
+
+    // ===================================================================
+    // Go tests
+    // ===================================================================
+
+    fn extract_go(source: &str) -> SyntaxExtraction {
+        let backend = GoSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("main.go"),
+            absolute_path: PathBuf::from("/tmp/test/main.go"),
+            language: "go".to_string(),
+            content: source.as_bytes().to_vec(),
+        };
+        backend.extract_symbols(&file).expect("extraction failed")
+    }
+
+    // -- Go backend identity --
+
+    #[test]
+    fn go_backend_id_follows_naming_convention() {
+        let backend = GoSyntaxBackend::new();
+        assert_eq!(backend.language(), "go");
+        assert_eq!(GoSyntaxBackend::backend_id().0, "syntax-go");
+    }
+
+    #[test]
+    fn go_capability_reports_expected_kinds() {
+        let backend = GoSyntaxBackend::new();
+        let cap = backend.capability();
+        assert!(cap.supported_kinds.contains(&SymbolKind::Function));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Method));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Type));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Constant));
+        assert!(cap.supports_containers);
+        assert!(cap.supports_docs);
+    }
+
+    #[test]
+    fn go_unsupported_language_returns_error() {
+        let backend = GoSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("main.rs"),
+            absolute_path: PathBuf::from("/tmp/main.rs"),
+            language: "rust".to_string(),
+            content: b"fn main() {}".to_vec(),
+        };
+        let err = backend.extract_symbols(&file).expect_err("wrong language");
+        assert!(err.to_string().contains("unsupported language"));
+    }
+
+    // -- Go extraction output --
+
+    #[test]
+    fn go_extraction_carries_backend_id() {
+        let result = extract_go("package main\nfunc hello() {}\n");
+        assert_eq!(result.backend_id.0, "syntax-go");
+        assert_eq!(result.language, "go");
+    }
+
+    // -- Go function extraction --
+
+    #[test]
+    fn go_extracts_free_function() {
+        let result = extract_go("package main\nfunc hello() {}\n");
+        let sym = find_symbol(&result.symbols, "hello");
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert_eq!(sym.qualified_name, "hello");
+        assert!(sym.parent_qualified_name.is_none());
+    }
+
+    #[test]
+    fn go_extracts_function_signature() {
+        let result =
+            extract_go("package main\nfunc process(x int, y string) bool {\n    return true\n}\n");
+        let sym = find_symbol(&result.symbols, "process");
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert!(sym.signature.contains("func process"));
+        assert!(sym.signature.contains("x int"));
+    }
+
+    // -- Go method extraction --
+
+    #[test]
+    fn go_extracts_pointer_receiver_method() {
+        let source = "package main\ntype Config struct{}\nfunc (c *Config) GetName() string {\n    return c.Name\n}\n";
+        let result = extract_go(source);
+        let sym = find_symbol(&result.symbols, "GetName");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "Config::GetName");
+        assert_eq!(sym.parent_qualified_name.as_deref(), Some("Config"));
+    }
+
+    #[test]
+    fn go_extracts_value_receiver_method() {
+        let source = "package main\ntype Config struct{}\nfunc (c Config) String() string {\n    return c.Name\n}\n";
+        let result = extract_go(source);
+        let sym = find_symbol(&result.symbols, "String");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "Config::String");
+        assert_eq!(sym.parent_qualified_name.as_deref(), Some("Config"));
+    }
+
+    // -- Go type extraction --
+
+    #[test]
+    fn go_extracts_struct_type() {
+        let result = extract_go("package main\ntype Config struct {\n    Name string\n}\n");
+        let sym = find_symbol(&result.symbols, "Config");
+        assert_eq!(sym.kind, SymbolKind::Type);
+        assert_eq!(sym.qualified_name, "Config");
+    }
+
+    #[test]
+    fn go_extracts_interface_type() {
+        let result = extract_go(
+            "package main\ntype Handler interface {\n    Handle(input string) error\n}\n",
+        );
+        let sym = find_symbol(&result.symbols, "Handler");
+        assert_eq!(sym.kind, SymbolKind::Type);
+    }
+
+    #[test]
+    fn go_extracts_type_alias() {
+        let result = extract_go("package main\ntype Color int\n");
+        let sym = find_symbol(&result.symbols, "Color");
+        assert_eq!(sym.kind, SymbolKind::Type);
+    }
+
+    // -- Go constant extraction --
+
+    #[test]
+    fn go_extracts_single_constant() {
+        let result = extract_go("package main\nconst MaxSize = 100\n");
+        let sym = find_symbol(&result.symbols, "MaxSize");
+        assert_eq!(sym.kind, SymbolKind::Constant);
+    }
+
+    #[test]
+    fn go_extracts_grouped_constants() {
+        let result = extract_go("package main\nconst (\n    Red = iota\n    Green\n    Blue\n)\n");
+        let red = find_symbol(&result.symbols, "Red");
+        assert_eq!(red.kind, SymbolKind::Constant);
+        let green = find_symbol(&result.symbols, "Green");
+        assert_eq!(green.kind, SymbolKind::Constant);
+        let blue = find_symbol(&result.symbols, "Blue");
+        assert_eq!(blue.kind, SymbolKind::Constant);
+    }
+
+    // -- Go docstrings --
+
+    #[test]
+    fn go_extracts_doc_comment() {
+        let source =
+            "package main\n// NewConfig creates a new Config.\nfunc NewConfig() *Config {\n    return nil\n}\n";
+        let result = extract_go(source);
+        let sym = find_symbol(&result.symbols, "NewConfig");
+        assert!(sym.docstring.is_some(), "expected Go doc comment");
+        assert!(
+            sym.docstring
+                .as_deref()
+                .unwrap()
+                .contains("NewConfig creates"),
+            "unexpected doc: {:?}",
+            sym.docstring
+        );
+    }
+
+    #[test]
+    fn go_extracts_multiline_doc_comment() {
+        let source = "package main\n// GetName returns the name.\n// It is safe to call concurrently.\nfunc GetName() string {\n    return \"\"\n}\n";
+        let result = extract_go(source);
+        let sym = find_symbol(&result.symbols, "GetName");
+        assert!(sym.docstring.is_some());
+        let doc = sym.docstring.as_deref().unwrap();
+        assert!(doc.contains("GetName returns"));
+        assert!(doc.contains("safe to call"));
+    }
+
+    #[test]
+    fn go_no_docstring_when_absent() {
+        let result = extract_go("package main\nfunc bare() {}\n");
+        let sym = find_symbol(&result.symbols, "bare");
+        assert!(sym.docstring.is_none());
+    }
+
+    // -- Go edge cases --
+
+    #[test]
+    fn go_empty_file_produces_no_symbols() {
+        let result = extract_go("package main\n");
+        assert!(result.symbols.is_empty());
+    }
+
+    // -- Go representative fixture --
+
+    #[test]
+    fn go_http_handler_fixture() {
+        let source = r#"package handlers
+
+import "net/http"
+
+// Server holds HTTP server configuration.
+type Server struct {
+    Addr string
+    Port int
+}
+
+// Handler defines the HTTP handler interface.
+type Handler interface {
+    ServeHTTP(w http.ResponseWriter, r *http.Request)
+}
+
+// NewServer creates a new server.
+func NewServer(addr string, port int) *Server {
+    return &Server{Addr: addr, Port: port}
+}
+
+// Start starts the server.
+func (s *Server) Start() error {
+    return nil
+}
+
+// Stop gracefully shuts down the server.
+func (s *Server) Stop() error {
+    return nil
+}
+
+const DefaultPort = 8080
+"#;
+        let result = extract_go(source);
+
+        let server = find_symbol(&result.symbols, "Server");
+        assert_eq!(server.kind, SymbolKind::Type);
+        assert!(server.docstring.is_some());
+
+        let handler = find_symbol(&result.symbols, "Handler");
+        assert_eq!(handler.kind, SymbolKind::Type);
+        assert!(handler.docstring.is_some());
+
+        let new_server = find_symbol(&result.symbols, "NewServer");
+        assert_eq!(new_server.kind, SymbolKind::Function);
+        assert!(new_server.docstring.is_some());
+
+        let start = find_symbol(&result.symbols, "Start");
+        assert_eq!(start.kind, SymbolKind::Method);
+        assert_eq!(start.qualified_name, "Server::Start");
+        assert!(start.docstring.is_some());
+
+        let stop = find_symbol(&result.symbols, "Stop");
+        assert_eq!(stop.kind, SymbolKind::Method);
+        assert_eq!(stop.qualified_name, "Server::Stop");
+
+        let port = find_symbol(&result.symbols, "DefaultPort");
+        assert_eq!(port.kind, SymbolKind::Constant);
+    }
+
+    #[test]
+    fn go_comprehensive_extraction_is_deterministic() {
+        let source = r#"package main
+
+// Config holds configuration.
+type Config struct {
+    Name string
+}
+
+type Handler interface {
+    Handle() error
+}
+
+type Status int
+
+const MaxRetries = 3
+
+func NewConfig(name string) *Config {
+    return &Config{Name: name}
+}
+
+func (c *Config) GetName() string {
+    return c.Name
+}
+
+func helper(x int) int {
+    return x + 1
+}
+"#;
+
+        let output1 = extract_go(source);
+        let output2 = extract_go(source);
+
+        assert_eq!(output1.symbols.len(), output2.symbols.len());
+        for (a, b) in output1.symbols.iter().zip(output2.symbols.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.qualified_name, b.qualified_name);
+            assert_eq!(a.span, b.span);
+        }
+
+        let names: Vec<(&str, SymbolKind)> = output1
+            .symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind))
+            .collect();
+
+        assert!(names.contains(&("Config", SymbolKind::Type)));
+        assert!(names.contains(&("Handler", SymbolKind::Type)));
+        assert!(names.contains(&("Status", SymbolKind::Type)));
+        assert!(names.contains(&("MaxRetries", SymbolKind::Constant)));
+        assert!(names.contains(&("NewConfig", SymbolKind::Function)));
+        assert!(names.contains(&("GetName", SymbolKind::Method)));
+        assert!(names.contains(&("helper", SymbolKind::Function)));
+
+        let get_name = find_symbol(&output1.symbols, "GetName");
+        assert_eq!(get_name.qualified_name, "Config::GetName");
+        assert_eq!(get_name.parent_qualified_name.as_deref(), Some("Config"));
+
+        let config = find_symbol(&output1.symbols, "Config");
+        assert!(config.docstring.is_some());
     }
 }

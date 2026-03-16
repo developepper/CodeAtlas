@@ -35,11 +35,22 @@ fn walk_node(
                 mapping.kind
             };
 
-            let qualified_name = build_qualified_name(scope_stack, &name);
-            let parent = if scope_stack.is_empty() {
-                None
+            // Check for receiver-based parent (e.g. Go methods).
+            let receiver_type = profile
+                .find_method_receiver(node_type)
+                .and_then(|rm| extract_receiver_type(&node, rm.receiver_field, source));
+
+            let (qualified_name, parent) = if let Some(ref recv) = receiver_type {
+                let qn = format!("{recv}::{name}");
+                (qn, Some(recv.clone()))
             } else {
-                Some(scope_stack.join("::"))
+                let qn = build_qualified_name(scope_stack, &name);
+                let p = if scope_stack.is_empty() {
+                    None
+                } else {
+                    Some(scope_stack.join("::"))
+                };
+                (qn, p)
             };
 
             symbols.push(SyntaxSymbol {
@@ -149,6 +160,34 @@ fn is_method_context(node: &Node) -> bool {
     false
 }
 
+/// Extracts the receiver type name from a Go-style method receiver parameter.
+///
+/// Given a `method_declaration` node with a `receiver` field like
+/// `(c *Config)` or `(c Config)`, returns `"Config"`.
+fn extract_receiver_type(node: &Node, receiver_field: &str, source: &[u8]) -> Option<String> {
+    let receiver = node.child_by_field_name(receiver_field)?;
+
+    // The receiver is a `parameter_list` containing one `parameter_declaration`.
+    let param = receiver.named_child(0)?;
+    if param.kind() != "parameter_declaration" {
+        return None;
+    }
+
+    // The type field may be `pointer_type` (e.g. `*Config`) or a direct type
+    // identifier (e.g. `Config`).
+    let type_node = param.child_by_field_name("type")?;
+    match type_node.kind() {
+        "pointer_type" => {
+            // `*Config` — the inner type_identifier is the first named child.
+            type_node
+                .named_child(0)
+                .and_then(|n| n.utf8_text(source).ok())
+                .map(|s| s.to_string())
+        }
+        _ => type_node.utf8_text(source).ok().map(|s| s.to_string()),
+    }
+}
+
 /// Replaces language-specific namespace separators (e.g. PHP `\`) with `::`.
 fn normalize_scope_separator(raw: &str) -> String {
     raw.replace('\\', "::")
@@ -239,7 +278,25 @@ fn find_body_start(node: &Node) -> Option<usize> {
 }
 
 /// Extracts doc comments preceding a definition node.
+///
+/// Checks the node's own preceding siblings first. If none found, also checks
+/// the parent node's preceding siblings. This handles Go's `type_spec` inside
+/// `type_declaration` where the doc comment precedes the outer declaration.
 pub fn extract_docstring(node: &Node, source: &[u8]) -> Option<String> {
+    if let Some(doc) = extract_preceding_doc(node, source) {
+        return Some(doc);
+    }
+    // Fallback: check parent's preceding siblings (e.g. type_spec → type_declaration).
+    if let Some(parent) = node.parent() {
+        if let Some(doc) = extract_preceding_doc(&parent, source) {
+            return Some(doc);
+        }
+    }
+    // Fallback: Python-style body docstrings.
+    extract_body_docstring(node, source)
+}
+
+fn extract_preceding_doc(node: &Node, source: &[u8]) -> Option<String> {
     let mut doc_lines = Vec::new();
     let mut sibling = node.prev_sibling();
 
@@ -247,7 +304,17 @@ pub fn extract_docstring(node: &Node, source: &[u8]) -> Option<String> {
         match sib.kind() {
             "line_comment" => {
                 let text = sib.utf8_text(source).unwrap_or("").trim();
+                // Rust `///` doc comments.
                 if let Some(doc) = text.strip_prefix("///") {
+                    doc_lines.push(doc.strip_prefix(' ').unwrap_or(doc).to_string());
+                } else {
+                    break;
+                }
+            }
+            // Go/C-style `// comment` (tree-sitter uses `comment` node type).
+            "comment" if !sib.utf8_text(source).unwrap_or("").starts_with("/*") => {
+                let text = sib.utf8_text(source).unwrap_or("").trim();
+                if let Some(doc) = text.strip_prefix("//") {
                     doc_lines.push(doc.strip_prefix(' ').unwrap_or(doc).to_string());
                 } else {
                     break;
@@ -270,8 +337,7 @@ pub fn extract_docstring(node: &Node, source: &[u8]) -> Option<String> {
     }
 
     if doc_lines.is_empty() {
-        // Fallback: Python-style body docstrings (first string literal in body).
-        return extract_body_docstring(node, source);
+        return None;
     }
     doc_lines.reverse();
     Some(doc_lines.join("\n"))

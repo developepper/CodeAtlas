@@ -2409,3 +2409,189 @@ fn python_search_symbols_finds_method() {
         "should find get_name method.\nstdout: {stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Go integration tests
+// ---------------------------------------------------------------------------
+
+fn setup_go_test_repo() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    std::fs::write(
+        dir.path().join("main.go"),
+        r#"package main
+
+// Server holds HTTP configuration.
+type Server struct {
+    Addr string
+}
+
+// NewServer creates a new server.
+func NewServer(addr string) *Server {
+    return &Server{Addr: addr}
+}
+
+// Start starts the server.
+func (s *Server) Start() error {
+    return nil
+}
+
+const DefaultPort = 8080
+"#,
+    )
+    .expect("write main.go");
+
+    dir
+}
+
+fn indexed_go_test_repo() -> (TempDir, TempDir, String) {
+    let repo_dir = setup_go_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let index_output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&index_output.stdout);
+    let stderr = String::from_utf8_lossy(&index_output.stderr);
+    assert!(
+        index_output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let repo_id = repo_dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    (repo_dir, db_dir, repo_id)
+}
+
+#[test]
+fn go_index_discovers_files_with_symbols() {
+    let repo_dir = setup_go_test_repo();
+    let db_dir = TempDir::new().expect("db temp dir");
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args(["index", repo_dir.path().to_str().unwrap(), "--db"])
+        .arg(&db_path)
+        .output()
+        .expect("index");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "index should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(stdout.contains("symbols_extracted:"));
+}
+
+#[test]
+fn go_file_outline_shows_symbols() {
+    let (_repo_dir, db_dir, repo_id) = indexed_go_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "file-outline",
+            "main.go",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("file-outline");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "file-outline should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("Server"),
+        "should show Server type.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("NewServer"),
+        "should show NewServer function.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Start"),
+        "should show Start method.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("DefaultPort"),
+        "should show DefaultPort constant.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn go_search_symbols_finds_type() {
+    let (_repo_dir, db_dir, repo_id) = indexed_go_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "Server",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("Server"),
+        "should find Server type.\nstdout: {stdout}"
+    );
+}
+
+#[test]
+fn go_search_symbols_finds_method() {
+    let (_repo_dir, db_dir, repo_id) = indexed_go_test_repo();
+    let db_path = db_dir.path().join("index.db");
+
+    let output = Command::new(codeatlas_bin())
+        .args([
+            "search-symbols",
+            "Start",
+            "--db",
+            db_path.to_str().unwrap(),
+            "--repo",
+            &repo_id,
+        ])
+        .output()
+        .expect("search-symbols");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "search should succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("Start"),
+        "should find Start method.\nstdout: {stdout}"
+    );
+}

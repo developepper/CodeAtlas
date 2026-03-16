@@ -70,4 +70,5 @@ pub static RUST_PROFILE: LanguageProfile = LanguageProfile {
     definitions: RUST_DEFINITIONS,
     scopes: RUST_SCOPES,
     sticky_scopes: &[],
+    method_receivers: &[],
 };

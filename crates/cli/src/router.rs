@@ -16,7 +16,7 @@ use semantic_typescript::adapter::TypeScriptSemanticAdapter;
 use semantic_typescript::config::TsServerConfig;
 use semantic_typescript::process::TsServerProcess;
 use semantic_typescript::runtime::SemanticRuntime;
-use syntax_platform::{PhpSyntaxBackend, PythonSyntaxBackend, RustSyntaxBackend};
+use syntax_platform::{GoSyntaxBackend, PhpSyntaxBackend, PythonSyntaxBackend, RustSyntaxBackend};
 use tracing::{debug, info, warn};
 
 /// Builds the production backend registry for the given repository root.
@@ -33,6 +33,9 @@ pub fn build_router(source_root: &Path) -> DefaultBackendRegistry {
     // Register syntax backends.
     let rust_id = RustSyntaxBackend::backend_id();
     registry.register_syntax(rust_id, Box::new(RustSyntaxBackend::new()));
+
+    let go_id = GoSyntaxBackend::backend_id();
+    registry.register_syntax(go_id, Box::new(GoSyntaxBackend::new()));
 
     let php_id = PhpSyntaxBackend::backend_id();
     registry.register_syntax(php_id, Box::new(PhpSyntaxBackend::new()));
