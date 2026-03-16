@@ -24,12 +24,12 @@ Source: `docs/specifications/rust-code-intelligence-platform-spec.md`
 crates/
   core-model/               Canonical schemas (SymbolRecord, FileRecord, RepoRecord, SymbolKind)
   repo-walker/              Repository traversal, ignore rules, language detection, security filters
-  adapter-api/              LanguageAdapter trait, AdapterRouter, capability model, contract tests
-  adapter-syntax-treesitter/ Tree-sitter based syntax extraction (Rust support)
-  adapter-semantic-typescript/ TypeScript semantic extraction via tsserver
-  adapter-semantic-kotlin/  Kotlin semantic extraction via JVM analysis bridge
+  syntax-platform/          Tree-sitter grammar registry, SyntaxBackend trait, language modules
+  semantic-api/             SemanticBackend trait and shared semantic types
+  adapter-semantic-typescript/ TypeScript semantic extraction via tsserver (package: semantic-typescript)
+  adapter-semantic-kotlin/  Kotlin semantic extraction via JVM analysis bridge (package: semantic-kotlin)
   store/                    MetadataStore (SQLite), BlobStore (content-addressed filesystem)
-  indexer/                  Pipeline orchestration: discovery → parse → enrich → persist
+  indexer/                  Pipeline orchestration: discovery → extract → enrich → persist
   query-engine/             Ranked symbol/text retrieval and structure queries
   server-mcp/               MCP tool registry and response/error contracts
   cli/                      Local command surface for indexing and query workflows

@@ -1,46 +1,53 @@
-use core_model::QualityLevel;
-
 use std::cell::RefCell;
 
-use adapter_api::{
-    AdapterCapabilities, AdapterError, AdapterOutput, IndexContext, LanguageAdapter, SourceFile,
-};
+use core_model::BackendId;
+use semantic_api::{SemanticBackend, SemanticCapability, SemanticError, SemanticExtraction};
+use syntax_platform::{PreparedFile, SyntaxMergeBaseline};
 use tracing::warn;
 
 use crate::error::KotlinAnalysisError;
 use crate::mapping::{map_kt_navtree_to_symbols, KtNavTreeItem};
 use crate::runtime::KotlinRuntime;
 
-const ADAPTER_ID: &str = "semantic-kotlin-v1";
 const LANGUAGE: &str = "kotlin";
 
-/// A semantic adapter for Kotlin that uses a JVM analysis bridge to
+/// A semantic backend for Kotlin that uses a JVM analysis bridge to
 /// extract symbols with high-confidence, type-aware metadata.
 ///
-/// The adapter communicates with a Kotlin analysis bridge process
+/// The backend communicates with a Kotlin analysis bridge process
 /// through the [`KotlinRuntime`] trait, enabling test doubles without
 /// real JVM processes.
 pub struct KotlinSemanticAdapter<R: KotlinRuntime> {
     runtime: RefCell<R>,
-    capabilities: AdapterCapabilities,
+    capability: SemanticCapability,
 }
 
 impl<R: KotlinRuntime> KotlinSemanticAdapter<R> {
     /// Creates a new Kotlin semantic adapter wrapping the given runtime.
     ///
-    /// The runtime must be started before calling `index_file`. The adapter
+    /// The runtime must be started before calling `enrich_symbols`. The adapter
     /// does not manage the runtime lifecycle — callers are responsible for
     /// starting and stopping the runtime.
     pub fn new(runtime: R) -> Self {
         Self {
             runtime: RefCell::new(runtime),
-            capabilities: AdapterCapabilities::semantic_baseline(),
+            capability: SemanticCapability {
+                supports_type_refs: true,
+                supports_call_refs: true,
+                default_confidence: 0.9,
+            },
         }
+    }
+
+    /// Returns the [`BackendId`] for this backend.
+    #[must_use]
+    pub fn backend_id() -> BackendId {
+        BackendId("semantic-kotlin".to_string())
     }
 
     /// Sends an `analyze` request to the bridge for the given file and
     /// parses the response into `KtNavTreeItem`s.
-    fn request_analysis(&self, file: &SourceFile) -> Result<Vec<KtNavTreeItem>, AdapterError> {
+    fn request_analysis(&self, file: &PreparedFile) -> Result<Vec<KtNavTreeItem>, SemanticError> {
         let content = String::from_utf8_lossy(&file.content).to_string();
         let mut rt = self.runtime.borrow_mut();
 
@@ -53,10 +60,10 @@ impl<R: KotlinRuntime> KotlinSemanticAdapter<R> {
             .send_request("analyze", Some(analyze_args))
             .map_err(|e| {
                 warn!(file = %file.relative_path.display(), error = %e, "kotlin analysis failed");
-                kt_error_to_adapter_error(e, &file.relative_path)
+                kt_error_to_semantic_error(e, &file.relative_path)
             })?;
 
-        let body = response.body.ok_or_else(|| AdapterError::Parse {
+        let body = response.body.ok_or_else(|| SemanticError::Analysis {
             path: file.relative_path.clone(),
             reason: "analyze response has no body".to_string(),
         })?;
@@ -65,52 +72,56 @@ impl<R: KotlinRuntime> KotlinSemanticAdapter<R> {
     }
 }
 
-impl<R: KotlinRuntime> LanguageAdapter for KotlinSemanticAdapter<R> {
-    fn adapter_id(&self) -> &str {
-        ADAPTER_ID
-    }
+// SAFETY: RefCell<R> prevents Sync, but SemanticBackend requires Send + Sync.
+// The Kotlin bridge process is inherently single-threaded; callers must ensure
+// exclusive access externally (the pipeline already does this).
+unsafe impl<R: KotlinRuntime + Send> Send for KotlinSemanticAdapter<R> {}
+unsafe impl<R: KotlinRuntime + Send> Sync for KotlinSemanticAdapter<R> {}
 
+impl<R: KotlinRuntime + Send> SemanticBackend for KotlinSemanticAdapter<R> {
     fn language(&self) -> &str {
         LANGUAGE
     }
 
-    fn capabilities(&self) -> &AdapterCapabilities {
-        &self.capabilities
+    fn capability(&self) -> &SemanticCapability {
+        &self.capability
     }
 
-    fn index_file(
+    fn enrich_symbols(
         &self,
-        _ctx: &IndexContext,
-        file: &SourceFile,
-    ) -> Result<AdapterOutput, AdapterError> {
+        file: &PreparedFile,
+        _syntax_baseline: Option<&SyntaxMergeBaseline>,
+    ) -> Result<SemanticExtraction, SemanticError> {
         if file.language != LANGUAGE {
-            return Err(AdapterError::Unsupported {
+            return Err(SemanticError::Unsupported {
                 language: file.language.clone(),
             });
         }
 
         if file.content.is_empty() {
-            return Ok(AdapterOutput {
+            return Ok(SemanticExtraction {
+                language: LANGUAGE.to_string(),
                 symbols: vec![],
-                source_adapter: ADAPTER_ID.to_string(),
-                quality_level: QualityLevel::Semantic,
+                backend_id: Self::backend_id(),
+                default_confidence: self.capability.default_confidence,
             });
         }
 
         let navtree_items = self.request_analysis(file)?;
         let mut symbols = map_kt_navtree_to_symbols(&navtree_items);
 
-        let default_confidence = self.capabilities.default_confidence;
+        let default_confidence = self.capability.default_confidence;
         for sym in &mut symbols {
             if sym.confidence_score.is_none() {
                 sym.confidence_score = Some(default_confidence);
             }
         }
 
-        Ok(AdapterOutput {
+        Ok(SemanticExtraction {
+            language: LANGUAGE.to_string(),
             symbols,
-            source_adapter: ADAPTER_ID.to_string(),
-            quality_level: QualityLevel::Semantic,
+            backend_id: Self::backend_id(),
+            default_confidence: self.capability.default_confidence,
         })
     }
 }
@@ -119,7 +130,7 @@ impl<R: KotlinRuntime> LanguageAdapter for KotlinSemanticAdapter<R> {
 fn parse_analysis_body(
     body: &serde_json::Value,
     path: &std::path::Path,
-) -> Result<Vec<KtNavTreeItem>, AdapterError> {
+) -> Result<Vec<KtNavTreeItem>, SemanticError> {
     // Try parsing as a direct array of items.
     if let Ok(items) = serde_json::from_value::<Vec<KtNavTreeItem>>(body.clone()) {
         return Ok(items);
@@ -130,24 +141,24 @@ fn parse_analysis_body(
         return Ok(root.child_items);
     }
 
-    Err(AdapterError::Parse {
+    Err(SemanticError::Analysis {
         path: path.to_path_buf(),
         reason: "failed to parse analysis response body".to_string(),
     })
 }
 
-/// Converts a `KotlinAnalysisError` into an `AdapterError`.
-fn kt_error_to_adapter_error(error: KotlinAnalysisError, path: &std::path::Path) -> AdapterError {
+/// Converts a `KotlinAnalysisError` into a `SemanticError`.
+fn kt_error_to_semantic_error(error: KotlinAnalysisError, path: &std::path::Path) -> SemanticError {
     match error {
-        KotlinAnalysisError::Timeout { operation } => AdapterError::Parse {
+        KotlinAnalysisError::Timeout { operation } => SemanticError::Analysis {
             path: path.to_path_buf(),
             reason: format!("kotlin analysis bridge timed out: {operation}"),
         },
-        KotlinAnalysisError::Io { source } => AdapterError::Io {
-            path: Some(path.to_path_buf()),
-            source,
+        KotlinAnalysisError::Io { .. } => SemanticError::Analysis {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
         },
-        other => AdapterError::Parse {
+        other => SemanticError::Analysis {
             path: path.to_path_buf(),
             reason: other.to_string(),
         },
@@ -241,15 +252,8 @@ mod tests {
         }
     }
 
-    fn make_context() -> IndexContext {
-        IndexContext {
-            repo_id: "test-repo".to_string(),
-            source_root: PathBuf::from("/tmp/test-repo"),
-        }
-    }
-
-    fn make_kt_file(content: &str) -> SourceFile {
-        SourceFile {
+    fn make_kt_file(content: &str) -> PreparedFile {
+        PreparedFile {
             relative_path: PathBuf::from("src/Main.kt"),
             absolute_path: PathBuf::from("/tmp/test-repo/src/Main.kt"),
             content: content.as_bytes().to_vec(),
@@ -260,19 +264,21 @@ mod tests {
     // -- Identity and capabilities --
 
     #[test]
-    fn adapter_id_follows_naming_convention() {
+    fn backend_id_follows_naming_convention() {
         let rt = MockRuntime::new(serde_json::json!([]));
         let adapter = KotlinSemanticAdapter::new(rt);
-        assert_eq!(adapter.adapter_id(), "semantic-kotlin-v1");
         assert_eq!(adapter.language(), "kotlin");
+        assert_eq!(
+            KotlinSemanticAdapter::<MockRuntime>::backend_id().0,
+            "semantic-kotlin"
+        );
     }
 
     #[test]
     fn capabilities_are_semantic_level() {
         let rt = MockRuntime::new(serde_json::json!([]));
         let adapter = KotlinSemanticAdapter::new(rt);
-        let caps = adapter.capabilities();
-        assert_eq!(caps.quality_level, QualityLevel::Semantic);
+        let caps = adapter.capability();
         assert!((caps.default_confidence - 0.9).abs() < f32::EPSILON);
         assert!(caps.supports_type_refs);
         assert!(caps.supports_call_refs);
@@ -284,12 +290,13 @@ mod tests {
     fn rejects_unsupported_language() {
         let rt = MockRuntime::new(serde_json::json!([]));
         let adapter = KotlinSemanticAdapter::new(rt);
-        let ctx = make_context();
-        let file = SourceFile {
+        let file = PreparedFile {
             language: "python".to_string(),
             ..make_kt_file("x = 1")
         };
-        let err = adapter.index_file(&ctx, &file).expect_err("should reject");
+        let err = adapter
+            .enrich_symbols(&file, None)
+            .expect_err("should reject");
         assert!(err.to_string().contains("unsupported language"));
     }
 
@@ -299,12 +306,10 @@ mod tests {
     fn empty_file_produces_no_symbols() {
         let rt = MockRuntime::new(serde_json::json!([]));
         let adapter = KotlinSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_kt_file("");
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
         assert!(output.symbols.is_empty());
-        assert_eq!(output.source_adapter, "semantic-kotlin-v1");
-        assert_eq!(output.quality_level, QualityLevel::Semantic);
+        assert_eq!(output.backend_id.0, "semantic-kotlin");
     }
 
     // -- Function extraction --
@@ -328,9 +333,8 @@ mod tests {
         let source = "fun greet(name: String): String {\n    return \"Hello, $name\"\n}";
         let rt = MockRuntime::new(body);
         let adapter = KotlinSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_kt_file(source);
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
         assert_eq!(output.symbols.len(), 1);
         let sym = &output.symbols[0];
@@ -381,9 +385,8 @@ mod tests {
         let source = "class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n\n    fun subtract(a: Int, b: Int): Int = a - b\n}\n";
         let rt = MockRuntime::new(body);
         let adapter = KotlinSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_kt_file(source);
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
         assert_eq!(output.symbols.len(), 3);
         assert_eq!(output.symbols[0].name, "Calculator");
@@ -416,12 +419,10 @@ mod tests {
         ]);
         let rt = MockRuntime::new(body);
         let adapter = KotlinSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_kt_file("fun hello() {}");
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
-        assert_eq!(output.source_adapter, "semantic-kotlin-v1");
-        assert_eq!(output.quality_level, QualityLevel::Semantic);
+        assert_eq!(output.backend_id.0, "semantic-kotlin");
     }
 
     // -- Confidence resolution --
@@ -453,9 +454,8 @@ mod tests {
         let source = "fun a() {}\nclass B {}";
         let rt = MockRuntime::new(body);
         let adapter = KotlinSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_kt_file(source);
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
         for sym in &output.symbols {
             let score = sym
@@ -468,15 +468,17 @@ mod tests {
     // -- Error handling --
 
     #[test]
-    fn analysis_failure_returns_parse_error() {
+    fn analysis_failure_returns_error() {
         let rt = MockRuntime::failing();
         let adapter = KotlinSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_kt_file("fun broken() {}");
         let err = adapter
-            .index_file(&ctx, &file)
+            .enrich_symbols(&file, None)
             .expect_err("should fail on analysis");
-        assert!(err.to_string().contains("protocol error") || err.to_string().contains("parse"));
+        assert!(
+            err.to_string().contains("protocol error")
+                || err.to_string().contains("semantic analysis failed")
+        );
     }
 
     // -- Determinism --
@@ -510,9 +512,8 @@ mod tests {
         let run = |body: &serde_json::Value| {
             let rt = MockRuntime::new(body.clone());
             let adapter = KotlinSemanticAdapter::new(rt);
-            let ctx = make_context();
             let file = make_kt_file(source);
-            adapter.index_file(&ctx, &file).unwrap()
+            adapter.enrich_symbols(&file, None).unwrap()
         };
 
         let out1 = run(&body);

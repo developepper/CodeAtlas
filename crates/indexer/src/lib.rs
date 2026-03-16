@@ -2,28 +2,41 @@
 //!
 //! Orchestrates the indexing pipeline stages:
 //! 1. **Discovery** — walk the repository and detect languages
-//! 2. **Parse** — select adapters and extract symbols
+//! 2. **Extract** — dispatch to syntax/semantic backends, merge results
 //! 3. **Persist** — validate and write records to the metadata store
-//!
-//! See spec §7.1 (crate structure) and §8 (indexing pipeline).
 
 use std::path::PathBuf;
 
 pub mod change_detection;
+pub mod classify;
 pub mod context;
+pub mod dispatch;
 pub mod enrich;
 pub mod git;
-pub mod merge;
+pub mod merge_engine;
 pub mod metrics;
 pub mod pipeline;
+pub mod registry;
 pub mod stage;
 
 pub use change_detection::{detect_changes, ChangeSet};
+pub use classify::{CapabilityClassifier, DefaultCapabilityClassifier};
 pub use context::PipelineContext;
-pub use merge::{merge_outputs, MergeOutcome, MergedOutput, SymbolProvenance};
+pub use dispatch::{
+    DefaultDispatchPlanner, DispatchContext, DispatchPlanner, ExecutionPlan, SemanticPolicy,
+    SyntaxPolicy,
+};
+pub use merge_engine::{
+    BackendAttempt, DefaultMergeEngine, ExecutionOutcome, MergeEngine, MergeResult, MergedSymbol,
+    MergedSymbolProvenance,
+};
 pub use metrics::{compute_tier_metrics, CapabilityTierMetrics};
 pub use pipeline::{run, IndexMetrics, IndexResult};
-pub use stage::{DiscoveryOutput, FileError, ParseOutput, ParsedFile, PreparedFile};
+pub use registry::{BackendRegistry, DefaultBackendRegistry};
+pub use stage::{DiscoveryOutput, FileError, ParseOutput, ParsedFile};
+
+// Re-export PreparedFile from syntax-platform for downstream convenience.
+pub use syntax_platform::PreparedFile;
 
 // ---------------------------------------------------------------------------
 // Pipeline error

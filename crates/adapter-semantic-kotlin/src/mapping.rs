@@ -1,5 +1,5 @@
-use adapter_api::{ExtractedSymbol, SourceSpan};
-use core_model::SymbolKind;
+use core_model::{SourceSpan, SymbolKind};
+use semantic_api::SemanticSymbol;
 use serde::Deserialize;
 
 /// A node in the Kotlin analysis bridge's navigation tree response.
@@ -106,11 +106,11 @@ fn build_signature(item: &KtNavTreeItem) -> String {
     }
 }
 
-/// Recursively maps a Kotlin navigation tree into `ExtractedSymbol` values.
+/// Recursively maps a Kotlin navigation tree into `SemanticSymbol` values.
 ///
 /// Walks the tree depth-first, tracking scope for qualified name construction.
 /// Only items that map to a canonical `SymbolKind` are emitted.
-pub fn map_kt_navtree_to_symbols(items: &[KtNavTreeItem]) -> Vec<ExtractedSymbol> {
+pub fn map_kt_navtree_to_symbols(items: &[KtNavTreeItem]) -> Vec<SemanticSymbol> {
     let mut symbols = Vec::new();
     let mut scope_stack: Vec<String> = Vec::new();
     walk_kt_items(items, &mut symbols, &mut scope_stack, None);
@@ -119,7 +119,7 @@ pub fn map_kt_navtree_to_symbols(items: &[KtNavTreeItem]) -> Vec<ExtractedSymbol
 
 fn walk_kt_items(
     items: &[KtNavTreeItem],
-    symbols: &mut Vec<ExtractedSymbol>,
+    symbols: &mut Vec<SemanticSymbol>,
     scope_stack: &mut Vec<String>,
     parent_kind: Option<&str>,
 ) {
@@ -140,7 +140,7 @@ fn walk_kt_items(
                     Some(scope_stack.join("::"))
                 };
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(SemanticSymbol {
                     name: item.name.clone(),
                     qualified_name,
                     kind,
@@ -149,6 +149,8 @@ fn walk_kt_items(
                     confidence_score: None,
                     docstring: None,
                     parent_qualified_name: parent,
+                    type_refs: vec![],
+                    call_refs: vec![],
                 });
             }
         }

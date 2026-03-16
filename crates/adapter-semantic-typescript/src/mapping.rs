@@ -1,5 +1,5 @@
-use adapter_api::{ExtractedSymbol, SourceSpan};
-use core_model::SymbolKind;
+use core_model::{SourceSpan, SymbolKind};
+use semantic_api::SemanticSymbol;
 use serde::Deserialize;
 
 /// A node in tsserver's navigation tree response.
@@ -169,11 +169,11 @@ fn build_signature(item: &NavTreeItem) -> String {
     }
 }
 
-/// Recursively maps a tsserver navigation tree into `ExtractedSymbol` values.
+/// Recursively maps a tsserver navigation tree into `SemanticSymbol` values.
 ///
 /// Walks the navtree depth-first, tracking scope for qualified name construction.
 /// Only items that map to a canonical `SymbolKind` are emitted.
-pub fn map_navtree_to_symbols(items: &[NavTreeItem], source: &[u8]) -> Vec<ExtractedSymbol> {
+pub fn map_navtree_to_symbols(items: &[NavTreeItem], source: &[u8]) -> Vec<SemanticSymbol> {
     let mut symbols = Vec::new();
     let mut scope_stack: Vec<String> = Vec::new();
     walk_navtree_items(items, source, &mut symbols, &mut scope_stack, None);
@@ -183,7 +183,7 @@ pub fn map_navtree_to_symbols(items: &[NavTreeItem], source: &[u8]) -> Vec<Extra
 fn walk_navtree_items(
     items: &[NavTreeItem],
     source: &[u8],
-    symbols: &mut Vec<ExtractedSymbol>,
+    symbols: &mut Vec<SemanticSymbol>,
     scope_stack: &mut Vec<String>,
     parent_kind: Option<&str>,
 ) {
@@ -217,7 +217,7 @@ fn walk_navtree_items(
                     Some(scope_stack.join("::"))
                 };
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(SemanticSymbol {
                     name: item.text.clone(),
                     qualified_name,
                     kind,
@@ -226,6 +226,8 @@ fn walk_navtree_items(
                     confidence_score: None,
                     docstring: None,
                     parent_qualified_name: parent,
+                    type_refs: vec![],
+                    call_refs: vec![],
                 });
             }
         }

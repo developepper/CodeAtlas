@@ -9,37 +9,20 @@
 use std::fs;
 use std::time::Instant;
 
-use adapter_api::{AdapterPolicy, AdapterRouter, LanguageAdapter};
-use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
-use indexer::{run, PipelineContext};
+use indexer::{run, DefaultBackendRegistry, DispatchContext, PipelineContext};
+use syntax_platform::RustSyntaxBackend;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
-// Router
+// Registry helper
 // ---------------------------------------------------------------------------
 
-struct TreeSitterRouter {
-    adapters: Vec<TreeSitterAdapter>,
-}
-
-impl TreeSitterRouter {
-    fn new() -> Self {
-        let adapters = supported_languages()
-            .iter()
-            .filter_map(|lang| create_adapter(lang))
-            .collect();
-        Self { adapters }
-    }
-}
-
-impl AdapterRouter for TreeSitterRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        self.adapters
-            .iter()
-            .filter(|a| a.language() == language)
-            .map(|a| a as &dyn LanguageAdapter)
-            .collect()
-    }
+fn make_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    let rust_backend = RustSyntaxBackend::new();
+    let rust_id = RustSyntaxBackend::backend_id();
+    registry.register_syntax(rust_id, Box::new(rust_backend));
+    registry
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +55,7 @@ fn create_rust_repo(file_count: usize) -> TempDir {
 
 #[test]
 fn full_pipeline_small_repo_under_threshold() {
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let repo_dir = create_rust_repo(20);
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store =
@@ -82,8 +65,8 @@ fn full_pipeline_small_repo_under_threshold() {
     let ctx = PipelineContext {
         repo_id: "perf-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -107,7 +90,7 @@ fn full_pipeline_small_repo_under_threshold() {
 
 #[test]
 fn incremental_reindex_no_changes_under_threshold() {
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let repo_dir = create_rust_repo(20);
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store =
@@ -117,8 +100,8 @@ fn incremental_reindex_no_changes_under_threshold() {
     let ctx = PipelineContext {
         repo_id: "perf-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -149,7 +132,7 @@ fn incremental_reindex_no_changes_under_threshold() {
 
 #[test]
 fn pipeline_50_files_under_threshold() {
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let repo_dir = create_rust_repo(50);
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store =
@@ -159,8 +142,8 @@ fn pipeline_50_files_under_threshold() {
     let ctx = PipelineContext {
         repo_id: "perf-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };

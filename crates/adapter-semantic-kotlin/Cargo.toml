@@ -1,17 +1,18 @@
 [package]
-name = "adapter-semantic-kotlin"
+name = "semantic-kotlin"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-adapter-api.workspace = true
 core-model.workspace = true
+semantic-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+syntax-platform.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-adapter-api = { workspace = true, features = ["test-harness"] }
+semantic-api.workspace = true
 tempfile.workspace = true

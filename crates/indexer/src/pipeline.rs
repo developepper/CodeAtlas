@@ -34,14 +34,7 @@ pub struct IndexResult {
     pub file_errors: Vec<FileError>,
 }
 
-/// Runs the full indexing pipeline: discovery → parse → persist.
-///
-/// The metadata store and blob store are passed separately from the pipeline
-/// context so that only the persist stage borrows them, while discovery and
-/// parse operate with an immutable context.
-///
-/// Returns an [`IndexResult`] with aggregate metrics and any per-file
-/// errors encountered during parsing.
+/// Runs the full indexing pipeline: discovery → extract → persist.
 pub fn run(
     ctx: &PipelineContext<'_>,
     store: &mut store::MetadataStore,
@@ -60,16 +53,13 @@ pub fn run(
     // Stage 1: Discovery
     let discovery: DiscoveryOutput = stage::discover(ctx)?;
 
-    // Stage 1.5: Change detection — load previous file hashes and classify
-    // discovered files as new, modified, or unchanged. Only changed/new
-    // files are sent to the parse stage; unchanged files are skipped.
+    // Stage 1.5: Change detection
     let previous_hashes = store
         .files()
         .list_hash_map(&ctx.repo_id)
         .map_err(PipelineError::Persist)?;
 
     let change_set = if ctx.use_git_diff {
-        // Try git-diff accelerated detection; fall back to hash-based on failure.
         let previous_head = store
             .repos()
             .get(&ctx.repo_id)
@@ -96,7 +86,7 @@ pub fn run(
                 })
             }
             _ => {
-                info!("git-diff not available (no previous head or not a git repo), using hash-based detection");
+                info!("git-diff not available, using hash-based detection");
                 change_detection::detect_changes(&discovery.files, &previous_hashes)
             }
         }
@@ -118,14 +108,13 @@ pub fn run(
     }
 
     // Build a filtered discovery output containing only changed/new files.
-    // The full discovery output is still passed to persist for stale cleanup.
     let changed_discovery = DiscoveryOutput {
         files: change_set
             .changed_indices
             .iter()
             .map(|&i| {
                 let f = &discovery.files[i];
-                stage::PreparedFile {
+                syntax_platform::PreparedFile {
                     relative_path: f.relative_path.clone(),
                     absolute_path: f.absolute_path.clone(),
                     language: f.language.clone(),
@@ -136,27 +125,22 @@ pub fn run(
         metrics: discovery.metrics.clone(),
     };
 
-    // Stage 2: Parse (only changed/new files)
+    // Stage 2: Extract (dispatch → syntax → merge → semantic → final merge)
     let parse_output: ParseOutput = stage::parse(ctx, &changed_discovery);
 
     let symbols_extracted: usize = parse_output
         .parsed_files
         .iter()
-        .map(|f| f.output.symbols.len())
+        .map(|f| f.merge_result.symbols.len())
         .sum();
 
     // Compute capability tier metrics from parse output.
     let coverage = metrics::compute_tier_metrics(&parse_output);
 
-    // Stage 3: Persist (blobs first, then metadata in a transaction)
-    // Pass the full discovery for stale file cleanup, but only parsed
-    // changed/new files for upserts.
+    // Stage 3: Persist
     stage::persist(ctx, store, blob_store, &discovery, &parse_output)?;
 
     let files_file_only = coverage.files_file_only;
-
-    // files_parsed means files that produced symbol-bearing adapter output.
-    // File-only records are tracked separately via files_file_only.
     let files_parsed = parse_output.parsed_files.len() - files_file_only;
 
     let metrics = IndexMetrics {

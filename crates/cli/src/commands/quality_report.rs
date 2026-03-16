@@ -79,13 +79,13 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
 
     let mut db = store::MetadataStore::open(&db_path)?;
     let blob_store = store::BlobStore::open(&blob_path)?;
-    let adapter_router = router::build_router(&source_root);
+    let backend_registry = router::build_router(&source_root);
 
     let ctx = PipelineContext {
         repo_id: repo_id.clone(),
         source_root,
-        router: &adapter_router,
-        policy_override: None,
+        registry: &backend_registry,
+        dispatch_context: indexer::DispatchContext::default(),
         correlation_id: None,
         use_git_diff: opts.git_diff,
     };

@@ -207,9 +207,9 @@ Use a split design:
 ## 7.1 Crate Structure (Proposed)
 
 - `core-model`: schemas, IDs, validation, serialization.
-- `adapter-api`: traits + capability contracts.
-- `adapter-syntax-treesitter`: generic syntax adapters.
-- `adapter-semantic-*`: per-language semantic adapters.
+- `syntax-platform`: tree-sitter grammar registry, `SyntaxBackend` trait, language modules.
+- `semantic-api`: `SemanticBackend` trait and shared semantic types.
+- `semantic-*`: per-language semantic adapters.
 - `indexer`: ingestion + pipeline orchestration.
 - `store`: metadata/content/search persistence.
 - `query-engine`: ranking, filtering, retrieval.

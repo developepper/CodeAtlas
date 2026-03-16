@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::stage::PreparedFile;
+use syntax_platform::PreparedFile;
 
 /// Classification of discovered files relative to the previous index.
 #[derive(Debug)]

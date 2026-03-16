@@ -13,9 +13,8 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-adapter-api.workspace = true
-adapter-syntax-treesitter.workspace = true
 indexer.workspace = true
+syntax-platform.workspace = true
 query-engine = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
 store.workspace = true

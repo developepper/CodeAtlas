@@ -1,80 +1,78 @@
-//! Adapter router for CLI usage.
+//! Backend registry builder for CLI usage.
 //!
-//! Builds a [`DefaultRouter`] that includes tree-sitter syntax adapters for
-//! all supported languages, plus semantic adapters when their runtime
+//! Builds a [`DefaultBackendRegistry`] that includes the Rust syntax backend
+//! from `syntax-platform`, plus semantic backends when their runtime
 //! dependencies are available.
 
 use std::path::{Path, PathBuf};
 
-use adapter_api::router::DefaultRouter;
-use adapter_semantic_kotlin::adapter::KotlinSemanticAdapter;
-use adapter_semantic_kotlin::config::KotlinAnalysisConfig;
-use adapter_semantic_kotlin::process::KotlinAnalysisProcess;
-use adapter_semantic_kotlin::runtime::KotlinRuntime;
-use adapter_semantic_typescript::adapter::TypeScriptSemanticAdapter;
-use adapter_semantic_typescript::config::TsServerConfig;
-use adapter_semantic_typescript::process::TsServerProcess;
-use adapter_semantic_typescript::runtime::SemanticRuntime;
-use adapter_syntax_treesitter::{create_adapter, supported_languages};
+use core_model::BackendId;
+use indexer::registry::DefaultBackendRegistry;
+use semantic_kotlin::adapter::KotlinSemanticAdapter;
+use semantic_kotlin::config::KotlinAnalysisConfig;
+use semantic_kotlin::process::KotlinAnalysisProcess;
+use semantic_kotlin::runtime::KotlinRuntime;
+use semantic_typescript::adapter::TypeScriptSemanticAdapter;
+use semantic_typescript::config::TsServerConfig;
+use semantic_typescript::process::TsServerProcess;
+use semantic_typescript::runtime::SemanticRuntime;
+use syntax_platform::RustSyntaxBackend;
 use tracing::{debug, info, warn};
 
-/// Builds the production adapter router for the given repository root.
+/// Builds the production backend registry for the given repository root.
 ///
 /// Registers:
-/// 1. Tree-sitter syntax adapters for all supported languages.
-/// 2. TypeScript semantic adapter if `tsserver` can be located and started.
+/// 1. Rust syntax backend from `syntax-platform`.
+/// 2. TypeScript semantic backend if `tsserver` can be located and started.
+/// 3. Kotlin semantic backend if `java` and the bridge JAR can be located.
 ///
-/// The returned router is ready for use with [`adapter_api::AdapterRouter::select`] and
-/// [`adapter_api::router::default_policy`].
-pub fn build_router(source_root: &Path) -> DefaultRouter {
-    let mut router = DefaultRouter::new();
+/// The returned registry is ready for use with the indexer pipeline.
+pub fn build_router(source_root: &Path) -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
 
-    // Register tree-sitter syntax adapters for all supported languages.
-    for lang in supported_languages() {
-        if let Some(adapter) = create_adapter(lang) {
-            router.register(Box::new(adapter));
-        }
-    }
+    // Register the Rust syntax backend.
+    let rust_id = RustSyntaxBackend::backend_id();
+    registry.register_syntax(rust_id, Box::new(RustSyntaxBackend::new()));
 
-    // Try to register the TypeScript semantic adapter.
-    match try_create_ts_semantic_adapter(source_root) {
-        Ok(adapter) => {
-            info!("TypeScript semantic adapter registered");
-            router.register(adapter);
+    // Try to register the TypeScript semantic backend.
+    match try_create_ts_semantic_backend(source_root) {
+        Ok((id, backend)) => {
+            info!("TypeScript semantic backend registered");
+            registry.register_semantic(id, backend);
         }
         Err(reason) => {
-            debug!(reason = %reason, "TypeScript semantic adapter not available, using syntax fallback");
+            debug!(reason = %reason, "TypeScript semantic backend not available, using syntax fallback");
         }
     }
 
-    // Try to register the Kotlin semantic adapter.
-    match try_create_kotlin_semantic_adapter(source_root) {
-        Ok(adapter) => {
-            info!("Kotlin semantic adapter registered");
-            router.register(adapter);
+    // Try to register the Kotlin semantic backend.
+    match try_create_kotlin_semantic_backend(source_root) {
+        Ok((id, backend)) => {
+            info!("Kotlin semantic backend registered");
+            registry.register_semantic(id, backend);
         }
         Err(reason) => {
-            debug!(reason = %reason, "Kotlin semantic adapter not available, using syntax fallback");
+            debug!(reason = %reason, "Kotlin semantic backend not available, using syntax fallback");
         }
     }
 
-    let ids = router.registered_adapter_ids();
+    let ids = registry.all_backend_ids();
     info!(
-        adapter_count = ids.len(),
-        adapters = ?ids,
-        "adapter router initialized"
+        backend_count = ids.len(),
+        backends = ?ids,
+        "backend registry initialized"
     );
 
-    router
+    registry
 }
 
-/// Attempts to locate tsserver and create a started TypeScript semantic adapter.
+/// Attempts to locate tsserver and create a started TypeScript semantic backend.
 ///
-/// Returns a boxed adapter ready for registration, or an error message
-/// explaining why the adapter could not be created.
-fn try_create_ts_semantic_adapter(
+/// Returns a backend ID and boxed backend ready for registration, or an error
+/// message explaining why the backend could not be created.
+fn try_create_ts_semantic_backend(
     source_root: &Path,
-) -> Result<Box<dyn adapter_api::LanguageAdapter>, String> {
+) -> Result<(BackendId, Box<dyn semantic_api::SemanticBackend>), String> {
     let tsserver_path = find_tsserver(source_root)?;
 
     let config = TsServerConfig::new(tsserver_path.clone(), source_root.to_path_buf());
@@ -88,17 +86,18 @@ fn try_create_ts_semantic_adapter(
     })?;
 
     let adapter = TypeScriptSemanticAdapter::new(process);
-    Ok(Box::new(adapter))
+    let id = TypeScriptSemanticAdapter::<TsServerProcess>::backend_id();
+    Ok((id, Box::new(adapter)))
 }
 
 /// Attempts to locate a JVM and the Kotlin analysis bridge JAR, then creates
-/// a started Kotlin semantic adapter.
+/// a started Kotlin semantic backend.
 ///
-/// Returns a boxed adapter ready for registration, or an error message
-/// explaining why the adapter could not be created.
-fn try_create_kotlin_semantic_adapter(
+/// Returns a backend ID and boxed backend ready for registration, or an error
+/// message explaining why the backend could not be created.
+fn try_create_kotlin_semantic_backend(
     source_root: &Path,
-) -> Result<Box<dyn adapter_api::LanguageAdapter>, String> {
+) -> Result<(BackendId, Box<dyn semantic_api::SemanticBackend>), String> {
     let java_path = find_java()?;
     let bridge_jar = find_kotlin_bridge_jar(source_root)?;
 
@@ -118,7 +117,8 @@ fn try_create_kotlin_semantic_adapter(
     })?;
 
     let adapter = KotlinSemanticAdapter::new(process);
-    Ok(Box::new(adapter))
+    let id = KotlinSemanticAdapter::<KotlinAnalysisProcess>::backend_id();
+    Ok((id, Box::new(adapter)))
 }
 
 /// Searches for a `java` binary in order of preference:

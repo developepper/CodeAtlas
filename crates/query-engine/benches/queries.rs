@@ -9,43 +9,27 @@
 
 use std::fs;
 
-use adapter_api::{AdapterPolicy, AdapterRouter, LanguageAdapter};
-use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
 use criterion::{criterion_group, criterion_main, Criterion};
-use indexer::{run, PipelineContext};
+use indexer::{run, DefaultBackendRegistry, DispatchContext, PipelineContext};
 use query_engine::StoreQueryService;
 use query_engine::{
     FileOutlineRequest, FileTreeRequest, QueryFilters, QueryService, RepoOutlineRequest,
     SymbolQuery, TextQuery,
 };
+use syntax_platform::RustSyntaxBackend;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
-// Router
+// Registry
 // ---------------------------------------------------------------------------
 
-struct TreeSitterRouter {
-    adapters: Vec<TreeSitterAdapter>,
-}
-
-impl TreeSitterRouter {
-    fn new() -> Self {
-        let adapters = supported_languages()
-            .iter()
-            .filter_map(|lang| create_adapter(lang))
-            .collect();
-        Self { adapters }
-    }
-}
-
-impl AdapterRouter for TreeSitterRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        self.adapters
-            .iter()
-            .filter(|a| a.language() == language)
-            .map(|a| a as &dyn LanguageAdapter)
-            .collect()
-    }
+fn make_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry
 }
 
 // ---------------------------------------------------------------------------
@@ -81,14 +65,14 @@ fn create_populated_store(file_count: usize) -> BenchFixture {
     let blob_store =
         store::BlobStore::open(&blob_dir.path().join("blobs")).expect("open blob store");
 
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "bench-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };

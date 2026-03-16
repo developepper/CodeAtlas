@@ -6,15 +6,15 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-adapter-api.workspace = true
 core-model.workspace = true
 repo-walker = { path = "../repo-walker" }
+semantic-api.workspace = true
 store = { path = "../store" }
+syntax-platform.workspace = true
 time.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-adapter-syntax-treesitter = { path = "../adapter-syntax-treesitter" }
 criterion.workspace = true
 query-engine = { path = "../query-engine" }
 tempfile.workspace = true

@@ -1,157 +1,139 @@
-#![allow(deprecated)] // QualityLevel used for adapter-api compat
 //! Integration tests for the indexer pipeline.
 //!
-//! These tests exercise the full discovery → parse → persist flow against
+//! These tests exercise the full discovery → extract → persist flow against
 //! real temp-dir repositories with an in-memory SQLite store and a
 //! temporary blob store.
 
 use std::path::PathBuf;
 
-use adapter_api::{
-    AdapterCapabilities, AdapterError, AdapterOutput, AdapterPolicy, AdapterRouter,
-    ExtractedSymbol, IndexContext, LanguageAdapter, SourceFile, SourceSpan,
+use core_model::{BackendId, SymbolKind};
+use indexer::{
+    run, stage, DefaultBackendRegistry, DispatchContext, PipelineContext, PipelineError,
+    SyntaxPolicy,
 };
-use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
-use core_model::{QualityLevel, SymbolKind};
-use indexer::{run, stage, PipelineContext, PipelineError};
+use syntax_platform::{
+    PreparedFile, RustSyntaxBackend, SyntaxBackend, SyntaxCapability, SyntaxError,
+    SyntaxExtraction, SyntaxSymbol,
+};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
-// Stub adapter and router
+// Registry helpers
 // ---------------------------------------------------------------------------
 
-struct StubAdapter;
+/// Registry with the real Rust syntax backend.
+fn make_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    let rust_backend = RustSyntaxBackend::new();
+    let rust_id = RustSyntaxBackend::backend_id();
+    registry.register_syntax(rust_id, Box::new(rust_backend));
+    registry
+}
 
-impl LanguageAdapter for StubAdapter {
-    fn adapter_id(&self) -> &str {
-        "stub-syntax-rust"
-    }
+// ---------------------------------------------------------------------------
+// Failing syntax backend (for error provenance tests)
+// ---------------------------------------------------------------------------
 
+/// A syntax backend that always fails with a Parse error.
+struct FailingSyntaxBackend;
+
+impl SyntaxBackend for FailingSyntaxBackend {
     fn language(&self) -> &str {
         "rust"
     }
 
-    fn capabilities(&self) -> &AdapterCapabilities {
-        const CAPS: AdapterCapabilities = AdapterCapabilities {
-            quality_level: QualityLevel::Syntax,
-            default_confidence: 0.7,
-            supports_type_refs: false,
-            supports_call_refs: false,
-            supports_container_refs: true,
-            supports_doc_extraction: false,
+    fn capability(&self) -> &SyntaxCapability {
+        static CAP: SyntaxCapability = SyntaxCapability {
+            supported_kinds: vec![],
+            supports_containers: false,
+            supports_docs: false,
         };
-        &CAPS
+        &CAP
     }
 
-    fn index_file(
-        &self,
-        _ctx: &IndexContext,
-        file: &SourceFile,
-    ) -> Result<AdapterOutput, AdapterError> {
-        if file.language != "rust" {
-            return Err(AdapterError::Unsupported {
-                language: file.language.clone(),
-            });
-        }
-        Ok(AdapterOutput {
-            symbols: vec![ExtractedSymbol {
-                name: "main".to_string(),
-                qualified_name: "main".to_string(),
-                kind: SymbolKind::Function,
-                span: SourceSpan {
-                    start_line: 1,
-                    end_line: 3,
-                    start_byte: 0,
-                    byte_length: 14,
-                },
-                signature: "fn main()".to_string(),
-                confidence_score: None,
-                docstring: None,
-                parent_qualified_name: None,
-            }],
-            source_adapter: "stub-syntax-rust".to_string(),
-            quality_level: QualityLevel::Syntax,
+    fn extract_symbols(&self, file: &PreparedFile) -> Result<SyntaxExtraction, SyntaxError> {
+        Err(SyntaxError::Parse {
+            path: file.relative_path.clone(),
+            reason: "simulated failure".to_string(),
         })
     }
 }
 
-/// A policy-gating router that only returns adapters when called with the
-/// expected policy. If the pipeline passes any other policy, `select`
-/// returns an empty vec, causing the parse stage to record a file error
-/// instead of a successful parse — making regressions observable.
-struct PolicyGatingRouter {
-    adapter: StubAdapter,
-    expected_policy: AdapterPolicy,
+impl FailingSyntaxBackend {
+    fn backend_id() -> BackendId {
+        BackendId("failing-backend".to_string())
+    }
 }
 
-impl PolicyGatingRouter {
-    fn expecting(policy: AdapterPolicy) -> Self {
-        Self {
-            adapter: StubAdapter,
-            expected_policy: policy,
+/// A syntax backend that fails only for files whose path contains a substring.
+struct PathSelectiveFailBackend {
+    fail_substring: &'static str,
+}
+
+impl SyntaxBackend for PathSelectiveFailBackend {
+    fn language(&self) -> &str {
+        "rust"
+    }
+
+    fn capability(&self) -> &SyntaxCapability {
+        static CAP: SyntaxCapability = SyntaxCapability {
+            supported_kinds: vec![],
+            supports_containers: false,
+            supports_docs: false,
+        };
+        &CAP
+    }
+
+    fn extract_symbols(&self, file: &PreparedFile) -> Result<SyntaxExtraction, SyntaxError> {
+        if file
+            .relative_path
+            .to_string_lossy()
+            .contains(self.fail_substring)
+        {
+            return Err(SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: "simulated selective failure".to_string(),
+            });
         }
+        Ok(SyntaxExtraction {
+            language: "rust".to_string(),
+            symbols: vec![SyntaxSymbol {
+                name: "stub_fn".to_string(),
+                qualified_name: "stub_fn".to_string(),
+                kind: SymbolKind::Function,
+                span: core_model::SourceSpan {
+                    start_line: 1,
+                    end_line: 1,
+                    start_byte: 0,
+                    byte_length: 10,
+                },
+                signature: "fn stub_fn()".to_string(),
+                docstring: None,
+                parent_qualified_name: None,
+            }],
+            backend_id: BackendId("path-selective-fail".to_string()),
+        })
     }
 }
 
-impl AdapterRouter for PolicyGatingRouter {
-    fn select(&self, language: &str, policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        if policy != self.expected_policy {
-            return vec![];
-        }
-        if language == "rust" {
-            vec![&self.adapter]
-        } else {
-            vec![]
-        }
-    }
+/// Build a registry with a failing backend as the only backend for Rust.
+fn make_fail_only_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        FailingSyntaxBackend::backend_id(),
+        Box::new(FailingSyntaxBackend),
+    );
+    registry
 }
 
-struct StubRouter {
-    adapter: StubAdapter,
-}
-
-impl StubRouter {
-    fn new() -> Self {
-        Self {
-            adapter: StubAdapter,
-        }
-    }
-}
-
-impl AdapterRouter for StubRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        if language == "rust" {
-            vec![&self.adapter]
-        } else {
-            vec![]
-        }
-    }
-}
-
-/// Router backed by real tree-sitter adapters. Returns adapters for all
-/// languages supported by `adapter-syntax-treesitter`.
-struct TreeSitterRouter {
-    adapters: Vec<TreeSitterAdapter>,
-}
-
-impl TreeSitterRouter {
-    fn new() -> Self {
-        let adapters = supported_languages()
-            .iter()
-            .filter_map(|lang| create_adapter(lang))
-            .collect();
-        Self { adapters }
-    }
-}
-
-impl AdapterRouter for TreeSitterRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        self.adapters
-            .iter()
-            .filter(|a| a.language() == language)
-            .map(|a| a as &dyn LanguageAdapter)
-            .collect()
-    }
+/// Build a registry with a path-selective-fail backend as the only backend.
+fn make_selective_fail_registry(fail_substring: &'static str) -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        BackendId("path-selective-fail".to_string()),
+        Box::new(PathSelectiveFailBackend { fail_substring }),
+    );
+    registry
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +153,7 @@ fn setup_blob_store(dir: &TempDir) -> store::BlobStore {
 }
 
 // ---------------------------------------------------------------------------
-// End-to-end pipeline smoke test (stub adapter)
+// End-to-end pipeline smoke test (real syntax backend)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -179,14 +161,14 @@ fn pipeline_end_to_end_smoke_test() {
     let repo_dir = setup_test_repo();
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = StubRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("test-correlation-001".to_string()),
         use_git_diff: false,
     };
@@ -258,11 +240,11 @@ fn pipeline_end_to_end_smoke_test() {
 }
 
 // ---------------------------------------------------------------------------
-// End-to-end with real tree-sitter adapter
+// End-to-end with real tree-sitter backend
 // ---------------------------------------------------------------------------
 
 #[test]
-fn pipeline_end_to_end_with_treesitter_adapter() {
+fn pipeline_end_to_end_with_treesitter_backend() {
     let repo_dir = TempDir::new().expect("create temp dir");
     let src = repo_dir.path().join("src");
     std::fs::create_dir_all(&src).expect("create src dir");
@@ -294,14 +276,14 @@ pub fn greet(config: &Config) -> String {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "treesitter-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -347,8 +329,8 @@ pub fn greet(config: &Config) -> String {
         .expect("get symbol")
         .expect("symbol exists");
     assert!(
-        first_sym.source_backend.contains("syntax-treesitter"),
-        "source_backend should identify tree-sitter: {}",
+        first_sym.source_backend.contains("syntax-rust"),
+        "source_backend should identify syntax-rust: {}",
         first_sym.source_backend
     );
     assert_eq!(
@@ -370,20 +352,20 @@ pub fn greet(config: &Config) -> String {
 fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
     let repo_dir = TempDir::new().expect("create temp dir");
 
-    // Write a Rust file (supported) and a Python file (unsupported by tree-sitter router).
+    // Write a Rust file (supported) and a Python file (no backend registered).
     std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write rs");
     std::fs::write(repo_dir.path().join("script.py"), "print('hi')\n").expect("write py");
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "mixed-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -394,7 +376,7 @@ fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
     assert_eq!(result.metrics.files_parsed, 1);
     assert_eq!(result.metrics.files_file_only, 1);
 
-    // Python file is NOT an error — missing adapter produces a file-only record.
+    // Python file is NOT an error — missing backend produces a file-only record.
     let py_errors: Vec<_> = result
         .file_errors
         .iter()
@@ -402,7 +384,7 @@ fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
         .collect();
     assert!(
         py_errors.is_empty(),
-        "missing adapter should not produce a file error"
+        "missing backend should not produce a file error"
     );
 
     // Repo persisted with both files.
@@ -429,163 +411,33 @@ fn pipeline_treesitter_unsupported_language_reports_error_with_provenance() {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter fallback and error provenance
+// Backend failure and error provenance
 // ---------------------------------------------------------------------------
 
-/// An adapter that always fails with an Internal error.
-struct FailingAdapter;
-
-impl LanguageAdapter for FailingAdapter {
-    fn adapter_id(&self) -> &str {
-        "failing-adapter"
-    }
-
-    fn language(&self) -> &str {
-        "rust"
-    }
-
-    fn capabilities(&self) -> &AdapterCapabilities {
-        const CAPS: AdapterCapabilities = AdapterCapabilities {
-            quality_level: QualityLevel::Syntax,
-            default_confidence: 0.7,
-            supports_type_refs: false,
-            supports_call_refs: false,
-            supports_container_refs: false,
-            supports_doc_extraction: false,
-        };
-        &CAPS
-    }
-
-    fn index_file(
-        &self,
-        _ctx: &IndexContext,
-        _file: &SourceFile,
-    ) -> Result<AdapterOutput, AdapterError> {
-        Err(AdapterError::Parse {
-            path: _file.relative_path.clone(),
-            reason: "simulated failure".to_string(),
-        })
-    }
-}
-
-/// Router that returns a failing adapter first, then the stub adapter.
-/// Verifies the pipeline falls through to the second adapter on error.
-struct FallbackRouter {
-    failing: FailingAdapter,
-    fallback: StubAdapter,
-}
-
-impl FallbackRouter {
-    fn new() -> Self {
-        Self {
-            failing: FailingAdapter,
-            fallback: StubAdapter,
-        }
-    }
-}
-
-impl AdapterRouter for FallbackRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        if language == "rust" {
-            vec![&self.failing, &self.fallback]
-        } else {
-            vec![]
-        }
-    }
-}
-
 #[test]
-fn adapter_fallback_continues_past_failing_adapter() {
+fn adapter_error_carries_backend_id_provenance() {
     let repo_dir = setup_test_repo();
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = FallbackRouter::new();
-    let mut db = store::MetadataStore::open_in_memory().expect("open store");
-
-    let ctx = PipelineContext {
-        repo_id: "fallback-repo".to_string(),
-        source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
-        correlation_id: None,
-        use_git_diff: false,
-    };
-
-    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
-
-    // The file should have been parsed by the fallback adapter.
-    assert_eq!(
-        result.metrics.files_parsed, 1,
-        "fallback adapter should have succeeded"
-    );
-
-    // No file errors — the failing adapter's error is logged via tracing
-    // but not surfaced in file_errors, since the file was successfully
-    // parsed by another adapter. file_errors only contains files with no
-    // usable output, keeping files_errored metrics accurate.
-    assert!(
-        result.file_errors.is_empty(),
-        "successfully parsed file should not appear in file_errors, got: {:?}",
-        result.file_errors
-    );
-
-    // Verify the symbol was persisted.
-    let repo = db
-        .repos()
-        .get("fallback-repo")
-        .expect("query repo")
-        .expect("repo record");
-    assert!(repo.symbol_count >= 1);
-}
-
-/// Router that only returns the failing adapter — no fallback.
-struct FailOnlyRouter {
-    failing: FailingAdapter,
-}
-
-impl FailOnlyRouter {
-    fn new() -> Self {
-        Self {
-            failing: FailingAdapter,
-        }
-    }
-}
-
-impl AdapterRouter for FailOnlyRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        if language == "rust" {
-            vec![&self.failing]
-        } else {
-            vec![]
-        }
-    }
-}
-
-#[test]
-fn adapter_error_carries_adapter_id_provenance() {
-    let repo_dir = setup_test_repo();
-    let blob_dir = TempDir::new().expect("blob temp dir");
-    let blob_store = setup_blob_store(&blob_dir);
-    let router = FailOnlyRouter::new();
+    let registry = make_fail_only_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "fail-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
 
-    // Adapter failed — file gets a file-only record, not counted as "parsed".
+    // Backend failed — file gets a file-only record, not counted as "parsed".
     assert_eq!(result.metrics.files_parsed, 0);
     assert_eq!(result.metrics.files_file_only, 1);
 
-    // Error carries the adapter ID for provenance — real adapter failures
-    // are still recorded in file_errors even though the file gets a record.
+    // Error carries the backend ID for provenance.
     let rs_errors: Vec<_> = result
         .file_errors
         .iter()
@@ -593,13 +445,13 @@ fn adapter_error_carries_adapter_id_provenance() {
         .collect();
     assert!(!rs_errors.is_empty(), "expected error for main.rs");
     assert_eq!(
-        rs_errors[0].adapter_id.as_deref(),
-        Some("failing-adapter"),
-        "error should carry the failing adapter's ID"
+        rs_errors[0].backend_id.as_deref(),
+        Some("failing-backend"),
+        "error should carry the failing backend's ID"
     );
     assert!(
         rs_errors[0].error.contains("simulated failure"),
-        "error message should contain adapter error: {}",
+        "error message should contain backend error: {}",
         rs_errors[0].error
     );
 
@@ -608,7 +460,7 @@ fn adapter_error_carries_adapter_id_provenance() {
         .files()
         .get("fail-repo", "src/main.rs")
         .expect("query file")
-        .expect("file record should exist despite adapter failure");
+        .expect("file record should exist despite backend failure");
     assert_eq!(file.symbol_count, 0);
 
     // Blob was persisted.
@@ -624,13 +476,13 @@ fn adapter_error_carries_adapter_id_provenance() {
 #[test]
 fn discovery_stage_finds_files() {
     let repo_dir = setup_test_repo();
-    let router = StubRouter::new();
+    let registry = make_registry();
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -642,13 +494,13 @@ fn discovery_stage_finds_files() {
 
 #[test]
 fn discovery_stage_rejects_invalid_root() {
-    let router = StubRouter::new();
+    let registry = make_registry();
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: PathBuf::from("/nonexistent/path"),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -666,13 +518,13 @@ fn discovery_detects_extensionless_script_via_content() {
     )
     .expect("write script");
 
-    let router = StubRouter::new();
+    let registry = make_registry();
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -694,18 +546,18 @@ fn discovery_detects_extensionless_script_via_content() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn parse_stage_handles_no_adapter() {
+fn parse_stage_handles_no_backend() {
     let repo_dir = setup_test_repo();
-    // Write a Python file that the stub router won't handle.
+    // Write a Python file that the registry won't have a backend for.
     std::fs::write(repo_dir.path().join("script.py"), "print('hi')\n").expect("write py file");
 
-    let router = StubRouter::new();
+    let registry = make_registry();
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -713,7 +565,7 @@ fn parse_stage_handles_no_adapter() {
     let discovery = stage::discover(&ctx).expect("discovery ok");
     let parse_output = stage::parse(&ctx, &discovery);
 
-    // The Python file should NOT appear in file_errors — missing adapter
+    // The Python file should NOT appear in file_errors — missing backend
     // is not an error, it produces a file-only record.
     let py_errors: Vec<_> = parse_output
         .file_errors
@@ -722,7 +574,7 @@ fn parse_stage_handles_no_adapter() {
         .collect();
     assert!(
         py_errors.is_empty(),
-        "missing adapter should not produce a file error"
+        "missing backend should not produce a file error"
     );
 
     // The Python file should appear in parsed_files as file-only.
@@ -735,25 +587,25 @@ fn parse_stage_handles_no_adapter() {
         !py_parsed.is_empty(),
         "Python file should be in parsed_files as file-only"
     );
-    assert_eq!(py_parsed[0].output.symbols.len(), 0);
-    assert_eq!(py_parsed[0].output.source_adapter, "file-only");
+    assert_eq!(py_parsed[0].merge_result.symbols.len(), 0);
 }
 
 #[test]
-fn parse_stage_uses_context_default_policy() {
+fn parse_stage_uses_dispatch_context_syntax_policy() {
     let repo_dir = setup_test_repo();
 
-    // Use a policy-gating router that only returns adapters when called
-    // with SemanticPreferred. If the pipeline regresses to hard-coding
-    // SyntaxOnly (the global default for Rust), the router returns no
-    // adapters and the file lands in file_errors instead of parsed_files.
-    let router = PolicyGatingRouter::expecting(AdapterPolicy::SemanticPreferred);
+    // Use a dispatch context with syntax disabled. Even though a Rust backend
+    // is registered, the dispatch planner should skip syntax extraction.
+    let registry = make_registry();
 
     let ctx = PipelineContext {
         repo_id: "test-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SemanticPreferred),
+        registry: &registry,
+        dispatch_context: DispatchContext {
+            syntax_policy: SyntaxPolicy::Disabled,
+            ..DispatchContext::default()
+        },
         correlation_id: None,
         use_git_diff: false,
     };
@@ -761,15 +613,20 @@ fn parse_stage_uses_context_default_policy() {
     let discovery = stage::discover(&ctx).expect("discovery ok");
     let parse_output = stage::parse(&ctx, &discovery);
 
-    // Parsing succeeds only if the router received SemanticPreferred.
-    assert_eq!(
-        parse_output.parsed_files.len(),
-        1,
-        "expected 1 parsed file — router should have received SemanticPreferred from context"
-    );
+    // With syntax disabled, the Rust file should be file-only (no symbols).
+    let rs_parsed: Vec<_> = parse_output
+        .parsed_files
+        .iter()
+        .filter(|f| f.relative_path.to_string_lossy().contains("main.rs"))
+        .collect();
     assert!(
-        parse_output.file_errors.is_empty(),
-        "no file errors expected when correct policy is forwarded"
+        !rs_parsed.is_empty(),
+        "Rust file should still be in parsed_files"
+    );
+    assert_eq!(
+        rs_parsed[0].merge_result.symbols.len(),
+        0,
+        "syntax disabled should produce no symbols"
     );
 }
 
@@ -789,14 +646,14 @@ fn reindex_removes_stale_files_and_recomputes_aggregates() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "aggregate-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -879,14 +736,14 @@ fn reindex_cleans_up_removed_symbols_within_file() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "symbol-cleanup-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -960,14 +817,14 @@ pub fn greet(config: &Config) -> String {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "enrich-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1061,7 +918,7 @@ fn enrichment_is_deterministic_across_runs() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
 
     // Run pipeline twice with separate DBs.
     let mut db1 = store::MetadataStore::open_in_memory().expect("open store");
@@ -1070,8 +927,8 @@ fn enrichment_is_deterministic_across_runs() {
     let ctx = PipelineContext {
         repo_id: "det-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1118,99 +975,11 @@ fn enrichment_is_deterministic_across_runs() {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter failure isolation
+// Backend failure isolation
 // ---------------------------------------------------------------------------
 
-/// An adapter that fails only for files whose path contains a substring.
-struct PathSelectiveFailAdapter {
-    fail_substring: &'static str,
-}
-
-impl LanguageAdapter for PathSelectiveFailAdapter {
-    fn adapter_id(&self) -> &str {
-        "path-selective-fail"
-    }
-
-    fn language(&self) -> &str {
-        "rust"
-    }
-
-    fn capabilities(&self) -> &AdapterCapabilities {
-        const CAPS: AdapterCapabilities = AdapterCapabilities {
-            quality_level: QualityLevel::Syntax,
-            default_confidence: 0.7,
-            supports_type_refs: false,
-            supports_call_refs: false,
-            supports_container_refs: false,
-            supports_doc_extraction: false,
-        };
-        &CAPS
-    }
-
-    fn index_file(
-        &self,
-        _ctx: &IndexContext,
-        file: &SourceFile,
-    ) -> Result<AdapterOutput, AdapterError> {
-        if file
-            .relative_path
-            .to_string_lossy()
-            .contains(self.fail_substring)
-        {
-            return Err(AdapterError::Parse {
-                path: file.relative_path.clone(),
-                reason: "simulated selective failure".to_string(),
-            });
-        }
-        Ok(AdapterOutput {
-            symbols: vec![ExtractedSymbol {
-                name: "stub_fn".to_string(),
-                qualified_name: "stub_fn".to_string(),
-                kind: SymbolKind::Function,
-                span: SourceSpan {
-                    start_line: 1,
-                    end_line: 1,
-                    start_byte: 0,
-                    byte_length: 10,
-                },
-                signature: "fn stub_fn()".to_string(),
-                confidence_score: None,
-                docstring: None,
-                parent_qualified_name: None,
-            }],
-            source_adapter: "path-selective-fail".to_string(),
-            quality_level: QualityLevel::Syntax,
-        })
-    }
-}
-
-/// Router that uses PathSelectiveFailAdapter as the only adapter.
-struct SelectiveFailOnlyRouter {
-    adapter: PathSelectiveFailAdapter,
-}
-
-impl SelectiveFailOnlyRouter {
-    fn failing_on(substring: &'static str) -> Self {
-        Self {
-            adapter: PathSelectiveFailAdapter {
-                fail_substring: substring,
-            },
-        }
-    }
-}
-
-impl AdapterRouter for SelectiveFailOnlyRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        if language == "rust" {
-            vec![&self.adapter]
-        } else {
-            vec![]
-        }
-    }
-}
-
 #[test]
-fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
+fn reindex_with_backend_failure_preserves_previously_indexed_file() {
     let repo_dir = TempDir::new().expect("create temp dir");
     let src = repo_dir.path().join("src");
     std::fs::create_dir_all(&src).expect("create src dir");
@@ -1222,13 +991,13 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
     let blob_store = setup_blob_store(&blob_dir);
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
-    // First run: use the tree-sitter router — both files index successfully.
-    let ts_router = TreeSitterRouter::new();
+    // First run: use the real Rust backend — both files index successfully.
+    let ts_registry = make_registry();
     let ctx1 = PipelineContext {
         repo_id: "fail-isolation-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &ts_router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &ts_registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1257,20 +1026,20 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
         .unwrap();
     assert!(!lib_symbols_before.is_empty(), "lib.rs should have symbols");
 
-    // Second run: use a router that fails on lib.rs.
-    let fail_router = SelectiveFailOnlyRouter::failing_on("lib.rs");
+    // Second run: use a registry with a backend that fails on lib.rs.
+    let fail_registry = make_selective_fail_registry("lib.rs");
     let ctx2 = PipelineContext {
         repo_id: "fail-isolation-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &fail_router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &fail_registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
 
     let r2 = run(&ctx2, &mut db, &blob_store).expect("second run");
     // Both files are unchanged from the first run, so incremental indexing
-    // skips them entirely — the failing adapter is never invoked.
+    // skips them entirely — the failing backend is never invoked.
     assert_eq!(r2.metrics.files_parsed, 0);
     assert_eq!(r2.metrics.files_unchanged, 2);
 
@@ -1280,7 +1049,7 @@ fn reindex_with_adapter_failure_preserves_previously_indexed_file() {
             .get("fail-isolation-repo", "src/lib.rs")
             .unwrap()
             .is_some(),
-        "lib.rs metadata should be preserved despite adapter failure"
+        "lib.rs metadata should be preserved despite backend failure"
     );
 
     // lib.rs symbols from the first run should still be present.
@@ -1348,14 +1117,14 @@ fn incremental_noop_run_skips_all_files() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "incr-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1398,14 +1167,14 @@ fn incremental_detects_modified_file_and_reindexes() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "incr-mod-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1448,14 +1217,14 @@ fn incremental_detects_new_file() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "incr-new-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1501,14 +1270,14 @@ fn incremental_hash_map_persists_across_runs() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "hash-persist-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1561,14 +1330,14 @@ fn incremental_deleted_file_removes_symbols_and_updates_aggregates() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "del-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1645,14 +1414,14 @@ fn incremental_full_lifecycle_add_modify_delete() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "lifecycle-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1778,14 +1547,14 @@ fn incremental_delete_all_files_leaves_empty_repo() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "empty-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1821,14 +1590,14 @@ fn incremental_multiple_deletes_across_runs() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "multi-del-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1926,7 +1695,7 @@ fn git_add_commit(dir: &std::path::Path, message: &str) {
 /// initial index + modify + delete lifecycle.
 #[test]
 fn git_diff_parity_with_hash_based_detection() {
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
 
     // --- Run A: hash-based mode ---
     let repo_a = TempDir::new().expect("repo_a dir");
@@ -1941,8 +1710,8 @@ fn git_diff_parity_with_hash_based_detection() {
     let ctx_a = PipelineContext {
         repo_id: "parity-repo".to_string(),
         source_root: repo_a.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -1968,8 +1737,8 @@ fn git_diff_parity_with_hash_based_detection() {
     let ctx_b = PipelineContext {
         repo_id: "parity-repo".to_string(),
         source_root: repo_b.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: true,
     };
@@ -2018,7 +1787,7 @@ fn git_diff_parity_with_hash_based_detection() {
 /// Git-diff mode detects uncommitted working-tree changes (same HEAD).
 #[test]
 fn git_diff_detects_uncommitted_changes() {
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let repo_dir = TempDir::new().expect("repo dir");
     let blob_dir = TempDir::new().expect("blob dir");
     let blob_store = setup_blob_store(&blob_dir);
@@ -2031,8 +1800,8 @@ fn git_diff_detects_uncommitted_changes() {
     let ctx = PipelineContext {
         repo_id: "dirty-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: true,
     };
@@ -2066,7 +1835,7 @@ fn git_diff_detects_uncommitted_changes() {
 /// Git-diff mode persists git_head and uses it for subsequent runs.
 #[test]
 fn git_diff_persists_and_uses_git_head() {
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let repo_dir = TempDir::new().expect("repo dir");
     let blob_dir = TempDir::new().expect("blob dir");
     let blob_store = setup_blob_store(&blob_dir);
@@ -2079,8 +1848,8 @@ fn git_diff_persists_and_uses_git_head() {
     let ctx = PipelineContext {
         repo_id: "head-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: true,
     };
@@ -2116,7 +1885,7 @@ fn git_diff_persists_and_uses_git_head() {
 /// Git-diff mode with no previous head falls back to hash-based (first run).
 #[test]
 fn git_diff_first_run_indexes_all_files() {
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let repo_dir = TempDir::new().expect("repo dir");
     let blob_dir = TempDir::new().expect("blob dir");
     let blob_store = setup_blob_store(&blob_dir);
@@ -2130,8 +1899,8 @@ fn git_diff_first_run_indexes_all_files() {
     let ctx = PipelineContext {
         repo_id: "first-run-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: true,
     };
@@ -2145,13 +1914,13 @@ fn git_diff_first_run_indexes_all_files() {
 }
 
 // ---------------------------------------------------------------------------
-// File-only indexing: recognized files without symbol adapters (#166)
+// File-only indexing: recognized files without syntax backends (#166)
 // ---------------------------------------------------------------------------
 
-/// A recognized-language repo with no adapters at all should produce file
+/// A recognized-language repo with no backends at all should produce file
 /// records and blobs for all discovered files (non-empty index).
 #[test]
-fn file_only_indexing_recognized_repo_no_adapters() {
+fn file_only_indexing_recognized_repo_no_backends() {
     let repo_dir = TempDir::new().expect("create temp dir");
     std::fs::write(repo_dir.path().join("app.py"), "print('hello')\n").expect("write py");
     std::fs::write(repo_dir.path().join("lib.go"), "package main\n").expect("write go");
@@ -2159,28 +1928,28 @@ fn file_only_indexing_recognized_repo_no_adapters() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    // TreeSitterRouter only has Rust adapters — no adapters for Python/Go/JS.
-    let router = TreeSitterRouter::new();
+    // Registry only has Rust backend — no backends for Python/Go/JS.
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "no-adapter-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
 
     let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
 
-    // All 3 files indexed as file-only — no symbol-bearing adapter output.
+    // All 3 files indexed as file-only — no symbol-bearing backend output.
     assert_eq!(result.metrics.files_parsed, 0);
     assert_eq!(result.metrics.files_file_only, 3);
     assert_eq!(result.metrics.symbols_extracted, 0);
     assert!(
         result.file_errors.is_empty(),
-        "no errors expected for missing adapters"
+        "no errors expected for missing backends"
     );
 
     // Repo has all 3 file records.
@@ -2227,11 +1996,11 @@ fn file_only_indexing_mixed_repo() {
     let src = repo_dir.path().join("src");
     std::fs::create_dir_all(&src).expect("create src dir");
 
-    // Rust file — will get symbols from tree-sitter.
+    // Rust file — will get symbols from syntax backend.
     std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("write rs");
-    // Python file — no adapter, will be file-only.
+    // Python file — no backend, will be file-only.
     std::fs::write(repo_dir.path().join("script.py"), "import sys\n").expect("write py");
-    // SQL file — recognized language, no adapter.
+    // SQL file — recognized language, no backend.
     std::fs::write(
         repo_dir.path().join("schema.sql"),
         "CREATE TABLE t (id INT);\n",
@@ -2240,14 +2009,14 @@ fn file_only_indexing_mixed_repo() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "mixed-file-only".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -2298,14 +2067,14 @@ fn file_only_stale_cleanup_preserves_file_only_records() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "stale-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -2342,14 +2111,14 @@ fn file_only_uses_same_content_hash_contract() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "hash-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -2377,25 +2146,25 @@ fn file_only_uses_same_content_hash_contract() {
     assert_eq!(blob, content);
 }
 
-/// Missing-adapter and adapter-failure produce different diagnostic states.
+/// Missing-backend and backend-failure produce different diagnostic states.
 #[test]
-fn file_only_distinguishes_missing_adapter_from_adapter_failure() {
+fn file_only_distinguishes_missing_backend_from_backend_failure() {
     let repo_dir = TempDir::new().expect("create temp dir");
-    // Python — no adapter at all (missing adapter).
+    // Python — no backend at all (missing backend).
     std::fs::write(repo_dir.path().join("script.py"), "print('hi')\n").expect("write py");
-    // Rust — adapter exists but fails (adapter failure).
+    // Rust — backend exists but fails (backend failure).
     std::fs::write(repo_dir.path().join("main.rs"), "fn main() {}\n").expect("write rs");
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = FailOnlyRouter::new(); // Only returns FailingAdapter for Rust.
+    let registry = make_fail_only_registry(); // Only returns FailingSyntaxBackend for Rust.
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "diag-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -2406,7 +2175,7 @@ fn file_only_distinguishes_missing_adapter_from_adapter_failure() {
     assert_eq!(result.metrics.files_parsed, 0);
     assert_eq!(result.metrics.files_file_only, 2);
 
-    // Missing adapter (Python): no file_error.
+    // Missing backend (Python): no file_error.
     let py_errors: Vec<_> = result
         .file_errors
         .iter()
@@ -2414,10 +2183,10 @@ fn file_only_distinguishes_missing_adapter_from_adapter_failure() {
         .collect();
     assert!(
         py_errors.is_empty(),
-        "missing adapter should not produce a file error"
+        "missing backend should not produce a file error"
     );
 
-    // Adapter failure (Rust): file_error WITH adapter_id.
+    // Backend failure (Rust): file_error WITH backend_id.
     let rs_errors: Vec<_> = result
         .file_errors
         .iter()
@@ -2425,7 +2194,7 @@ fn file_only_distinguishes_missing_adapter_from_adapter_failure() {
         .collect();
     assert!(
         !rs_errors.is_empty(),
-        "adapter failure should still produce a file error"
+        "backend failure should still produce a file error"
     );
-    assert_eq!(rs_errors[0].adapter_id.as_deref(), Some("failing-adapter"));
+    assert_eq!(rs_errors[0].backend_id.as_deref(), Some("failing-backend"));
 }

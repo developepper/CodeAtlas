@@ -1,47 +1,20 @@
 //! Criterion benchmarks for the indexing pipeline.
-//!
-//! Measures end-to-end pipeline throughput (discovery → parse → persist)
-//! across synthetic repos. Used for regression detection in CI (spec §13.1, §15).
 
 use std::fs;
 
-use adapter_api::{AdapterPolicy, AdapterRouter, LanguageAdapter};
-use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use indexer::{run, PipelineContext};
+use indexer::{run, DefaultBackendRegistry, DispatchContext, PipelineContext};
+use syntax_platform::RustSyntaxBackend;
 use tempfile::TempDir;
 
-// ---------------------------------------------------------------------------
-// Router backed by real tree-sitter adapters
-// ---------------------------------------------------------------------------
-
-struct TreeSitterRouter {
-    adapters: Vec<TreeSitterAdapter>,
+fn make_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry
 }
-
-impl TreeSitterRouter {
-    fn new() -> Self {
-        let adapters = supported_languages()
-            .iter()
-            .filter_map(|lang| create_adapter(lang))
-            .collect();
-        Self { adapters }
-    }
-}
-
-impl AdapterRouter for TreeSitterRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        self.adapters
-            .iter()
-            .filter(|a| a.language() == language)
-            .map(|a| a as &dyn LanguageAdapter)
-            .collect()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Fixture setup
-// ---------------------------------------------------------------------------
 
 fn create_rust_repo(file_count: usize) -> TempDir {
     let dir = TempDir::new().expect("create temp dir");
@@ -59,7 +32,6 @@ fn create_rust_repo(file_count: usize) -> TempDir {
         fs::write(src.join(format!("mod_{i}.rs")), content).expect("write file");
     }
 
-    // Write a main.rs that references the modules.
     let main_content = (0..file_count)
         .map(|i| format!("mod mod_{i};"))
         .collect::<Vec<_>>()
@@ -70,15 +42,11 @@ fn create_rust_repo(file_count: usize) -> TempDir {
     dir
 }
 
-// ---------------------------------------------------------------------------
-// Benchmarks
-// ---------------------------------------------------------------------------
-
 fn bench_pipeline_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("pipeline_throughput");
     group.sample_size(10);
 
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
 
     for &file_count in &[5, 20, 50] {
         let repo_dir = create_rust_repo(file_count);
@@ -91,14 +59,13 @@ fn bench_pipeline_throughput(c: &mut Criterion) {
             &file_count,
             |b, _| {
                 b.iter(|| {
-                    // Fresh DB each iteration to measure full index (not incremental).
                     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
                     let ctx = PipelineContext {
                         repo_id: "bench-repo".to_string(),
                         source_root: repo_dir.path().to_path_buf(),
-                        router: &router,
-                        policy_override: Some(AdapterPolicy::SyntaxOnly),
+                        registry: &registry,
+                        dispatch_context: DispatchContext::default(),
                         correlation_id: None,
                         use_git_diff: false,
                     };
@@ -116,19 +83,18 @@ fn bench_incremental_reindex(c: &mut Criterion) {
     let mut group = c.benchmark_group("incremental_reindex");
     group.sample_size(10);
 
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let repo_dir = create_rust_repo(20);
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store =
         store::BlobStore::open(&blob_dir.path().join("blobs")).expect("open blob store");
 
-    // Pre-populate the store with an initial index.
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
     let ctx = PipelineContext {
         repo_id: "bench-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -139,8 +105,8 @@ fn bench_incremental_reindex(c: &mut Criterion) {
             let ctx = PipelineContext {
                 repo_id: "bench-repo".to_string(),
                 source_root: repo_dir.path().to_path_buf(),
-                router: &router,
-                policy_override: Some(AdapterPolicy::SyntaxOnly),
+                registry: &registry,
+                dispatch_context: DispatchContext::default(),
                 correlation_id: None,
                 use_git_diff: false,
             };

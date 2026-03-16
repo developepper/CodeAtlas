@@ -540,35 +540,19 @@ fn search_text_bare_fts_operator_does_not_error() {
 // ── Pipeline end-to-end ───────────────────────────────────────────────
 
 mod pipeline {
-    use adapter_api::{AdapterPolicy, AdapterRouter, LanguageAdapter};
-    use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
-    use indexer::{run, PipelineContext};
+    use indexer::{run, DefaultBackendRegistry, DispatchContext, PipelineContext};
     use query_engine::{QueryFilters, QueryService, StoreQueryService, TextQuery};
     use store::MetadataStore;
+    use syntax_platform::RustSyntaxBackend;
     use tempfile::TempDir;
 
-    struct TreeSitterRouter {
-        adapters: Vec<TreeSitterAdapter>,
-    }
-
-    impl TreeSitterRouter {
-        fn new() -> Self {
-            let adapters = supported_languages()
-                .iter()
-                .filter_map(|lang| create_adapter(lang))
-                .collect();
-            Self { adapters }
-        }
-    }
-
-    impl AdapterRouter for TreeSitterRouter {
-        fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-            self.adapters
-                .iter()
-                .filter(|a| a.language() == language)
-                .map(|a| a as &dyn LanguageAdapter)
-                .collect()
-        }
+    fn make_registry() -> DefaultBackendRegistry {
+        let mut registry = DefaultBackendRegistry::new();
+        registry.register_syntax(
+            RustSyntaxBackend::backend_id(),
+            Box::new(RustSyntaxBackend::new()),
+        );
+        registry
     }
 
     #[test]
@@ -599,12 +583,12 @@ struct HttpServer {
 
         // 2. Index via the full pipeline.
         let mut db = MetadataStore::open_in_memory().expect("open store");
-        let router = TreeSitterRouter::new();
+        let registry = make_registry();
         let ctx = PipelineContext {
             repo_id: "pipeline-test".to_string(),
             source_root: repo_dir.path().to_path_buf(),
-            router: &router,
-            policy_override: Some(AdapterPolicy::SyntaxOnly),
+            registry: &registry,
+            dispatch_context: DispatchContext::default(),
             correlation_id: None,
             use_git_diff: false,
         };

@@ -1,4 +1,3 @@
-#![allow(deprecated)] // QualityLevel used for adapter-api compat
 //! Security regression tests for the indexer pipeline.
 //!
 //! Covers:
@@ -8,119 +7,26 @@
 //!
 //! Spec references: §11.2 Controls, §16.1 Security tests.
 
-use adapter_api::{
-    AdapterCapabilities, AdapterError, AdapterOutput, AdapterPolicy, AdapterRouter,
-    ExtractedSymbol, IndexContext, LanguageAdapter, SourceFile, SourceSpan,
-};
-use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
-use core_model::{QualityLevel, SymbolKind};
-use indexer::{run, PipelineContext};
+use indexer::{run, DefaultBackendRegistry, DispatchContext, PipelineContext};
+use syntax_platform::RustSyntaxBackend;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
-// Stub adapter that always succeeds (for files where we test discovery/persist)
+// Registry helpers
 // ---------------------------------------------------------------------------
 
-struct StubAdapter;
-
-impl LanguageAdapter for StubAdapter {
-    fn adapter_id(&self) -> &str {
-        "stub-syntax-rust"
-    }
-
-    fn language(&self) -> &str {
-        "rust"
-    }
-
-    fn capabilities(&self) -> &AdapterCapabilities {
-        const CAPS: AdapterCapabilities = AdapterCapabilities {
-            quality_level: QualityLevel::Syntax,
-            default_confidence: 0.7,
-            supports_type_refs: false,
-            supports_call_refs: false,
-            supports_container_refs: true,
-            supports_doc_extraction: false,
-        };
-        &CAPS
-    }
-
-    fn index_file(
-        &self,
-        _ctx: &IndexContext,
-        file: &SourceFile,
-    ) -> Result<AdapterOutput, AdapterError> {
-        if file.language != "rust" {
-            return Err(AdapterError::Unsupported {
-                language: file.language.clone(),
-            });
-        }
-        Ok(AdapterOutput {
-            symbols: vec![ExtractedSymbol {
-                name: "stub_fn".to_string(),
-                qualified_name: "stub_fn".to_string(),
-                kind: SymbolKind::Function,
-                span: SourceSpan {
-                    start_line: 1,
-                    end_line: 1,
-                    start_byte: 0,
-                    byte_length: file.content.len() as u64,
-                },
-                signature: "fn stub_fn()".to_string(),
-                confidence_score: None,
-                docstring: None,
-                parent_qualified_name: None,
-            }],
-            source_adapter: "stub-syntax-rust".to_string(),
-            quality_level: QualityLevel::Syntax,
-        })
-    }
+/// Registry with only a Rust syntax backend (for realistic parse testing).
+fn make_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    let rust_backend = RustSyntaxBackend::new();
+    let rust_id = RustSyntaxBackend::backend_id();
+    registry.register_syntax(rust_id, Box::new(rust_backend));
+    registry
 }
 
-struct StubRouter {
-    adapter: StubAdapter,
-}
-
-impl StubRouter {
-    fn new() -> Self {
-        Self {
-            adapter: StubAdapter,
-        }
-    }
-}
-
-impl AdapterRouter for StubRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        if language == "rust" {
-            vec![&self.adapter]
-        } else {
-            vec![]
-        }
-    }
-}
-
-/// Router backed by real tree-sitter adapters for realistic parse testing.
-struct TreeSitterRouter {
-    adapters: Vec<TreeSitterAdapter>,
-}
-
-impl TreeSitterRouter {
-    fn new() -> Self {
-        let adapters = supported_languages()
-            .iter()
-            .filter_map(|lang| create_adapter(lang))
-            .collect();
-        Self { adapters }
-    }
-}
-
-impl AdapterRouter for TreeSitterRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        self.adapters
-            .iter()
-            .filter(|a| a.language() == language)
-            .map(|a| a as &dyn LanguageAdapter)
-            .collect()
-    }
+/// Empty registry — no backends registered at all.
+fn make_empty_registry() -> DefaultBackendRegistry {
+    DefaultBackendRegistry::new()
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +38,7 @@ fn setup_blob_store(dir: &TempDir) -> store::BlobStore {
 }
 
 // ---------------------------------------------------------------------------
-// Malformed source file tests (tree-sitter adapter)
+// Malformed source file tests (tree-sitter backend)
 // ---------------------------------------------------------------------------
 
 /// Completely garbage content in a .rs file should result in a parse error
@@ -150,14 +56,14 @@ fn garbage_rust_source_does_not_panic() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-garbage".to_string()),
         use_git_diff: false,
     };
@@ -183,14 +89,14 @@ fn empty_rust_file_does_not_panic() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-empty".to_string()),
         use_git_diff: false,
     };
@@ -203,7 +109,7 @@ fn empty_rust_file_does_not_panic() {
 }
 
 /// A file containing a single extremely long line should not cause OOM
-/// or excessive processing time in the tree-sitter adapter.
+/// or excessive processing time in the syntax backend.
 #[test]
 fn extremely_long_line_does_not_crash() {
     let repo_dir = TempDir::new().expect("create temp dir");
@@ -216,14 +122,14 @@ fn extremely_long_line_does_not_crash() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-longline".to_string()),
         use_git_diff: false,
     };
@@ -250,14 +156,14 @@ fn deeply_nested_syntax_does_not_stack_overflow() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-nested".to_string()),
         use_git_diff: false,
     };
@@ -293,14 +199,14 @@ fn pipeline_continues_past_parse_errors() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-mixed".to_string()),
         use_git_diff: false,
     };
@@ -332,14 +238,14 @@ fn repo_with_no_parseable_files_succeeds() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = StubRouter::new();
+    let registry = make_empty_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-noparseable".to_string()),
         use_git_diff: false,
     };
@@ -353,7 +259,7 @@ fn repo_with_no_parseable_files_succeeds() {
 }
 
 /// Invalid UTF-8 content in a source file should not crash the pipeline.
-/// The walker may skip it as binary (null-byte heuristic) or the adapter
+/// The walker may skip it as binary (null-byte heuristic) or the backend
 /// may handle the lossy conversion gracefully.
 #[test]
 fn invalid_utf8_content_does_not_crash() {
@@ -372,14 +278,14 @@ fn invalid_utf8_content_does_not_crash() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-utf8".to_string()),
         use_git_diff: false,
     };
@@ -410,14 +316,14 @@ fn many_parse_errors_complete_in_bounded_time() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = setup_blob_store(&blob_dir);
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
     let ctx = PipelineContext {
         repo_id: "security-test".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: Some("sec-manyerr".to_string()),
         use_git_diff: false,
     };
