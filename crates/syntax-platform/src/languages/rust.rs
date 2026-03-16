@@ -69,4 +69,5 @@ pub static RUST_PROFILE: LanguageProfile = LanguageProfile {
     ts_language: rust_language,
     definitions: RUST_DEFINITIONS,
     scopes: RUST_SCOPES,
+    sticky_scopes: &[],
 };
