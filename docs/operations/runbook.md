@@ -353,16 +353,22 @@ CODEATLAS_OTEL=1 cargo run -p cli -- index <repo-path>
 
 ### No symbols extracted
 
-This is expected for repositories in recognized languages that lack symbol
-adapters (e.g. Python, Go, Java without semantic runtimes). File-level indexing
-still provides file tree, file content retrieval, and repo outline.
+This is expected for repositories in recognized languages without a syntax
+backend (e.g. Ruby, C, C++, C#, Swift). File-level indexing still provides
+file tree, file content retrieval, and repo outline.
+
+For languages with syntax backends (Go, Java, JavaScript, PHP, Python, Rust),
+zero symbols on files that contain declarations is often worth investigating.
+Note that zero symbols can be legitimate if the files contain only comments,
+configuration, or code patterns that do not produce extractable declarations.
 
 If you expected symbols, check:
 
 - repo path is valid
-- files are supported by current language detection and adapters
+- files are supported by current language detection and syntax backends
 - the quality report's "files with symbols" vs "file-only" breakdown
 - file errors printed by the CLI
+- that files have the correct extension for language detection
 
 ### Semantic coverage unexpectedly zero
 
@@ -374,8 +380,8 @@ Check:
 
 ### High file error count
 
-File errors indicate real adapter failures, not missing adapters. Missing
-adapters produce file-only indexed records instead of errors.
+File errors indicate real backend failures, not missing backends. Languages
+without a registered syntax backend produce file-only records instead of errors.
 
 Check:
 

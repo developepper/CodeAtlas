@@ -6,12 +6,12 @@ This document describes how query surfaces behave across capability tiers.
 
 Every indexed file is classified into one of these tiers:
 
-| Tier                 | Meaning                                              |
-|----------------------|------------------------------------------------------|
-| `file_only`          | File record and content only; no extracted symbols   |
-| `syntax_only`        | Symbols extracted by a syntax backend (tree-sitter)  |
-| `syntax_plus_semantic` | Syntax baseline enriched by a semantic backend     |
-| `semantic_only`      | Transitional: semantic backend only, no syntax       |
+| Tier                 | Meaning                                              | Example languages |
+|----------------------|------------------------------------------------------|-------------------|
+| `file_only`          | File record and content only; no extracted symbols   | Ruby, C, C++, Markdown, JSON |
+| `syntax_only`        | Symbols extracted by a syntax backend (tree-sitter)  | Go, Java, JavaScript, PHP, Python, Rust |
+| `syntax_plus_semantic` | Syntax baseline enriched by a semantic backend     | (no languages at this tier yet — will apply once TypeScript/Kotlin gain syntax backends) |
+| `semantic_only`      | Transitional: semantic backend only, no syntax       | TypeScript (with tsserver), Kotlin (with JVM bridge) — will be resolved by adding syntax backends |
 
 ## Query Surface Behavior by Tier
 
