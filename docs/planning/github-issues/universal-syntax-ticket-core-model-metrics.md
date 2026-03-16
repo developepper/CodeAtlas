@@ -12,12 +12,20 @@ must represent that cleanly.
 - update reporting semantics to reflect the layered capability model
 - make the foundational model changes needed for the long-term architecture in
   this first slice rather than deferring them for incremental convenience
+- implement the core-model direction described in the architecture doc,
+  including promotion of the canonical capability/provenance and structural
+  fields needed for broad syntax indexing
 
 ## Deliverables
 
 - schema/model changes as needed
 - metrics and reporting updates
 - regression coverage for capability-tier semantics
+- explicit decisions for the first-class model fields needed by the new
+  architecture, including capability/provenance tier and the structural fields
+  called out in the architecture doc (`container_symbol_id`, `namespace_path`,
+  raw language-native symbol kind, canonical byte/line ranges, and related
+  equivalents if names differ)
 
 ## Acceptance Criteria
 
@@ -50,6 +58,8 @@ must represent that cleanly.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/engineering-principles.md](docs/engineering-principles.md)
 - [crates/core-model/src/lib.rs](crates/core-model/src/lib.rs)
 - [crates/indexer/src/pipeline.rs](crates/indexer/src/pipeline.rs)
 - [crates/indexer/src/metrics.rs](crates/indexer/src/metrics.rs)

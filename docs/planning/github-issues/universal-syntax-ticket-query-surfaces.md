@@ -51,6 +51,7 @@ must remain clean and useful across file, syntax, and semantic capability tiers.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
 - [crates/query-engine/src/store_service.rs](crates/query-engine/src/store_service.rs)
 - [crates/server-mcp/src/tools.rs](crates/server-mcp/src/tools.rs)
 - [crates/service/src/routes.rs](crates/service/src/routes.rs)

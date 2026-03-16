@@ -70,6 +70,8 @@ grow a small set of language-specific special cases.
 
 - This epic is intentionally larger than prior slices because it establishes a
   new platform baseline rather than a narrow feature.
+- As defined by the early-stage architecture policy, clean long-term
+  architecture is favored over backward compatibility for this initiative.
 - The preferred syntax substrate is tree-sitter.
 - Semantic adapters remain important, but they are treated as enrichment over a
   syntax baseline rather than the only path to useful symbol coverage.
@@ -77,5 +79,7 @@ grow a small set of language-specific special cases.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/engineering-principles.md](docs/engineering-principles.md)
 - [docs/planning/post-v1-roadmap.md](docs/planning/post-v1-roadmap.md)
 - [docs/planning/issue-backlog.md](docs/planning/issue-backlog.md)

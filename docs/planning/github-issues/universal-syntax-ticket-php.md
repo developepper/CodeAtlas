@@ -9,6 +9,8 @@ reduction workflows.
 - implement production-grade PHP syntax extraction on the new syntax subsystem
 - support high-value PHP symbol kinds and relationships
 - validate behavior on a Laravel-style repository
+- follow the shared language-module pattern established by Ticket 3 rather than
+  introducing a one-off PHP extraction path
 
 ## Deliverables
 
@@ -46,3 +48,5 @@ reduction workflows.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md](docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md)

@@ -7,6 +7,8 @@ treated as a first-class syntax baseline in CodeAtlas.
 
 - implement production-grade Java syntax extraction
 - add regression coverage for Java
+- follow the shared language-module pattern established by Ticket 3 rather than
+  introducing a one-off Java extraction path
 
 ## Deliverables
 
@@ -41,3 +43,5 @@ treated as a first-class syntax baseline in CodeAtlas.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md](docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md)

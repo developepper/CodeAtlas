@@ -8,6 +8,8 @@ existing paths.
 
 - implement production-grade JavaScript syntax extraction
 - add regression coverage for JavaScript
+- follow the shared language-module pattern established by Ticket 3 rather than
+  introducing a one-off JavaScript extraction path
 
 ## Deliverables
 
@@ -42,3 +44,5 @@ existing paths.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md](docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md)

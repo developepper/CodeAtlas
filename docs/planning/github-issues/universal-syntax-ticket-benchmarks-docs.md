@@ -45,6 +45,8 @@ semantic usefulness separately.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
 - [README.md](README.md)
 - [docs/benchmarks/blog-benchmark-kit.md](docs/benchmarks/blog-benchmark-kit.md)
+- [docs/engineering-principles.md](docs/engineering-principles.md)
 - [docs/operations/runbook.md](docs/operations/runbook.md)

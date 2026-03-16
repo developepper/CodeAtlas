@@ -80,5 +80,6 @@ boundaries between syntax backends, semantic backends, and merge policy.
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
 - [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/engineering-principles.md](docs/engineering-principles.md)
 - [crates/adapter-api/src/router.rs](crates/adapter-api/src/router.rs)
 - [crates/indexer/src/stage.rs](crates/indexer/src/stage.rs)

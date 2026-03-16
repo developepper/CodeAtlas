@@ -9,6 +9,8 @@ languages without devolving into a brittle collection of one-off adapters.
 - define grammar registration / parser lifecycle
 - add shared extraction utilities and language-module patterns
 - migrate the current Rust syntax path onto the new subsystem
+- replace the old `LanguageAdapter`-centered Rust syntax path rather than
+  preserving it as a parallel legacy flow
 
 ## Deliverables
 
@@ -49,4 +51,8 @@ languages without devolving into a brittle collection of one-off adapters.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/engineering-principles.md](docs/engineering-principles.md)
+- [crates/adapter-api/src/lib.rs](crates/adapter-api/src/lib.rs)
 - [crates/adapter-syntax-treesitter](crates/adapter-syntax-treesitter)
+- [crates/adapter-syntax-treesitter/src](crates/adapter-syntax-treesitter/src)

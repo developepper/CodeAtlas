@@ -9,6 +9,8 @@ estimated independently.
 
 - implement production-grade Python syntax extraction
 - add regression coverage for Python
+- follow the shared language-module pattern established by Ticket 3 rather than
+  introducing a one-off Python extraction path
 
 ## Deliverables
 
@@ -43,3 +45,5 @@ estimated independently.
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
+- [docs/architecture/universal-syntax-indexing-architecture.md](docs/architecture/universal-syntax-indexing-architecture.md)
+- [docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md](docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md)
