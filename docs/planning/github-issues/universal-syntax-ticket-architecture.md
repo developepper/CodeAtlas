@@ -58,6 +58,24 @@ boundaries between syntax backends, semantic backends, and merge policy.
 - [ ] the ticket produces concrete trait/interface proposals rather than a
       second high-level planning pass
 
+## Testing Requirements
+
+- Unit: N/A for this spec/design ticket
+- Integration: N/A for this spec/design ticket
+- Security: N/A
+- Performance: N/A
+
+## Dependencies
+
+- Blocks Tickets 2-10
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Architecture and planning docs updated and internally consistent
+- [ ] Ticket 1 is merged or otherwise ratified as the canonical Epic 17 design gate
+- [ ] No implementation ticket proceeds on conflicting design assumptions
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)

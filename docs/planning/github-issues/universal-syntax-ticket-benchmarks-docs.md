@@ -23,6 +23,25 @@ semantic usefulness separately.
 - [ ] benchmark guidance includes Laravel/PHP proving-ground expectations
 - [ ] docs remain honest about where semantic enrichment still exceeds syntax-only capability
 
+## Testing Requirements
+
+- Unit: N/A
+- Integration: validate referenced commands/docs examples remain consistent with shipped CLI/query behavior
+- Security: N/A
+- Performance: benchmark guidance captures token/context and indexing-performance implications where relevant
+
+## Dependencies
+
+- Requires Ticket 1
+- Should land after Tickets 2-4 so docs and benchmark guidance reflect real architecture and PHP proving-ground evidence
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Docs updated and internally consistent
+- [ ] Benchmark guidance updated and reviewable
+- [ ] CI green if docs/tests are affected
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)

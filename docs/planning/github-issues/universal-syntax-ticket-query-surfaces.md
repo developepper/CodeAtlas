@@ -28,6 +28,26 @@ must remain clean and useful across file, syntax, and semantic capability tiers.
       syntax-plus-semantic repositories
 - [ ] exact file/source retrieval semantics remain coherent across capability tiers
 
+## Testing Requirements
+
+- Unit: query-layer behavior tests for capability-tier branching where practical
+- Integration: service/MCP/query-engine tests covering file-only, syntax-only, and syntax-plus-semantic repositories
+- Security: N/A
+- Performance: validate query latency remains acceptable on syntax-indexed repositories
+
+## Dependencies
+
+- Requires Ticket 1
+- Requires Ticket 2 for capability-tier model/reporting semantics
+- Requires at least Ticket 3 and one language ticket to validate syntax-indexed behavior meaningfully
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Tests added/updated and passing
+- [ ] Docs updated if needed
+- [ ] CI green
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)

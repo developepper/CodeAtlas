@@ -19,6 +19,25 @@ treated as a first-class syntax baseline in CodeAtlas.
 - [ ] file outline is useful on representative Java repositories
 - [ ] symbol search returns useful results on representative Java repositories
 
+## Testing Requirements
+
+- Unit: Java symbol extraction coverage for high-value symbol kinds
+- Integration: representative Java repository tests for file outline and symbol search
+- Security: N/A
+- Performance: validate Java extraction remains acceptable on representative repositories
+
+## Dependencies
+
+- Requires Ticket 1
+- Requires Ticket 3
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Tests added/updated and passing
+- [ ] Docs updated if needed
+- [ ] CI green
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)

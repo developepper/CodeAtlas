@@ -34,16 +34,16 @@ grow a small set of language-specific special cases.
 
 ## Child Tickets
 
-- TBD Ticket: Define the universal syntax indexing architecture and capability model
-- TBD Ticket: Refactor core model and metrics for file/syntax/semantic capability tiers
-- TBD Ticket: Create the multi-language syntax indexing subsystem and migrate Rust onto it
-- TBD Ticket: Implement PHP syntax indexing on the new subsystem
-- TBD Ticket: Implement Python syntax indexing
-- TBD Ticket: Implement Go syntax indexing
-- TBD Ticket: Implement Java syntax indexing
-- TBD Ticket: Implement JavaScript syntax indexing
-- TBD Ticket: Rework query surfaces for broad syntax coverage
-- TBD Ticket: Update benchmark and token-efficiency evaluation strategy
+- Ticket 1: Define the universal syntax indexing architecture and capability model
+- Ticket 2: Refactor core model and metrics for file/syntax/semantic capability tiers
+- Ticket 3: Create the multi-language syntax indexing subsystem and migrate Rust onto it
+- Ticket 4: Implement PHP syntax indexing on the new subsystem
+- Ticket 5: Implement Python syntax indexing
+- Ticket 6: Implement Go syntax indexing
+- Ticket 7: Implement Java syntax indexing
+- Ticket 8: Implement JavaScript syntax indexing
+- Ticket 9: Rework query surfaces for broad syntax coverage
+- Ticket 10: Update benchmark and token-efficiency evaluation strategy
 
 ## Epic Definition Of Done
 

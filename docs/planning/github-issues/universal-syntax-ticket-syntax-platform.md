@@ -27,6 +27,25 @@ languages without devolving into a brittle collection of one-off adapters.
 - [ ] the subsystem is positioned for continued language expansion without
       repeated foundational redesign
 
+## Testing Requirements
+
+- Unit: parser lifecycle, grammar registry, and shared extraction utility coverage
+- Integration: Rust indexing runs through the new syntax subsystem with stable output
+- Security: N/A
+- Performance: validate no material regression in baseline Rust syntax indexing throughput
+
+## Dependencies
+
+- Requires Ticket 1
+- May require Ticket 2 first or in parallel if core-model changes are foundational to the new subsystem
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Tests added/updated and passing
+- [ ] Docs updated if needed
+- [ ] CI green
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)

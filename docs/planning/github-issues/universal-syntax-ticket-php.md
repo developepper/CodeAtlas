@@ -23,6 +23,26 @@ reduction workflows.
 - [ ] PHP symbol search returns useful results on a Laravel-style repo
 - [ ] Laravel/PHP proving-ground evidence is captured for review
 
+## Testing Requirements
+
+- Unit: PHP symbol extraction coverage for high-value symbol kinds and parent/container relationships
+- Integration: Laravel-oriented indexing tests covering outlines and symbol search
+- Security: N/A
+- Performance: validate PHP syntax extraction remains acceptable on a large Laravel repository
+
+## Dependencies
+
+- Requires Ticket 1
+- Requires Ticket 3
+- May require Ticket 2 first if model/query changes are needed for PHP symbol representation
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Tests added/updated and passing
+- [ ] Docs updated if needed
+- [ ] CI green
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)

@@ -28,6 +28,25 @@ must represent that cleanly.
 - [ ] the ticket does not defer known foundational schema/model corrections
       purely to keep the initial implementation smaller
 
+## Testing Requirements
+
+- Unit: schema/model validation and capability-tier classification coverage
+- Integration: pipeline/reporting tests proving file-only, syntax, and semantic metrics remain distinct
+- Security: N/A
+- Performance: confirm reporting/model changes do not introduce unacceptable indexing overhead
+
+## Dependencies
+
+- Requires Ticket 1
+- Should land before or alongside Ticket 3 if schema changes are required by the new syntax subsystem
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Tests added/updated and passing
+- [ ] Docs updated if needed
+- [ ] CI green
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)

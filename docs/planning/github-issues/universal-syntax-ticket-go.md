@@ -21,6 +21,25 @@ estimated independently.
 - [ ] file outline is useful on representative Go repositories
 - [ ] symbol search returns useful results on representative Go repositories
 
+## Testing Requirements
+
+- Unit: Go symbol extraction coverage for high-value symbol kinds
+- Integration: representative Go repository tests for file outline and symbol search
+- Security: N/A
+- Performance: validate Go extraction remains acceptable on representative repositories
+
+## Dependencies
+
+- Requires Ticket 1
+- Requires Ticket 3
+
+## Definition Of Done
+
+- [ ] Acceptance criteria met
+- [ ] Tests added/updated and passing
+- [ ] Docs updated if needed
+- [ ] CI green
+
 ## References
 
 - [docs/planning/universal-syntax-indexing.md](docs/planning/universal-syntax-indexing.md)
