@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Integration tests for the Kotlin semantic adapter with the real runtime.
 //!
 //! These tests exercise `KotlinSemanticAdapter<KotlinAnalysisProcess>` — the

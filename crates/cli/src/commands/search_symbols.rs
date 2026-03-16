@@ -25,7 +25,7 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
         filters: QueryFilters {
             kind: opts.kind,
             language: opts.language,
-            quality_level: None,
+            capability_tier: None,
             file_path: None,
         },
         limit: opts.limit,

@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use adapter_api::{
     AdapterCapabilities, AdapterError, AdapterOutput, ExtractedSymbol, IndexContext,
     LanguageAdapter, SourceFile, SourceSpan,

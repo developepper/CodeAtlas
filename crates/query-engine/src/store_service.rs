@@ -42,7 +42,7 @@ impl QueryService for StoreQueryService<'_> {
             &query.repo_id,
             query.filters.kind,
             query.filters.language.as_deref(),
-            query.filters.quality_level,
+            query.filters.capability_tier,
             query.filters.file_path.as_deref(),
         )?;
 

@@ -6,7 +6,7 @@ use tracing::{info, info_span};
 
 use crate::change_detection;
 use crate::context::PipelineContext;
-use crate::metrics::{self, SemanticCoverageMetrics};
+use crate::metrics::{self, CapabilityTierMetrics};
 use crate::stage::{self, DiscoveryOutput, FileError, ParseOutput};
 use crate::PipelineError;
 
@@ -23,8 +23,8 @@ pub struct IndexMetrics {
     pub files_deleted: usize,
     /// Files indexed at file level only (no symbols extracted).
     pub files_file_only: usize,
-    /// Semantic coverage metrics computed from parse output.
-    pub coverage: SemanticCoverageMetrics,
+    /// Capability tier metrics computed from parse output.
+    pub coverage: CapabilityTierMetrics,
 }
 
 /// Result of a successful pipeline run.
@@ -145,19 +145,15 @@ pub fn run(
         .map(|f| f.output.symbols.len())
         .sum();
 
-    // Compute semantic coverage metrics from parse output.
-    let coverage = metrics::compute_coverage(&parse_output);
+    // Compute capability tier metrics from parse output.
+    let coverage = metrics::compute_tier_metrics(&parse_output);
 
     // Stage 3: Persist (blobs first, then metadata in a transaction)
     // Pass the full discovery for stale file cleanup, but only parsed
     // changed/new files for upserts.
     stage::persist(ctx, store, blob_store, &discovery, &parse_output)?;
 
-    let files_file_only = parse_output
-        .parsed_files
-        .iter()
-        .filter(|f| f.output.symbols.is_empty())
-        .count();
+    let files_file_only = coverage.files_file_only;
 
     // files_parsed means files that produced symbol-bearing adapter output.
     // File-only records are tracked separately via files_file_only.

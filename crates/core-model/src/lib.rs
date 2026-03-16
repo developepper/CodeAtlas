@@ -58,12 +58,146 @@ impl fmt::Display for ValidationError {
 
 impl Error for ValidationError {}
 
+// ---------------------------------------------------------------------------
+// Capability tier (replaces QualityLevel for the long-term architecture)
+// ---------------------------------------------------------------------------
+
+/// Capability tier for a file or symbol after indexing.
+///
+/// This is the canonical representation introduced by Epic 17. It replaces
+/// the previous two-value `QualityLevel` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityTier {
+    /// File record and content blob only; no extracted symbols.
+    FileOnly,
+    /// Symbols extracted by a syntax backend (tree-sitter).
+    SyntaxOnly,
+    /// Syntax baseline enriched by a semantic backend.
+    SyntaxPlusSemantic,
+    /// Transitional: semantic backend produced symbols but no syntax backend
+    /// was available. Not a durable product tier — should be resolved by
+    /// adding syntax backends for the affected languages.
+    SemanticOnly,
+}
+
+impl CapabilityTier {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FileOnly => "file_only",
+            Self::SyntaxOnly => "syntax_only",
+            Self::SyntaxPlusSemantic => "syntax_plus_semantic",
+            Self::SemanticOnly => "semantic_only",
+        }
+    }
+
+    /// Returns `true` if this tier includes semantic-quality symbols.
+    #[must_use]
+    pub fn has_semantic(self) -> bool {
+        matches!(self, Self::SyntaxPlusSemantic | Self::SemanticOnly)
+    }
+
+    /// Returns `true` if this tier includes any extracted symbols.
+    #[must_use]
+    pub fn has_symbols(self) -> bool {
+        !matches!(self, Self::FileOnly)
+    }
+}
+
+impl std::str::FromStr for CapabilityTier {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "file_only" => Ok(Self::FileOnly),
+            "syntax_only" => Ok(Self::SyntaxOnly),
+            "syntax_plus_semantic" => Ok(Self::SyntaxPlusSemantic),
+            "semantic_only" => Ok(Self::SemanticOnly),
+            other => Err(format!("unknown capability tier: '{other}'")),
+        }
+    }
+}
+
+impl fmt::Display for CapabilityTier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QualityLevel (deprecated — retained for adapter-api compatibility until
+// Ticket 3 retires adapter-api)
+// ---------------------------------------------------------------------------
+
+#[deprecated(
+    note = "Use CapabilityTier instead; QualityLevel is removed when adapter-api is retired in Ticket 3"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QualityLevel {
     Semantic,
     Syntax,
 }
+
+#[allow(deprecated)]
+impl From<QualityLevel> for CapabilityTier {
+    fn from(ql: QualityLevel) -> Self {
+        match ql {
+            QualityLevel::Semantic => CapabilityTier::SemanticOnly,
+            QualityLevel::Syntax => CapabilityTier::SyntaxOnly,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SourceSpan (moved from adapter-api for cross-subsystem sharing)
+// ---------------------------------------------------------------------------
+
+/// Byte-and-line position of a symbol in its source file.
+///
+/// Previously defined in `adapter-api`. Moved to `core-model` so that
+/// `syntax-platform`, `semantic-api`, and `indexer` can all reference it
+/// without depending on `adapter-api`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceSpan {
+    /// 1-based start line.
+    pub start_line: u32,
+    /// 1-based end line (inclusive). Must be >= start_line.
+    pub end_line: u32,
+    /// 0-based start byte offset.
+    pub start_byte: u64,
+    /// Length in bytes. Must be > 0.
+    pub byte_length: u64,
+}
+
+impl Validate for SourceSpan {
+    fn validate(&self) -> ValidationResult {
+        if self.start_line == 0 {
+            return Err(ValidationError::InvalidField {
+                field: "start_line",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.end_line < self.start_line {
+            return Err(ValidationError::InvalidField {
+                field: "end_line",
+                reason: "must be greater than or equal to start_line",
+            });
+        }
+        if self.byte_length == 0 {
+            return Err(ValidationError::InvalidField {
+                field: "byte_length",
+                reason: "must be greater than zero",
+            });
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Status enums
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -131,6 +265,10 @@ impl std::str::FromStr for FreshnessStatus {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SymbolKind
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
@@ -170,6 +308,10 @@ impl SymbolKind {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Record types
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SymbolRecord {
     pub id: String,
@@ -185,9 +327,9 @@ pub struct SymbolRecord {
     pub start_byte: u64,
     pub byte_length: u64,
     pub content_hash: String,
-    pub quality_level: QualityLevel,
+    pub capability_tier: CapabilityTier,
     pub confidence_score: f32,
-    pub source_adapter: String,
+    pub source_backend: String,
     pub indexed_at: String,
     pub docstring: Option<String>,
     pub summary: Option<String>,
@@ -195,12 +337,30 @@ pub struct SymbolRecord {
     pub keywords: Option<Vec<String>>,
     pub decorators_or_attributes: Option<Vec<String>>,
     pub semantic_refs: Option<Vec<String>>,
-}
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct QualityMix {
-    pub semantic_percent: f32,
-    pub syntax_percent: f32,
+    // -- Structural fields for broad syntax indexing (Epic 17) --
+    /// Symbol ID of the containing symbol (e.g. the struct/class that contains
+    /// a method). `None` for top-level symbols. Replaces the string-based
+    /// `parent_qualified_name` from adapter output with a stable ID reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_symbol_id: Option<String>,
+
+    /// Fully-qualified namespace or module path (e.g. `crate::service`,
+    /// `com.example.app`). Language-specific; `None` when not applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace_path: Option<String>,
+
+    /// Raw language-native symbol kind string (e.g. `"struct_item"`,
+    /// `"class_declaration"`, `"function_item"`). Preserves the original
+    /// tree-sitter or semantic-backend node type before normalization to
+    /// `SymbolKind`. Useful for language-specific filtering and diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_kind: Option<String>,
+
+    /// Common modifiers where available (e.g. `"pub"`, `"static"`,
+    /// `"abstract"`, `"async"`). Language-specific; empty when not extracted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifiers: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -211,8 +371,17 @@ pub struct FileRecord {
     pub file_hash: String,
     pub summary: String,
     pub symbol_count: u64,
-    pub quality_mix: QualityMix,
+    pub capability_tier: CapabilityTier,
     pub updated_at: String,
+}
+
+/// Deprecated — replaced by `CapabilityTier` on `FileRecord`.
+/// Retained temporarily for adapter-api compatibility until Ticket 3.
+#[deprecated(note = "Use CapabilityTier on FileRecord instead; removed in Ticket 3")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QualityMix {
+    pub semantic_percent: f32,
+    pub syntax_percent: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -240,6 +409,10 @@ pub struct RepoRecord {
     pub freshness_status: FreshnessStatus,
 }
 
+// ---------------------------------------------------------------------------
+// Validation impls
+// ---------------------------------------------------------------------------
+
 impl Validate for SymbolRecord {
     fn validate(&self) -> ValidationResult {
         require_non_empty(&self.id, "id")?;
@@ -250,7 +423,7 @@ impl Validate for SymbolRecord {
         require_non_empty(&self.qualified_name, "qualified_name")?;
         require_non_empty(&self.signature, "signature")?;
         require_non_empty(&self.content_hash, "content_hash")?;
-        require_non_empty(&self.source_adapter, "source_adapter")?;
+        require_non_empty(&self.source_backend, "source_backend")?;
         require_non_empty(&self.indexed_at, "indexed_at")?;
         validate_symbol_id(&self.id)?;
 
@@ -313,22 +486,11 @@ impl Validate for SymbolRecord {
         )?;
         validate_optional_non_empty_items(&self.semantic_refs, "semantic_refs")?;
 
-        Ok(())
-    }
-}
-
-impl Validate for QualityMix {
-    fn validate(&self) -> ValidationResult {
-        validate_percentage(self.semantic_percent, "quality_mix.semantic_percent")?;
-        validate_percentage(self.syntax_percent, "quality_mix.syntax_percent")?;
-
-        let total = self.semantic_percent + self.syntax_percent;
-        if total > 100.0 + f32::EPSILON {
-            return Err(ValidationError::InvalidField {
-                field: "quality_mix",
-                reason: "semantic_percent + syntax_percent must be <= 100",
-            });
-        }
+        // Structural fields (Epic 17).
+        validate_optional_string(&self.container_symbol_id, "container_symbol_id")?;
+        validate_optional_string(&self.namespace_path, "namespace_path")?;
+        validate_optional_string(&self.raw_kind, "raw_kind")?;
+        validate_optional_non_empty_items(&self.modifiers, "modifiers")?;
 
         Ok(())
     }
@@ -343,7 +505,6 @@ impl Validate for FileRecord {
         require_non_empty(&self.summary, "summary")?;
         require_non_empty(&self.updated_at, "updated_at")?;
         validate_rfc3339_timestamp(&self.updated_at, "updated_at")?;
-        self.quality_mix.validate()?;
         Ok(())
     }
 }
@@ -371,6 +532,10 @@ impl Validate for RepoRecord {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
 
 fn require_non_empty(value: &str, field: &'static str) -> ValidationResult {
     if value.trim().is_empty() {
@@ -409,24 +574,6 @@ fn validate_optional_non_empty_items(
     Ok(())
 }
 
-fn validate_percentage(value: f32, field: &'static str) -> ValidationResult {
-    if !value.is_finite() {
-        return Err(ValidationError::InvalidField {
-            field,
-            reason: "must be finite",
-        });
-    }
-
-    if !(0.0..=100.0).contains(&value) {
-        return Err(ValidationError::InvalidField {
-            field,
-            reason: "must be within 0.0..=100.0",
-        });
-    }
-
-    Ok(())
-}
-
 fn validate_rfc3339_timestamp(value: &str, field: &'static str) -> ValidationResult {
     if OffsetDateTime::parse(value, &Rfc3339).is_err() {
         return Err(ValidationError::InvalidField {
@@ -438,6 +585,10 @@ fn validate_rfc3339_timestamp(value: &str, field: &'static str) -> ValidationRes
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -446,7 +597,7 @@ mod tests {
 
     use super::{
         build_symbol_id, disambiguate_symbol_id, normalize_file_path, parse_symbol_id,
-        validate_symbol_id, FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix,
+        validate_symbol_id, CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus,
         RepoRecord, SymbolKind, SymbolRecord, Validate,
     };
 
@@ -469,9 +620,9 @@ mod tests {
             start_byte: 120,
             byte_length: 25,
             content_hash: "abc123".to_string(),
-            quality_level: QualityLevel::Semantic,
+            capability_tier: CapabilityTier::SyntaxPlusSemantic,
             confidence_score: 0.95,
-            source_adapter: "semantic-rust-v1".to_string(),
+            source_backend: "semantic-rust-v1".to_string(),
             indexed_at: "2026-03-09T00:00:00Z".to_string(),
             docstring: Some("Executes the app.".to_string()),
             summary: Some("Entry point".to_string()),
@@ -479,6 +630,10 @@ mod tests {
             keywords: Some(vec!["entrypoint".to_string(), "startup".to_string()]),
             decorators_or_attributes: None,
             semantic_refs: Some(vec!["crate::Config".to_string()]),
+            container_symbol_id: None,
+            namespace_path: Some("crate".to_string()),
+            raw_kind: Some("function_item".to_string()),
+            modifiers: Some(vec!["pub".to_string()]),
         }
     }
 
@@ -490,10 +645,7 @@ mod tests {
             file_hash: "def456".to_string(),
             summary: "Main executable module".to_string(),
             symbol_count: 7,
-            quality_mix: QualityMix {
-                semantic_percent: 80.0,
-                syntax_percent: 20.0,
-            },
+            capability_tier: CapabilityTier::SyntaxPlusSemantic,
             updated_at: "2026-03-09T00:00:00Z".to_string(),
         }
     }
@@ -506,7 +658,7 @@ mod tests {
             display_name: "CodeAtlas".to_string(),
             source_root: "/repo".to_string(),
             indexed_at: "2026-03-09T00:00:00Z".to_string(),
-            index_version: "1.0.0".to_string(),
+            index_version: "1.1.0".to_string(),
             language_counts,
             file_count: 10,
             symbol_count: 90,
@@ -570,6 +722,7 @@ mod tests {
 
     #[test]
     fn symbol_deserialization_fails_when_required_field_missing() {
+        // Missing "id" field.
         let payload = json!({
             "repo_id": "repo-1",
             "file_path": "src/main.rs",
@@ -583,9 +736,9 @@ mod tests {
             "start_byte": 120,
             "byte_length": 25,
             "content_hash": "abc123",
-            "quality_level": "semantic",
+            "capability_tier": "syntax_plus_semantic",
             "confidence_score": 0.9,
-            "source_adapter": "semantic-rust-v1",
+            "source_backend": "semantic-rust-v1",
             "indexed_at": "2026-03-09T00:00:00Z",
             "docstring": null,
             "summary": null,
@@ -600,13 +753,9 @@ mod tests {
     }
 
     #[test]
-    fn file_validation_rejects_invalid_quality_mix() {
-        let mut record = valid_file_record();
-        record.quality_mix.semantic_percent = 70.0;
-        record.quality_mix.syntax_percent = 40.0;
-
-        let err = record.validate().expect_err("expected validation failure");
-        assert!(format!("{err}").contains("quality_mix"));
+    fn file_validation_accepts_valid_record() {
+        let record = valid_file_record();
+        assert!(record.validate().is_ok());
     }
 
     #[test]
@@ -658,9 +807,9 @@ mod tests {
             "start_byte": 120,
             "byte_length": 25,
             "content_hash": "abc123",
-            "quality_level": "semantic",
+            "capability_tier": "syntax_plus_semantic",
             "confidence_score": 0.9,
-            "source_adapter": "semantic-rust-v1",
+            "source_backend": "semantic-rust-v1",
             "indexed_at": "2026-03-09T00:00:00Z",
             "docstring": null,
             "summary": null,
@@ -677,6 +826,118 @@ mod tests {
             .expect_err("expected unknown kind to fail");
         assert!(format!("{err}").contains("id"));
     }
+
+    // -- Capability tier tests --
+
+    #[test]
+    fn capability_tier_round_trips_through_serde() {
+        for tier in [
+            CapabilityTier::FileOnly,
+            CapabilityTier::SyntaxOnly,
+            CapabilityTier::SyntaxPlusSemantic,
+            CapabilityTier::SemanticOnly,
+        ] {
+            let json = serde_json::to_string(&tier).expect("serialize tier");
+            let decoded: CapabilityTier = serde_json::from_str(&json).expect("deserialize tier");
+            assert_eq!(decoded, tier);
+        }
+    }
+
+    #[test]
+    fn capability_tier_as_str_matches_serde() {
+        assert_eq!(CapabilityTier::FileOnly.as_str(), "file_only");
+        assert_eq!(CapabilityTier::SyntaxOnly.as_str(), "syntax_only");
+        assert_eq!(
+            CapabilityTier::SyntaxPlusSemantic.as_str(),
+            "syntax_plus_semantic"
+        );
+        assert_eq!(CapabilityTier::SemanticOnly.as_str(), "semantic_only");
+    }
+
+    #[test]
+    fn capability_tier_from_str_round_trips() {
+        for tier in [
+            CapabilityTier::FileOnly,
+            CapabilityTier::SyntaxOnly,
+            CapabilityTier::SyntaxPlusSemantic,
+            CapabilityTier::SemanticOnly,
+        ] {
+            let parsed: CapabilityTier = tier.as_str().parse().expect("parse tier");
+            assert_eq!(parsed, tier);
+        }
+    }
+
+    #[test]
+    fn capability_tier_has_semantic() {
+        assert!(!CapabilityTier::FileOnly.has_semantic());
+        assert!(!CapabilityTier::SyntaxOnly.has_semantic());
+        assert!(CapabilityTier::SyntaxPlusSemantic.has_semantic());
+        assert!(CapabilityTier::SemanticOnly.has_semantic());
+    }
+
+    #[test]
+    fn capability_tier_has_symbols() {
+        assert!(!CapabilityTier::FileOnly.has_symbols());
+        assert!(CapabilityTier::SyntaxOnly.has_symbols());
+        assert!(CapabilityTier::SyntaxPlusSemantic.has_symbols());
+        assert!(CapabilityTier::SemanticOnly.has_symbols());
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn quality_level_converts_to_capability_tier() {
+        use super::QualityLevel;
+        assert_eq!(
+            CapabilityTier::from(QualityLevel::Semantic),
+            CapabilityTier::SemanticOnly
+        );
+        assert_eq!(
+            CapabilityTier::from(QualityLevel::Syntax),
+            CapabilityTier::SyntaxOnly
+        );
+    }
+
+    // -- SourceSpan tests --
+
+    #[test]
+    fn source_span_validation_accepts_valid() {
+        use super::SourceSpan;
+        let span = SourceSpan {
+            start_line: 1,
+            end_line: 5,
+            start_byte: 0,
+            byte_length: 100,
+        };
+        assert!(span.validate().is_ok());
+    }
+
+    #[test]
+    fn source_span_validation_rejects_zero_start_line() {
+        use super::SourceSpan;
+        let span = SourceSpan {
+            start_line: 0,
+            end_line: 1,
+            start_byte: 0,
+            byte_length: 10,
+        };
+        let err = span.validate().expect_err("should fail");
+        assert!(format!("{err}").contains("start_line"));
+    }
+
+    #[test]
+    fn source_span_validation_rejects_zero_byte_length() {
+        use super::SourceSpan;
+        let span = SourceSpan {
+            start_line: 1,
+            end_line: 1,
+            start_byte: 0,
+            byte_length: 0,
+        };
+        let err = span.validate().expect_err("should fail");
+        assert!(format!("{err}").contains("byte_length"));
+    }
+
+    // -- Symbol ID tests (unchanged) --
 
     #[test]
     fn symbol_id_constructor_is_stable_for_unchanged_identity() {

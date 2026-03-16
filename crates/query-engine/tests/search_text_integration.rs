@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use core_model::{
-    FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+    CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus, RepoRecord, SymbolKind,
     SymbolRecord,
 };
 use query_engine::{QueryError, QueryFilters, QueryService, StoreQueryService, TextQuery};
@@ -20,7 +20,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             display_name: "Test".into(),
             source_root: "/tmp/test".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
-            index_version: "1.0.0".into(),
+            index_version: "1.1.0".into(),
             language_counts: BTreeMap::from([("rust".into(), 2)]),
             file_count: 2,
             symbol_count: 5,
@@ -41,10 +41,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
                 file_hash: format!("sha256:{path}"),
                 summary: "source file".into(),
                 symbol_count: 0,
-                quality_mix: QualityMix {
-                    semantic_percent: 0.0,
-                    syntax_percent: 100.0,
-                },
+                capability_tier: CapabilityTier::SyntaxOnly,
                 updated_at: "2026-03-09T00:00:00Z".into(),
             })
             .unwrap();
@@ -126,9 +123,9 @@ fn make_symbol(
         start_byte: 0,
         byte_length: 100,
         content_hash: format!("hash-{name}"),
-        quality_level: QualityLevel::Syntax,
+        capability_tier: CapabilityTier::SyntaxOnly,
         confidence_score: 0.8,
-        source_adapter: "syntax-treesitter-v1".into(),
+        source_backend: "syntax-treesitter-v1".into(),
         indexed_at: "2026-03-09T00:00:00Z".into(),
         docstring: docstring.map(String::from),
         summary: None,
@@ -136,6 +133,10 @@ fn make_symbol(
         keywords,
         decorators_or_attributes: None,
         semantic_refs: None,
+        container_symbol_id: None,
+        namespace_path: None,
+        raw_kind: None,
+        modifiers: None,
     }
 }
 
@@ -386,7 +387,7 @@ fn fts_index_updated_on_symbol_insert() {
             display_name: "R".into(),
             source_root: "/r".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
-            index_version: "1.0.0".into(),
+            index_version: "1.1.0".into(),
             language_counts: BTreeMap::new(),
             file_count: 1,
             symbol_count: 0,
@@ -406,10 +407,7 @@ fn fts_index_updated_on_symbol_insert() {
             file_hash: "h".into(),
             summary: "s".into(),
             symbol_count: 0,
-            quality_mix: QualityMix {
-                semantic_percent: 0.0,
-                syntax_percent: 100.0,
-            },
+            capability_tier: CapabilityTier::SyntaxOnly,
             updated_at: "2026-03-09T00:00:00Z".into(),
         })
         .unwrap();
@@ -447,9 +445,9 @@ fn fts_index_updated_on_symbol_insert() {
             start_byte: 0,
             byte_length: 100,
             content_hash: "hash-unique".into(),
-            quality_level: QualityLevel::Syntax,
+            capability_tier: CapabilityTier::SyntaxOnly,
             confidence_score: 0.8,
-            source_adapter: "syntax-treesitter-v1".into(),
+            source_backend: "syntax-treesitter-v1".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
             docstring: None,
             summary: None,
@@ -457,6 +455,10 @@ fn fts_index_updated_on_symbol_insert() {
             keywords: None,
             decorators_or_attributes: None,
             semantic_refs: None,
+            container_symbol_id: None,
+            namespace_path: None,
+            raw_kind: None,
+            modifiers: None,
         })
         .unwrap();
 

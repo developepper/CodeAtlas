@@ -1,3 +1,6 @@
+// adapter-api intentionally uses QualityLevel until it is retired in Ticket 3.
+#![allow(deprecated)]
+
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
@@ -112,41 +115,10 @@ impl Validate for AdapterCapabilities {
 }
 
 // ---------------------------------------------------------------------------
-// Source span
+// Source span (re-exported from core-model)
 // ---------------------------------------------------------------------------
 
-/// Byte-and-line position of a symbol in its source file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SourceSpan {
-    pub start_line: u32,
-    pub end_line: u32,
-    pub start_byte: u64,
-    pub byte_length: u64,
-}
-
-impl Validate for SourceSpan {
-    fn validate(&self) -> ValidationResult {
-        if self.start_line == 0 {
-            return Err(ValidationError::InvalidField {
-                field: "start_line",
-                reason: "must be greater than zero",
-            });
-        }
-        if self.end_line < self.start_line {
-            return Err(ValidationError::InvalidField {
-                field: "end_line",
-                reason: "must be greater than or equal to start_line",
-            });
-        }
-        if self.byte_length == 0 {
-            return Err(ValidationError::InvalidField {
-                field: "byte_length",
-                reason: "must be greater than zero",
-            });
-        }
-        Ok(())
-    }
-}
+pub use core_model::SourceSpan;
 
 // ---------------------------------------------------------------------------
 // Extracted symbol (adapter output)

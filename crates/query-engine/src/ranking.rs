@@ -7,7 +7,7 @@
 //!
 //! Tie-breaking uses the symbol ID for deterministic ordering.
 
-use core_model::{QualityLevel, SymbolRecord};
+use core_model::SymbolRecord;
 
 use crate::ScoredSymbol;
 
@@ -45,9 +45,10 @@ pub fn score_symbol(query: &str, record: &SymbolRecord) -> Option<f32> {
     };
 
     // Signal 4: Confidence boost for semantic quality.
-    let confidence_boost = match record.quality_level {
-        QualityLevel::Semantic => record.confidence_score * 0.1,
-        QualityLevel::Syntax => 0.0,
+    let confidence_boost = if record.capability_tier.has_semantic() {
+        record.confidence_score * 0.1
+    } else {
+        0.0
     };
 
     // Weighted combination, clamped to [0.0, 1.0].
@@ -146,7 +147,7 @@ fn token_overlap(query_tokens: &[String], candidate_tokens: &[String]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_model::{build_symbol_id, SymbolKind};
+    use core_model::{build_symbol_id, CapabilityTier, SymbolKind};
 
     fn make_symbol(name: &str, kind: SymbolKind) -> SymbolRecord {
         let file_path = "src/lib.rs";
@@ -165,9 +166,9 @@ mod tests {
             start_byte: 0,
             byte_length: 50,
             content_hash: "hash".into(),
-            quality_level: QualityLevel::Syntax,
+            capability_tier: CapabilityTier::SyntaxOnly,
             confidence_score: 0.8,
-            source_adapter: "syntax-treesitter-v1".into(),
+            source_backend: "syntax-treesitter-v1".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
             docstring: None,
             summary: None,
@@ -175,6 +176,10 @@ mod tests {
             keywords: None,
             decorators_or_attributes: None,
             semantic_refs: None,
+            container_symbol_id: None,
+            namespace_path: None,
+            raw_kind: None,
+            modifiers: None,
         }
     }
 
@@ -206,10 +211,10 @@ mod tests {
     #[test]
     fn semantic_quality_boosts_score() {
         let mut syntax_sym = make_symbol("process", SymbolKind::Function);
-        syntax_sym.quality_level = QualityLevel::Syntax;
+        syntax_sym.capability_tier = CapabilityTier::SyntaxOnly;
 
         let mut semantic_sym = syntax_sym.clone();
-        semantic_sym.quality_level = QualityLevel::Semantic;
+        semantic_sym.capability_tier = CapabilityTier::SyntaxPlusSemantic;
         semantic_sym.confidence_score = 0.95;
 
         let syntax_score = score_symbol("process", &syntax_sym).expect("match");
@@ -339,7 +344,7 @@ mod tests {
     #[test]
     fn score_clamped_to_one() {
         let mut sym = make_symbol("x", SymbolKind::Function);
-        sym.quality_level = QualityLevel::Semantic;
+        sym.capability_tier = CapabilityTier::SyntaxPlusSemantic;
         sym.confidence_score = 1.0;
         sym.keywords = Some(vec!["x".into()]);
         sym.summary = Some("x".into());

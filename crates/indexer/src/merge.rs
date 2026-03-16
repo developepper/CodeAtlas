@@ -6,7 +6,7 @@
 //! - Deduplicate symbols by identity (`qualified_name` + `kind`).
 //! - Keep the higher-confidence record when the same symbol appears in
 //!   multiple outputs.
-//! - Preserve provenance (`source_adapter`, `quality_level`) from the
+//! - Preserve provenance (`source_backend`, `capability_tier`) from the
 //!   winning output.
 //! - Deterministic tie-breaking: prefer semantic over syntax; within the
 //!   same quality level, prefer the output that appears earlier in the
@@ -15,16 +15,23 @@
 use std::collections::HashMap;
 
 use adapter_api::{AdapterOutput, ExtractedSymbol};
-use core_model::{QualityLevel, SymbolKind};
+#[allow(deprecated)]
+use core_model::QualityLevel;
+use core_model::{CapabilityTier, SymbolKind};
 use tracing::debug;
 
 /// Identity key for deduplication: `(qualified_name, kind)`.
 type SymbolKey = (String, SymbolKind);
 
 /// A symbol with its provenance metadata, used during merge.
+///
+/// Internal field `quality_level` is kept as [`QualityLevel`] because
+/// [`AdapterOutput`] still uses it. Converted to [`CapabilityTier`] when
+/// building the public [`SymbolProvenance`].
 struct TaggedSymbol {
     symbol: ExtractedSymbol,
     source_adapter: String,
+    #[allow(deprecated)]
     quality_level: QualityLevel,
     /// Default confidence from the producing adapter's capabilities.
     default_confidence: f32,
@@ -53,20 +60,20 @@ pub enum MergeOutcome {
     /// Semantic and syntax adapters both produced this symbol with equal
     /// confidence; tie-broken by adapter priority in favour of semantic.
     Tie,
-    /// Multiple adapters of the *same* quality level both produced this
+    /// Multiple adapters of the *same* capability tier both produced this
     /// symbol (e.g. two semantic adapters). Not a semantic-vs-syntax
     /// comparison, so excluded from the win-rate KPI.
-    SameQuality,
+    SameTier,
 }
 
 /// Per-symbol provenance tracking for merged outputs.
 ///
 /// When symbols from multiple adapters are merged, each symbol retains
-/// the `quality_level` and `source_adapter` of the adapter that produced it.
+/// the `capability_tier` and `source_backend` of the adapter that produced it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SymbolProvenance {
-    pub quality_level: QualityLevel,
-    pub source_adapter: String,
+    pub capability_tier: CapabilityTier,
+    pub source_backend: String,
     /// The default confidence of the adapter that produced this symbol.
     pub default_confidence: f32,
     /// Whether this symbol was unique to one adapter or won a merge contest.
@@ -81,7 +88,7 @@ pub struct SymbolProvenance {
 ///
 /// Per-symbol provenance is available in `symbol_provenance`, parallel
 /// to `output.symbols`, enabling the persist stage to write accurate
-/// per-symbol `quality_level` and `source_adapter` fields.
+/// per-symbol `capability_tier` and `source_backend` fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MergedOutput {
     /// Merged adapter output with deduplicated symbols.
@@ -102,6 +109,7 @@ pub struct MergedOutput {
 /// `default_confidence` is the adapter's `AdapterCapabilities::default_confidence`.
 ///
 /// Returns `None` if `outputs` is empty.
+#[allow(deprecated)]
 pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput> {
     if outputs.is_empty() {
         return None;
@@ -114,8 +122,8 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
             .symbols
             .iter()
             .map(|_| SymbolProvenance {
-                quality_level: output.quality_level,
-                source_adapter: output.source_adapter.clone(),
+                capability_tier: CapabilityTier::from(output.quality_level),
+                source_backend: output.source_adapter.clone(),
                 default_confidence,
                 merge_outcome: MergeOutcome::Unique,
             })
@@ -169,7 +177,7 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
                 let outcome = if winner.quality_level == loser.quality_level {
                     // Same quality level (e.g. two semantic adapters) —
                     // not a semantic-vs-syntax comparison.
-                    MergeOutcome::SameQuality
+                    MergeOutcome::SameTier
                 } else {
                     // Cross-quality contest. Check whether confidence
                     // actually differed or it was a tiebreak.
@@ -199,22 +207,11 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
     let merged_symbols: Vec<ExtractedSymbol> =
         winners.iter().map(|&i| tagged[i].symbol.clone()).collect();
 
-    let symbol_provenance: Vec<SymbolProvenance> = winners
-        .iter()
-        .map(|&i| {
-            let ts = &tagged[i];
-            let key = (ts.symbol.qualified_name.clone(), ts.symbol.kind);
-            let merge_outcome = outcomes.get(&key).copied().unwrap_or(MergeOutcome::Unique);
-            SymbolProvenance {
-                quality_level: ts.quality_level,
-                source_adapter: ts.source_adapter.clone(),
-                default_confidence: ts.default_confidence,
-                merge_outcome,
-            }
-        })
-        .collect();
-
-    // Determine composite provenance for the file-level output.
+    // Determine whether both quality levels contributed to this file's
+    // merged output. Used to classify per-symbol provenance and
+    // file-level composite provenance.
+    let mut has_syntax = false;
+    let mut has_semantic = false;
     let mut adapters_used: Vec<&str> = Vec::new();
     let mut highest_quality = QualityLevel::Syntax;
     for &i in &winners {
@@ -222,10 +219,60 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
         if !adapters_used.contains(&ts.source_adapter.as_str()) {
             adapters_used.push(&ts.source_adapter);
         }
-        if ts.quality_level == QualityLevel::Semantic {
-            highest_quality = QualityLevel::Semantic;
+        match ts.quality_level {
+            QualityLevel::Semantic => {
+                has_semantic = true;
+                highest_quality = QualityLevel::Semantic;
+            }
+            QualityLevel::Syntax => {
+                has_syntax = true;
+            }
         }
     }
+
+    // Also check all tagged symbols (not just winners) — if the input
+    // included both syntax and semantic outputs, even if one tier lost
+    // every merge contest, the file still had both tiers contributing.
+    for ts in &tagged {
+        match ts.quality_level {
+            QualityLevel::Semantic => has_semantic = true,
+            QualityLevel::Syntax => has_syntax = true,
+        }
+    }
+
+    let both_tiers = has_syntax && has_semantic;
+
+    // Per-symbol capability_tier reflects how that individual symbol was
+    // produced, not the file-level tier:
+    //   - Syntax-sourced symbol → SyntaxOnly (always)
+    //   - Semantic-sourced symbol in a file with both tiers →
+    //     SyntaxPlusSemantic (syntax context was available)
+    //   - Semantic-sourced symbol in a semantic-only file →
+    //     SemanticOnly (no syntax baseline existed)
+    let symbol_provenance: Vec<SymbolProvenance> = winners
+        .iter()
+        .map(|&i| {
+            let ts = &tagged[i];
+            let key = (ts.symbol.qualified_name.clone(), ts.symbol.kind);
+            let merge_outcome = outcomes.get(&key).copied().unwrap_or(MergeOutcome::Unique);
+            let tier = match ts.quality_level {
+                QualityLevel::Syntax => CapabilityTier::SyntaxOnly,
+                QualityLevel::Semantic => {
+                    if both_tiers {
+                        CapabilityTier::SyntaxPlusSemantic
+                    } else {
+                        CapabilityTier::SemanticOnly
+                    }
+                }
+            };
+            SymbolProvenance {
+                capability_tier: tier,
+                source_backend: ts.source_adapter.clone(),
+                default_confidence: ts.default_confidence,
+                merge_outcome,
+            }
+        })
+        .collect();
 
     let source_adapter = if adapters_used.len() == 1 {
         adapters_used[0].to_string()
@@ -258,6 +305,7 @@ pub fn merge_outputs(outputs: Vec<(AdapterOutput, f32)>) -> Option<MergedOutput>
 /// 2. If confidence ties, semantic quality wins over syntax.
 /// 3. If still tied, the adapter with lower source_index wins (higher
 ///    priority in the router's selection order).
+#[allow(deprecated)]
 fn should_replace(existing: &TaggedSymbol, candidate: &TaggedSymbol) -> bool {
     let ec = existing.effective_confidence();
     let cc = candidate.effective_confidence();
@@ -317,6 +365,7 @@ mod tests {
         }
     }
 
+    #[allow(deprecated)]
     fn make_output(
         adapter: &str,
         quality: QualityLevel,
@@ -335,6 +384,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn single_output_passes_through() {
         let sym = make_symbol("foo", SymbolKind::Function, None);
         let output = make_output("syntax-v1", QualityLevel::Syntax, vec![sym.clone()]);
@@ -348,6 +398,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn semantic_wins_over_syntax_for_same_symbol() {
         let syntax_sym = make_symbol("foo", SymbolKind::Function, None);
         let semantic_sym = make_symbol("foo", SymbolKind::Function, None);
@@ -365,6 +416,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn higher_confidence_wins_regardless_of_quality_level() {
         // Syntax adapter with very high per-symbol confidence.
         let syntax_sym = make_symbol("foo", SymbolKind::Function, Some(0.99));
@@ -382,6 +434,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn non_overlapping_symbols_are_all_kept() {
         let syn_sym = make_symbol("foo", SymbolKind::Function, None);
         let sem_sym = make_symbol("bar", SymbolKind::Class, None);
@@ -399,6 +452,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn same_name_different_kind_are_distinct() {
         let func = make_symbol("foo", SymbolKind::Function, None);
         let constant = make_symbol("foo", SymbolKind::Constant, None);
@@ -412,6 +466,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn tie_breaking_prefers_semantic_quality() {
         // Both adapters with same confidence, different quality levels.
         let syntax_sym = make_symbol("foo", SymbolKind::Function, Some(0.8));
@@ -428,6 +483,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn tie_breaking_prefers_earlier_adapter_same_quality() {
         let sym_a = make_symbol("foo", SymbolKind::Function, Some(0.85));
         let sym_b = make_symbol("foo", SymbolKind::Function, Some(0.85));
@@ -443,6 +499,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn default_confidence_used_when_no_override() {
         // Semantic adapter default 0.9 > syntax adapter default 0.7.
         let syn_sym = make_symbol("foo", SymbolKind::Function, None);
@@ -459,6 +516,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn multiple_symbols_mixed_overlap() {
         // Semantic finds: foo (function), bar (class)
         // Syntax finds:  foo (function), baz (method)
@@ -492,6 +550,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn deterministic_symbol_ordering() {
         // Run merge twice, verify same output order.
         let build = || {
@@ -533,6 +592,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn quality_level_reflects_highest_contributor() {
         // All symbols from syntax only → quality stays Syntax.
         let syn_a = make_symbol("foo", SymbolKind::Function, None);

@@ -398,25 +398,25 @@ fn error_response_round_trips_through_json() {
 }
 
 // ---------------------------------------------------------------------------
-// Provenance: source_adapter in symbol payloads
+// Provenance: source_backend in symbol payloads
 // ---------------------------------------------------------------------------
 
 #[test]
-fn get_symbol_carries_source_adapter() {
+fn get_symbol_carries_source_backend() {
     let svc = StubQueryService::new();
     let id = svc.symbols[0].id.clone();
     let reg = ToolRegistry::new(&svc);
     let resp = reg.call("get_symbol", json!({ "id": id }));
     let payload = resp.payload.unwrap();
-    let adapter = payload["source_adapter"].as_str().unwrap();
+    let adapter = payload["source_backend"].as_str().unwrap();
     assert!(
         !adapter.is_empty(),
-        "source_adapter should be non-empty, got: {adapter}"
+        "source_backend should be non-empty, got: {adapter}"
     );
 }
 
 #[test]
-fn search_symbols_results_carry_source_adapter() {
+fn search_symbols_results_carry_source_backend() {
     let resp = call(
         "search_symbols",
         json!({ "repo_id": "repo-1", "query": "alpha" }),
@@ -425,14 +425,14 @@ fn search_symbols_results_carry_source_adapter() {
     assert!(!items.is_empty());
     for item in &items {
         assert!(
-            item["source_adapter"].is_string(),
-            "each search result should have source_adapter"
+            item["source_backend"].is_string(),
+            "each search result should have source_backend"
         );
     }
 }
 
 #[test]
-fn get_file_outline_symbols_carry_source_adapter() {
+fn get_file_outline_symbols_carry_source_backend() {
     let resp = call(
         "get_file_outline",
         json!({ "repo_id": "repo-1", "file_path": "src/lib.rs" }),
@@ -440,8 +440,8 @@ fn get_file_outline_symbols_carry_source_adapter() {
     let symbols = resp.payload.unwrap()["symbols"].as_array().unwrap().clone();
     for sym in &symbols {
         assert!(
-            sym["source_adapter"].is_string(),
-            "outline symbols should carry source_adapter"
+            sym["source_backend"].is_string(),
+            "outline symbols should carry source_backend"
         );
     }
 }

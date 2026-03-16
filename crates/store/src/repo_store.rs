@@ -398,10 +398,7 @@ mod tests {
                 file_hash: "sha256:abc".to_string(),
                 summary: "test".to_string(),
                 symbol_count: 5,
-                quality_mix: core_model::QualityMix {
-                    semantic_percent: 0.0,
-                    syntax_percent: 100.0,
-                },
+                capability_tier: core_model::CapabilityTier::SyntaxOnly,
                 updated_at: "2025-01-15T10:30:00Z".to_string(),
             })
             .unwrap();

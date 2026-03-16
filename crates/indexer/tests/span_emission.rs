@@ -1,3 +1,4 @@
+#![allow(deprecated)] // QualityLevel used for adapter-api compat
 //! Tests that tracing spans are emitted for major pipeline stages and that
 //! child stage spans inherit trace context from the parent pipeline span.
 //!
