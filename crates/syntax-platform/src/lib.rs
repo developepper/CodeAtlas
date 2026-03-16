@@ -318,6 +318,83 @@ impl SyntaxBackend for JavaSyntaxBackend {
 }
 
 // ---------------------------------------------------------------------------
+// JavaScriptSyntaxBackend
+// ---------------------------------------------------------------------------
+
+/// Tree-sitter-based syntax backend for JavaScript.
+pub struct JavaScriptSyntaxBackend {
+    capability: SyntaxCapability,
+}
+
+impl JavaScriptSyntaxBackend {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            capability: SyntaxCapability {
+                supported_kinds: vec![SymbolKind::Function, SymbolKind::Method, SymbolKind::Class],
+                supports_containers: true,
+                supports_docs: true,
+            },
+        }
+    }
+
+    /// Returns the [`BackendId`] for this backend.
+    #[must_use]
+    pub fn backend_id() -> BackendId {
+        BackendId("syntax-javascript".to_string())
+    }
+}
+
+impl Default for JavaScriptSyntaxBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SyntaxBackend for JavaScriptSyntaxBackend {
+    fn language(&self) -> &str {
+        "javascript"
+    }
+
+    fn capability(&self) -> &SyntaxCapability {
+        &self.capability
+    }
+
+    fn extract_symbols(&self, file: &PreparedFile) -> Result<SyntaxExtraction, SyntaxError> {
+        if file.language != "javascript" {
+            return Err(SyntaxError::Unsupported {
+                language: file.language.clone(),
+            });
+        }
+
+        let profile = &languages::javascript::JAVASCRIPT_PROFILE;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&(profile.ts_language)())
+            .map_err(|err| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: format!("failed to set language: {err}"),
+            })?;
+
+        let tree = parser
+            .parse(&file.content, None)
+            .ok_or_else(|| SyntaxError::Parse {
+                path: file.relative_path.clone(),
+                reason: "tree-sitter parse returned no tree".to_string(),
+            })?;
+
+        let symbols = extraction::extract_symbols(tree.root_node(), &file.content, profile);
+
+        Ok(SyntaxExtraction {
+            language: "javascript".to_string(),
+            symbols,
+            backend_id: Self::backend_id(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PhpSyntaxBackend
 // ---------------------------------------------------------------------------
 
@@ -2368,5 +2445,371 @@ public record Pair(Object first, Object second) {}
 
         let config = find_symbol(&output1.symbols, "Config");
         assert!(config.docstring.is_some());
+    }
+
+    // ===================================================================
+    // JavaScript tests
+    // ===================================================================
+
+    fn extract_js(source: &str) -> SyntaxExtraction {
+        let backend = JavaScriptSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("src/index.js"),
+            absolute_path: PathBuf::from("/tmp/test/src/index.js"),
+            language: "javascript".to_string(),
+            content: source.as_bytes().to_vec(),
+        };
+        backend.extract_symbols(&file).expect("extraction failed")
+    }
+
+    // -- JS backend identity --
+
+    #[test]
+    fn js_backend_id_follows_naming_convention() {
+        let backend = JavaScriptSyntaxBackend::new();
+        assert_eq!(backend.language(), "javascript");
+        assert_eq!(JavaScriptSyntaxBackend::backend_id().0, "syntax-javascript");
+    }
+
+    #[test]
+    fn js_capability_reports_expected_kinds() {
+        let backend = JavaScriptSyntaxBackend::new();
+        let cap = backend.capability();
+        assert!(cap.supported_kinds.contains(&SymbolKind::Function));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Method));
+        assert!(cap.supported_kinds.contains(&SymbolKind::Class));
+        assert!(cap.supports_containers);
+        assert!(cap.supports_docs);
+    }
+
+    #[test]
+    fn js_unsupported_language_returns_error() {
+        let backend = JavaScriptSyntaxBackend::new();
+        let file = PreparedFile {
+            relative_path: PathBuf::from("main.py"),
+            absolute_path: PathBuf::from("/tmp/main.py"),
+            language: "python".to_string(),
+            content: b"def foo(): pass".to_vec(),
+        };
+        let err = backend.extract_symbols(&file).expect_err("wrong language");
+        assert!(err.to_string().contains("unsupported language"));
+    }
+
+    // -- JS extraction output --
+
+    #[test]
+    fn js_extraction_carries_backend_id() {
+        let result = extract_js("function hello() {}\n");
+        assert_eq!(result.backend_id.0, "syntax-javascript");
+        assert_eq!(result.language, "javascript");
+    }
+
+    // -- JS function extraction --
+
+    #[test]
+    fn js_extracts_free_function() {
+        let result = extract_js("function hello() {}\n");
+        let sym = find_symbol(&result.symbols, "hello");
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert_eq!(sym.qualified_name, "hello");
+        assert!(sym.parent_qualified_name.is_none());
+    }
+
+    #[test]
+    fn js_extracts_function_signature() {
+        let result = extract_js("function process(x, y) {\n    return x + y;\n}\n");
+        let sym = find_symbol(&result.symbols, "process");
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert!(sym.signature.contains("function process"));
+    }
+
+    #[test]
+    fn js_extracts_async_function() {
+        let result = extract_js("async function fetchData(url) {\n    return {};\n}\n");
+        let sym = find_symbol(&result.symbols, "fetchData");
+        assert_eq!(sym.kind, SymbolKind::Function);
+    }
+
+    // -- JS arrow function and function expression extraction --
+
+    #[test]
+    fn js_extracts_arrow_function() {
+        let result = extract_js("const createApp = (config) => ({ config });\n");
+        let sym = find_symbol(&result.symbols, "createApp");
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert_eq!(sym.qualified_name, "createApp");
+    }
+
+    #[test]
+    fn js_extracts_async_arrow_function() {
+        let result = extract_js("const fetchData = async (url) => { return {}; };\n");
+        let sym = find_symbol(&result.symbols, "fetchData");
+        assert_eq!(sym.kind, SymbolKind::Function);
+    }
+
+    #[test]
+    fn js_extracts_function_expression() {
+        let result = extract_js("const helper = function(x) { return x + 1; };\n");
+        let sym = find_symbol(&result.symbols, "helper");
+        assert_eq!(sym.kind, SymbolKind::Function);
+    }
+
+    #[test]
+    fn js_skips_non_function_const() {
+        let source = "const MAX = 3;\nconst config = { port: 8080 };\nconst items = [1, 2];\nconst createApp = () => ({});\n";
+        let result = extract_js(source);
+        // Only createApp should be extracted (arrow function).
+        // MAX, config, items should NOT appear.
+        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"createApp"),
+            "missing createApp in {names:?}"
+        );
+        assert!(
+            !names.contains(&"MAX"),
+            "MAX should not be extracted: {names:?}"
+        );
+        assert!(
+            !names.contains(&"config"),
+            "config should not be extracted: {names:?}"
+        );
+        assert!(
+            !names.contains(&"items"),
+            "items should not be extracted: {names:?}"
+        );
+    }
+
+    // -- JS class extraction --
+
+    #[test]
+    fn js_extracts_class() {
+        let result = extract_js("class User {}\n");
+        let sym = find_symbol(&result.symbols, "User");
+        assert_eq!(sym.kind, SymbolKind::Class);
+        assert_eq!(sym.qualified_name, "User");
+    }
+
+    #[test]
+    fn js_extracts_class_with_extends() {
+        let result = extract_js("class Admin extends User {}\n");
+        let sym = find_symbol(&result.symbols, "Admin");
+        assert_eq!(sym.kind, SymbolKind::Class);
+        assert!(sym.signature.contains("class Admin extends User"));
+    }
+
+    // -- JS method extraction --
+
+    #[test]
+    fn js_extracts_methods_with_qualified_names() {
+        let source = "class User {\n    getName() {\n        return this.name;\n    }\n}\n";
+        let result = extract_js(source);
+        let sym = find_symbol(&result.symbols, "getName");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::getName");
+        assert_eq!(sym.parent_qualified_name.as_deref(), Some("User"));
+    }
+
+    #[test]
+    fn js_extracts_constructor() {
+        let source = "class User {\n    constructor(name) {\n        this.name = name;\n    }\n}\n";
+        let result = extract_js(source);
+        let sym = find_symbol(&result.symbols, "constructor");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::constructor");
+    }
+
+    #[test]
+    fn js_extracts_static_method() {
+        let source =
+            "class User {\n    static create(name) {\n        return new User(name);\n    }\n}\n";
+        let result = extract_js(source);
+        let sym = find_symbol(&result.symbols, "create");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::create");
+    }
+
+    #[test]
+    fn js_extracts_getter() {
+        let source = "class User {\n    get displayName() {\n        return this.name;\n    }\n}\n";
+        let result = extract_js(source);
+        let sym = find_symbol(&result.symbols, "displayName");
+        assert_eq!(sym.kind, SymbolKind::Method);
+        assert_eq!(sym.qualified_name, "User::displayName");
+    }
+
+    // -- JS docstrings --
+
+    #[test]
+    fn js_extracts_jsdoc() {
+        let source = "/**\n * Represents a user.\n */\nclass User {}\n";
+        let result = extract_js(source);
+        let sym = find_symbol(&result.symbols, "User");
+        assert!(sym.docstring.is_some(), "expected JSDoc");
+        assert!(
+            sym.docstring
+                .as_deref()
+                .unwrap()
+                .contains("Represents a user"),
+            "unexpected doc: {:?}",
+            sym.docstring
+        );
+    }
+
+    #[test]
+    fn js_extracts_method_jsdoc() {
+        let source = "class User {\n    /**\n     * Gets the name.\n     */\n    getName() {\n        return this.name;\n    }\n}\n";
+        let result = extract_js(source);
+        let sym = find_symbol(&result.symbols, "getName");
+        assert!(sym.docstring.is_some(), "expected method JSDoc");
+    }
+
+    #[test]
+    fn js_no_docstring_when_absent() {
+        let result = extract_js("function bare() {}\n");
+        let sym = find_symbol(&result.symbols, "bare");
+        assert!(sym.docstring.is_none());
+    }
+
+    // -- JS edge cases --
+
+    #[test]
+    fn js_empty_file_produces_no_symbols() {
+        let result = extract_js("");
+        assert!(result.symbols.is_empty());
+    }
+
+    // -- JS representative fixture --
+
+    #[test]
+    fn js_express_style_fixture() {
+        let source = r#"
+/**
+ * User management service.
+ */
+class UserService {
+    constructor(db) {
+        this.db = db;
+    }
+
+    /**
+     * Find all users.
+     */
+    findAll() {
+        return this.db.query('SELECT * FROM users');
+    }
+
+    findById(id) {
+        return this.db.query('SELECT * FROM users WHERE id = ?', [id]);
+    }
+
+    static tableName() {
+        return 'users';
+    }
+}
+
+class AdminService extends UserService {
+    promote(userId) {
+        return this.db.query('UPDATE users SET role = ?', ['admin']);
+    }
+}
+
+function createApp(config) {
+    return { config };
+}
+
+const initDb = async (url) => {
+    return {};
+};
+
+async function startServer(port) {
+    return null;
+}
+"#;
+        let result = extract_js(source);
+
+        let svc = find_symbol(&result.symbols, "UserService");
+        assert_eq!(svc.kind, SymbolKind::Class);
+        assert!(svc.docstring.is_some());
+
+        let constructor = find_symbol(&result.symbols, "constructor");
+        assert_eq!(constructor.kind, SymbolKind::Method);
+        assert_eq!(constructor.qualified_name, "UserService::constructor");
+
+        let find_all = find_symbol(&result.symbols, "findAll");
+        assert_eq!(find_all.kind, SymbolKind::Method);
+        assert_eq!(find_all.qualified_name, "UserService::findAll");
+        assert!(find_all.docstring.is_some());
+
+        let admin = find_symbol(&result.symbols, "AdminService");
+        assert_eq!(admin.kind, SymbolKind::Class);
+
+        let promote = find_symbol(&result.symbols, "promote");
+        assert_eq!(promote.kind, SymbolKind::Method);
+        assert_eq!(promote.qualified_name, "AdminService::promote");
+
+        let init_db = find_symbol(&result.symbols, "initDb");
+        assert_eq!(init_db.kind, SymbolKind::Function);
+
+        let create_app = find_symbol(&result.symbols, "createApp");
+        assert_eq!(create_app.kind, SymbolKind::Function);
+
+        let start_server = find_symbol(&result.symbols, "startServer");
+        assert_eq!(start_server.kind, SymbolKind::Function);
+    }
+
+    #[test]
+    fn js_comprehensive_extraction_is_deterministic() {
+        let source = r#"
+/**
+ * Base class.
+ */
+class Base {
+    constructor() {}
+    method() {}
+}
+
+class Child extends Base {
+    override() {}
+    static helper() {}
+}
+
+function free(x) {
+    return x;
+}
+
+async function asyncFn() {}
+"#;
+
+        let output1 = extract_js(source);
+        let output2 = extract_js(source);
+
+        assert_eq!(output1.symbols.len(), output2.symbols.len());
+        for (a, b) in output1.symbols.iter().zip(output2.symbols.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.qualified_name, b.qualified_name);
+            assert_eq!(a.span, b.span);
+        }
+
+        let names: Vec<(&str, SymbolKind)> = output1
+            .symbols
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind))
+            .collect();
+
+        assert!(names.contains(&("Base", SymbolKind::Class)));
+        assert!(names.contains(&("constructor", SymbolKind::Method)));
+        assert!(names.contains(&("method", SymbolKind::Method)));
+        assert!(names.contains(&("Child", SymbolKind::Class)));
+        assert!(names.contains(&("helper", SymbolKind::Method)));
+        assert!(names.contains(&("free", SymbolKind::Function)));
+        assert!(names.contains(&("asyncFn", SymbolKind::Function)));
+
+        let method = find_symbol(&output1.symbols, "method");
+        assert_eq!(method.qualified_name, "Base::method");
+        assert_eq!(method.parent_qualified_name.as_deref(), Some("Base"));
+
+        let base = find_symbol(&output1.symbols, "Base");
+        assert!(base.docstring.is_some());
     }
 }

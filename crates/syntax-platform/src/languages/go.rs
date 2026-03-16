@@ -12,6 +12,7 @@ static GO_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Function,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     // Go has a dedicated `method_declaration` node with a receiver.
     // Mapped directly to Method; receiver-based parent is handled by
@@ -21,6 +22,7 @@ static GO_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Method,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     // `type_spec` is the inner node of `type_declaration`. It carries
     // the name and the underlying type (struct, interface, alias, etc.).
@@ -29,6 +31,7 @@ static GO_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Type,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     // `const_spec` is the inner node of `const_declaration`.
     NodeMapping {
@@ -36,6 +39,7 @@ static GO_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Constant,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
 ];
 
