@@ -2,7 +2,7 @@
 //!
 //! Provides tree-sitter-backed syntax extraction for CodeAtlas. Each
 //! language is defined by a [`LanguageProfile`](languages::LanguageProfile)
-//! and produces [`SyntaxExtraction`](types::SyntaxExtraction) output via
+//! and produces [`SyntaxExtraction`] output via
 //! the [`SyntaxBackend`] trait.
 
 pub mod extraction;
