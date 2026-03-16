@@ -30,7 +30,8 @@ must represent that cleanly.
 ## Acceptance Criteria
 
 - [ ] capability/provenance distinctions are represented cleanly in the model
-- [ ] metrics distinguish file-only, syntax-indexed, and semantic-indexed output
+- [ ] metrics distinguish FileOnly, SyntaxOnly, SyntaxPlusSemantic, and
+      SemanticOnly (transitional) capability tiers
 - [ ] reporting remains honest about symbol quality versus index coverage
 - [ ] any schema/index version implications are documented explicitly
 - [ ] the ticket does not defer known foundational schema/model corrections

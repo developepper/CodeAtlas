@@ -1,6 +1,9 @@
 # Universal Syntax Indexing Platform Plan
 
-Status: Draft planning baseline for the next major architecture epic
+Status: Active — planning baseline for Epic 17
+
+Architecture status: ratified via Ticket 1 (#174) in
+`docs/architecture/universal-syntax-indexing-architecture.md`
 
 Owner intent: evolve CodeAtlas from a narrow adapter set plus file-level
 fallback into a general-purpose code intelligence platform where syntax
@@ -144,15 +147,20 @@ Decision:
 
 ### Capability model
 
-The platform should represent indexing capability explicitly at the file and
-symbol level:
+The platform represents indexing capability via explicit tiers. The ratified
+tier model is defined in the architecture doc. The durable steady-state tiers
+are:
 
-- file-only
-- syntax-indexed
-- semantic-indexed
-- syntax-plus-semantic-indexed
+- `FileOnly`
+- `SyntaxOnly`
+- `SyntaxPlusSemantic`
 
-This classification should drive:
+`SemanticOnly` exists only as a transitional migration state for languages that
+have semantic backends but no syntax backend yet (TypeScript, Kotlin during
+Phase 3). It is not a target product shape and should be resolved by adding
+syntax backends for those languages.
+
+This classification drives:
 
 - metrics
 - diagnostics
@@ -181,17 +189,17 @@ adapter extended indefinitely.
 ### Language extraction modules
 
 Within the syntax subsystem, add language-specific extraction modules for
-high-value ecosystems. The first wave should prioritize:
+high-value ecosystems. The first wave (Epic 17, Tickets 4-8) covers:
 
 - PHP
 - Python
 - Go
 - Java
 - JavaScript
-- Ruby
 
 Later waves can expand into:
 
+- Ruby
 - C / C++
 - C#
 - Swift
@@ -232,15 +240,16 @@ Recommended top-level subsystem split:
 These names are descriptive rather than final API commitments, but the
 architectural split itself is intentional and should drive the refactor.
 
-Capability-tier intent:
+Capability-tier enum (ratified):
 
-- `file-only`
-- `syntax-only`
-- `syntax-plus-semantic`
+- `FileOnly`
+- `SyntaxOnly`
+- `SyntaxPlusSemantic`
+- `SemanticOnly` — transitional only, not a durable product tier
 
-`semantic-only` should not be treated as a durable steady-state capability
-tier. If it appears during migration, it should be treated as an exception to
-be removed rather than a target product shape.
+`SemanticOnly` exists to accurately classify TypeScript/Kotlin during Phase 3
+migration. It should be resolved by adding syntax backends for those languages,
+at which point the variant can be removed.
 
 ### Core model evolution
 
