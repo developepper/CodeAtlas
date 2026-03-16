@@ -404,6 +404,11 @@ pub(crate) fn tool_input_schema(name: &str) -> Value {
                     "type": "string",
                     "description": "Filter by programming language"
                 },
+                "capability_tier": {
+                    "type": "string",
+                    "description": "Filter by capability tier",
+                    "enum": ["file_only", "syntax_only", "syntax_plus_semantic", "semantic_only"]
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of results to return",
@@ -806,12 +811,16 @@ mod tests {
         assert!(props.contains_key("query"));
         assert!(props.contains_key("kind"));
         assert!(props.contains_key("language"));
+        assert!(props.contains_key("capability_tier"));
         assert!(props.contains_key("limit"));
         assert!(props.contains_key("offset"));
-        assert_eq!(props.len(), 6);
+        assert_eq!(props.len(), 7);
 
         // kind has enum constraint
         assert!(schema["properties"]["kind"]["enum"].is_array());
+
+        // capability_tier has enum constraint
+        assert!(schema["properties"]["capability_tier"]["enum"].is_array());
 
         // limit/offset have minimum and default matching usize semantics
         assert_eq!(schema["properties"]["limit"]["default"], 20);

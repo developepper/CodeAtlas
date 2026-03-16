@@ -4,7 +4,7 @@
 //! deserializes the request, calls the query engine, and returns a
 //! serialized payload or typed error.
 
-use core_model::SymbolKind;
+use core_model::{CapabilityTier, SymbolKind};
 use query_engine::{
     FileContentRequest, FileOutlineRequest, FileTreeRequest, QueryFilters, QueryService,
     RepoOutlineRequest, SymbolQuery, TextQuery,
@@ -24,6 +24,8 @@ pub struct SearchSymbolsParams {
     pub kind: Option<String>,
     #[serde(default)]
     pub language: Option<String>,
+    #[serde(default)]
+    pub capability_tier: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: usize,
     #[serde(default)]
@@ -158,6 +160,11 @@ pub fn search_symbols(svc: &dyn QueryService, params: serde_json::Value) -> Tool
         serde_json::from_value(params).map_err(|e| McpError::invalid_params(e.to_string()))?;
 
     let kind = p.kind.as_deref().map(parse_symbol_kind).transpose()?;
+    let capability_tier = p
+        .capability_tier
+        .as_deref()
+        .map(parse_capability_tier)
+        .transpose()?;
 
     let query = SymbolQuery {
         repo_id: p.repo_id,
@@ -165,7 +172,7 @@ pub fn search_symbols(svc: &dyn QueryService, params: serde_json::Value) -> Tool
         filters: QueryFilters {
             kind,
             language: p.language,
-            capability_tier: None,
+            capability_tier,
             file_path: None,
         },
         limit: p.limit,
@@ -256,6 +263,7 @@ pub fn get_file_outline(svc: &dyn QueryService, params: serde_json::Value) -> To
                 "file_path": outline.file.file_path,
                 "language": outline.file.language,
                 "symbol_count": outline.file.symbol_count,
+                "capability_tier": outline.file.capability_tier.as_str(),
             },
             "symbols": symbols,
         }),
@@ -279,6 +287,7 @@ pub fn get_file_content(svc: &dyn QueryService, params: serde_json::Value) -> To
                 "file_path": content.file.file_path,
                 "language": content.file.language,
                 "symbol_count": content.file.symbol_count,
+                "capability_tier": content.file.capability_tier.as_str(),
             },
             "content": content.content,
         }),
@@ -303,6 +312,7 @@ pub fn get_file_tree(svc: &dyn QueryService, params: serde_json::Value) -> ToolR
                 "path": e.path,
                 "language": e.language,
                 "symbol_count": e.symbol_count,
+                "capability_tier": e.capability_tier.as_str(),
             })
         })
         .collect();
@@ -328,6 +338,7 @@ pub fn get_repo_outline(svc: &dyn QueryService, params: serde_json::Value) -> To
                 "path": e.path,
                 "language": e.language,
                 "symbol_count": e.symbol_count,
+                "capability_tier": e.capability_tier.as_str(),
             })
         })
         .collect();
@@ -466,6 +477,18 @@ fn parse_symbol_kind(s: &str) -> Result<SymbolKind, McpError> {
         "constant" => Ok(SymbolKind::Constant),
         other => Err(McpError::invalid_params(format!(
             "unknown symbol kind: {other}"
+        ))),
+    }
+}
+
+fn parse_capability_tier(s: &str) -> Result<CapabilityTier, McpError> {
+    match s.to_lowercase().as_str() {
+        "file_only" => Ok(CapabilityTier::FileOnly),
+        "syntax_only" => Ok(CapabilityTier::SyntaxOnly),
+        "syntax_plus_semantic" => Ok(CapabilityTier::SyntaxPlusSemantic),
+        "semantic_only" => Ok(CapabilityTier::SemanticOnly),
+        other => Err(McpError::invalid_params(format!(
+            "unknown capability tier: {other}"
         ))),
     }
 }

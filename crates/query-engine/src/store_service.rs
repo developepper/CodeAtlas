@@ -181,6 +181,7 @@ impl QueryService for StoreQueryService<'_> {
                     path: file.file_path,
                     language: file.language,
                     symbol_count: file.symbol_count,
+                    capability_tier: file.capability_tier,
                 });
             }
         }
