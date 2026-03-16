@@ -34,6 +34,10 @@ fn walk_node(
                 && !check_ancestor_modifiers(&node, mapping.requires_modifiers, source)
             {
                 // Modifiers not satisfied — skip this node but continue walking children.
+            } else if !mapping.requires_value_types.is_empty()
+                && !check_value_type(&node, mapping.requires_value_types)
+            {
+                // Value type not satisfied — skip (e.g. `const x = 3` is not a function).
             } else {
                 let kind = if mapping.kind == SymbolKind::Function && is_method_context(&node) {
                     SymbolKind::Method
@@ -134,6 +138,15 @@ fn walk_node(
     if pushed_scope {
         scope_stack.pop();
     }
+}
+
+/// Checks whether a node's `value` child matches one of the required types.
+///
+/// Used to filter JS `variable_declarator` nodes: only extract when the value
+/// is an `arrow_function` or `function_expression`, not plain data.
+fn check_value_type(node: &Node, required_types: &[&str]) -> bool {
+    node.child_by_field_name("value")
+        .is_some_and(|v| required_types.contains(&v.kind()))
 }
 
 /// Checks whether a node or its parent has a `modifiers` child containing

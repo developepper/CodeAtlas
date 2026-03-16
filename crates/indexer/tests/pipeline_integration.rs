@@ -12,9 +12,9 @@ use indexer::{
     SyntaxPolicy,
 };
 use syntax_platform::{
-    GoSyntaxBackend, JavaSyntaxBackend, PhpSyntaxBackend, PreparedFile, PythonSyntaxBackend,
-    RustSyntaxBackend, SyntaxBackend, SyntaxCapability, SyntaxError, SyntaxExtraction,
-    SyntaxSymbol,
+    GoSyntaxBackend, JavaScriptSyntaxBackend, JavaSyntaxBackend, PhpSyntaxBackend, PreparedFile,
+    PythonSyntaxBackend, RustSyntaxBackend, SyntaxBackend, SyntaxCapability, SyntaxError,
+    SyntaxExtraction, SyntaxSymbol,
 };
 use tempfile::TempDir;
 
@@ -2980,6 +2980,160 @@ fn pipeline_java_mixed_with_rust() {
     assert!(java_file.symbol_count >= 2); // Main + main method
     assert_eq!(
         java_file.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
+}
+
+// ---------------------------------------------------------------------------
+// JavaScript syntax backend integration tests
+// ---------------------------------------------------------------------------
+
+fn make_registry_with_js() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry.register_syntax(
+        JavaScriptSyntaxBackend::backend_id(),
+        Box::new(JavaScriptSyntaxBackend::new()),
+    );
+    registry
+}
+
+#[test]
+fn pipeline_js_express_app_end_to_end() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+
+    std::fs::write(
+        src.join("app.js"),
+        r#"
+/**
+ * User service.
+ */
+class UserService {
+    constructor(db) {
+        this.db = db;
+    }
+
+    findAll() {
+        return this.db.query('SELECT * FROM users');
+    }
+
+    findById(id) {
+        return this.db.query('SELECT * FROM users WHERE id = ?', [id]);
+    }
+}
+
+function createApp(config) {
+    return { config };
+}
+"#,
+    )
+    .expect("write app.js");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_js();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "js-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+    assert!(result.metrics.files_parsed >= 1);
+    assert!(result.file_errors.is_empty());
+
+    let file = db
+        .files()
+        .get("js-repo", "src/app.js")
+        .expect("query file")
+        .expect("app.js file record");
+    assert_eq!(file.language, "javascript");
+    // UserService + constructor + findAll + findById + createApp = 5
+    assert!(
+        file.symbol_count >= 5,
+        "expected at least 5 symbols, got {}",
+        file.symbol_count
+    );
+    assert_eq!(file.capability_tier, core_model::CapabilityTier::SyntaxOnly);
+
+    let symbol_ids = db
+        .symbols()
+        .list_ids_for_file("js-repo", "src/app.js")
+        .expect("list symbols");
+    let all_syms: Vec<_> = symbol_ids
+        .iter()
+        .filter_map(|id| db.symbols().get(id).ok().flatten())
+        .collect();
+
+    let svc = all_syms
+        .iter()
+        .find(|s| s.name == "UserService")
+        .expect("UserService should exist");
+    assert_eq!(svc.kind, SymbolKind::Class);
+    assert!(svc.source_backend.contains("syntax-javascript"));
+
+    let find_all = all_syms
+        .iter()
+        .find(|s| s.name == "findAll")
+        .expect("findAll should exist");
+    assert_eq!(find_all.kind, SymbolKind::Method);
+    assert!(
+        find_all.qualified_name.contains("UserService::findAll"),
+        "expected qualified name, got: {}",
+        find_all.qualified_name
+    );
+}
+
+#[test]
+fn pipeline_js_mixed_with_rust() {
+    let repo_dir = TempDir::new().expect("create temp dir");
+
+    std::fs::write(
+        repo_dir.path().join("index.js"),
+        "class App {\n    run() {}\n}\nfunction main() {}\n",
+    )
+    .expect("write js");
+
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src");
+    std::fs::write(src.join("lib.rs"), "pub fn greet() {}\n").expect("write rs");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store = setup_blob_store(&blob_dir);
+    let registry = make_registry_with_js();
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let ctx = PipelineContext {
+        repo_id: "js-rs-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = run(&ctx, &mut db, &blob_store).expect("pipeline should succeed");
+    assert!(result.metrics.files_parsed >= 2);
+
+    let js_file = db
+        .files()
+        .get("js-rs-repo", "index.js")
+        .expect("query js")
+        .expect("index.js record");
+    assert_eq!(js_file.language, "javascript");
+    assert!(js_file.symbol_count >= 3); // App + run + main
+    assert_eq!(
+        js_file.capability_tier,
         core_model::CapabilityTier::SyntaxOnly
     );
 }

@@ -12,36 +12,42 @@ static PHP_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Function,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "method_declaration",
         kind: SymbolKind::Method,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "class_declaration",
         kind: SymbolKind::Class,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "interface_declaration",
         kind: SymbolKind::Type,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "trait_declaration",
         kind: SymbolKind::Type,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "enum_declaration",
         kind: SymbolKind::Type,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     // Constants: the name lives on `const_element` as a child of type
     // `name` (not a named field). The `child_text` fallback handles this.
@@ -50,6 +56,7 @@ static PHP_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Constant,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
 ];
 

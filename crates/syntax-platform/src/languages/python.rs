@@ -14,12 +14,14 @@ static PYTHON_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Function,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "class_definition",
         kind: SymbolKind::Class,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
 ];
 

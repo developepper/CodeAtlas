@@ -12,18 +12,21 @@ static JAVA_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Class,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "interface_declaration",
         kind: SymbolKind::Type,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "enum_declaration",
         kind: SymbolKind::Type,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     // Java records are value-based classes.
     NodeMapping {
@@ -31,6 +34,7 @@ static JAVA_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Class,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     // Methods are always inside a class/interface/enum body.
     NodeMapping {
@@ -38,18 +42,21 @@ static JAVA_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Method,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "constructor_declaration",
         kind: SymbolKind::Method,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     NodeMapping {
         node_type: "enum_constant",
         kind: SymbolKind::Constant,
         name_field: "name",
         requires_modifiers: &[],
+        requires_value_types: &[],
     },
     // Java `static final` field constants. The `variable_declarator` node
     // carries the name; the `requires_modifiers` filter ensures we only
@@ -59,6 +66,7 @@ static JAVA_DEFINITIONS: &[NodeMapping] = &[
         kind: SymbolKind::Constant,
         name_field: "name",
         requires_modifiers: &["static", "final"],
+        requires_value_types: &[],
     },
 ];
 
