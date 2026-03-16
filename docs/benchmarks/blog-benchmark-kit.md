@@ -20,11 +20,16 @@ Use this kit to collect evidence for:
 
 Use 4-7 repositories with distinct characteristics:
 
-- Rust-heavy repo (syntax adapter coverage)
-- TypeScript repo with `tsserver` available (semantic adapter coverage)
-- Kotlin repo with JVM bridge available (semantic adapter coverage)
-- mixed-language application repo (mix of symbol-bearing and file-only files)
-- recognized-language repo with no current adapter (e.g. Python, Go — file-level only)
+- Rust repo (syntax-only coverage)
+- PHP/Laravel repo (syntax-only coverage, proving-ground ecosystem)
+- Python repo (syntax-only coverage)
+- Go repo (syntax-only coverage)
+- TypeScript repo with `tsserver` available (semantic-only coverage today;
+  will become syntax-plus-semantic once a TypeScript syntax backend is added)
+- Kotlin repo with JVM bridge available (semantic-only coverage today;
+  will become syntax-plus-semantic once a Kotlin syntax backend is added)
+- mixed-language application repo (mix of syntax-bearing and file-only files)
+- recognized-language repo without syntax backend (e.g. Ruby, C — file-level only)
 - medium/large service or app repo
 - repo with frequent small edits for incremental-refresh demos
 
@@ -59,8 +64,8 @@ The script writes CSV outputs under a timestamped directory.
 Collected from `codeatlas quality-report`:
 
 - files discovered
-- files with symbols (symbol-bearing adapter output)
-- files file-only (indexed without symbols)
+- files with symbols (syntax or semantic extraction output)
+- files file-only (indexed without symbols — no syntax backend available)
 - files errored (real adapter failures)
 - symbols extracted
 - semantic symbols
@@ -178,25 +183,30 @@ The prompt pair should answer the same question with different context shapes.
 
 - multi-repo developers
 - AI-assisted exploration and symbol lookup
+- repos in syntax-indexed languages (Go, Java, JavaScript, PHP, Python, Rust)
 - repos with strong TypeScript or Kotlin semantic coverage
 
 ### 4. Honest boundaries
 
 - local-first, not hosted
 - exact token counts vary by model
-- semantic quality depends on adapter availability
-- most recognized languages are currently file-level only (no symbol extraction)
-- symbol search is only useful on languages with working adapters (Rust, TypeScript, Kotlin)
+- semantic quality depends on runtime availability (TypeScript, Kotlin)
+- syntax-only coverage is shallower than semantic — no type references,
+  call-site resolution, or confidence-boosted ranking
+- languages without syntax backends (Ruby, C, C++, C#, Swift) remain
+  file-only with no symbol extraction
 
 ## Example Claims You Can Back With Data
 
 - "One CodeAtlas service handled N repos with one MCP configuration."
 - "Semantic coverage reached X% on repo Y."
-- "File-level index coverage reached X% on repo Z (a Python/Go repo with no symbol adapter)."
+- "Syntax-indexed symbol coverage reached X% on repo Z (a PHP/Laravel repo)."
 - "A repo refresh after a small edit was X times faster than a fresh index."
 - "The CodeAtlas-assisted prompt was X% smaller by estimated token count."
 - "Symbol lookup and file-outline queries stayed below X ms on repo Y."
 - "File tree and file content retrieval worked on repo Z even with zero symbol coverage."
+- "A Laravel/PHP repo that was previously file-only now has symbol search,
+  file outlines, and meaningful token reduction compared to raw-file prompts."
 
 ## Run Flow
 

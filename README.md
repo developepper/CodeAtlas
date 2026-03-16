@@ -529,43 +529,54 @@ adapter availability:
 
 | Level | Languages | What works |
 |-------|-----------|------------|
-| Semantic + syntax | TypeScript, Kotlin (when runtimes are available) | Symbol search, file outline, file tree, file content, repo outline |
-| Syntax only | Rust | Symbol search, file outline, file tree, file content, repo outline |
-| File-level only | All other recognized languages | File tree, file content, repo outline (zero symbols) |
+| Semantic (no syntax backend yet) | TypeScript, Kotlin (when runtimes are available) | Symbol search, file outline, file tree, file content, repo outline |
+| Syntax | Go, Java, JavaScript, PHP, Python, Rust | Symbol search, file outline, file tree, file content, repo outline |
+| File-level only | Other recognized languages (Ruby, C, C++, C#, Swift, Shell, JSON, YAML, TOML, Markdown, SQL, Dockerfile) | File tree, file content, repo outline (zero symbols) |
 | Not indexed | Unrecognized files (`Language::Unknown`) | Excluded at discovery |
 
-File-level indexing is the baseline — every recognized file gets a file record,
-stored content blob, and appears in file tree and repo outline queries. Symbol
-extraction is additive on top of that baseline when adapters are available.
+Syntax indexing is the baseline for major recognized code languages. Every
+recognized file gets a file record, stored content blob, and appears in file
+tree and repo outline queries. Symbol extraction is additive on top of that
+baseline.
 
-### Long-term architecture direction
+### Capability tier model
 
-The current capability table reflects the product as it exists today, not the
-intended end state.
+CodeAtlas classifies every indexed file into a capability tier that describes
+the depth of indexing it received:
 
-CodeAtlas is now explicitly moving toward:
+- **File-only**: file record and content blob only; no extracted symbols.
+- **Syntax-only**: symbols extracted by a tree-sitter syntax backend.
+- **Syntax-plus-semantic**: syntax baseline enriched by a semantic backend.
+- **Semantic-only** (transitional): semantic backend produced symbols but no
+  syntax backend is available yet. This currently applies to TypeScript and
+  Kotlin, which have semantic backends but have not yet been migrated onto the
+  syntax platform. This tier will be resolved by adding syntax backends for
+  those languages.
 
-- file-level persistence as the universal floor for recognized files
-- syntax indexing as the default baseline for most recognized code languages
-- semantic indexing as an enrichment layer on top of syntax
-- file-only indexing as the explicit last fallback rather than the common case
+All query surfaces expose the capability tier on file and symbol records so
+consumers can understand indexing depth. See
+`docs/architecture/capability-tier-query-behavior.md` for the full query
+behavior spec.
 
-This project is still early enough that clean long-term architecture is favored
-over preserving awkward intermediate interfaces. If the indexing model, schema,
-or crate boundaries need to be refactored to support that direction, those
-refactors are in scope.
+### Architecture
 
-The planning artifact for that next major architecture initiative is:
-`docs/planning/universal-syntax-indexing.md`.
+Syntax indexing is the default baseline for recognized code languages, backed
+by a multi-language tree-sitter platform (`syntax-platform` crate). Semantic
+indexing enriches the syntax baseline where language-native runtimes are
+available. TypeScript and Kotlin currently run semantic-only paths because
+they do not yet have syntax backends on the new subsystem; once those are
+added, they will achieve the full syntax-plus-semantic tier. File-only
+indexing remains as the fallback for languages without a syntax backend.
 
-The canonical technical design source for that initiative will live in:
-`docs/architecture/universal-syntax-indexing-architecture.md`.
+The canonical architecture design is in
+`docs/architecture/universal-syntax-indexing-architecture.md`. The planning
+artifact is in `docs/planning/universal-syntax-indexing.md`.
 
 ### What does not exist yet
 
 - Watcher/local file-system triggered update mode.
 - Semantic adapters beyond the current TypeScript and Kotlin implementations.
-- Syntax adapters beyond Rust (other recognized languages are file-level only).
+- Syntax backends for additional languages beyond the current set (Go, Java, JavaScript, PHP, Python, Rust).
 - Docker packaging for the persistent service.
 - Hosted auth, quotas, and multi-tenant controls.
 - Production observability dashboards and hosted telemetry/export integrations beyond the local CLI baseline.
