@@ -39,3 +39,14 @@
 - Security and data handling implications reviewed.
 - Observability impact reviewed (logs/metrics/traces where relevant).
 - Migration/compatibility impact reviewed (schema/API/index versioning).
+
+## Early-Stage Architecture Policy
+
+- Prefer clean long-term architecture over backward compatibility when the two
+  are in tension.
+- Do not preserve awkward intermediate schemas, APIs, or crate boundaries
+  solely because they already exist.
+- For foundational architecture epics, evaluate whether refactoring now will
+  remove long-term platform constraints; if yes, prefer the refactor.
+- Backward compatibility should be a conscious product decision, not the
+  default assumption, until the project has real external adoption pressure.

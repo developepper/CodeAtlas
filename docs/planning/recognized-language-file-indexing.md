@@ -2,6 +2,9 @@
 
 Status: Complete — all tickets merged (#166, #167, #165)
 
+Follow-on architecture work now lives in:
+`docs/planning/universal-syntax-indexing.md`
+
 Owner intent: ensure CodeAtlas produces a useful, non-empty index for any
 repository containing files in recognized languages, even when symbol adapters
 are unavailable or incomplete.

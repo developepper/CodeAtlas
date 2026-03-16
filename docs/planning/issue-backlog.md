@@ -117,6 +117,7 @@ Strategic roadmap themes after M10 live in:
 
 - `docs/planning/post-v1-roadmap.md`
 - `docs/planning/persistent-multi-repo-local-service.md`
+- `docs/planning/universal-syntax-indexing.md`
 
 ### Epic 13: Persistent Multi-Repo Local Service (complete)
 
@@ -169,6 +170,54 @@ What was delivered:
 - `files_file_only` metric tracks file-level indexed files separately from `files_parsed`
 - quality report returns `NOT APPLICABLE` for repos with zero symbol coverage
 - docs, runbook, benchmark guidance, and CLI output updated for file-level baseline
+
+### Epic 17: Universal Syntax Indexing Platform (next)
+
+Planning artifact:
+`docs/planning/universal-syntax-indexing.md`.
+
+Reviewed issue docs for the next issue-creation pass:
+
+- `docs/planning/github-issues/universal-syntax-indexing-epic.md`
+- `docs/planning/github-issues/universal-syntax-ticket-architecture.md`
+- `docs/planning/github-issues/universal-syntax-ticket-core-model-metrics.md`
+- `docs/planning/github-issues/universal-syntax-ticket-syntax-platform.md`
+- `docs/planning/github-issues/universal-syntax-ticket-php.md`
+- `docs/planning/github-issues/universal-syntax-ticket-python.md`
+- `docs/planning/github-issues/universal-syntax-ticket-go.md`
+- `docs/planning/github-issues/universal-syntax-ticket-java.md`
+- `docs/planning/github-issues/universal-syntax-ticket-javascript.md`
+- `docs/planning/github-issues/universal-syntax-ticket-query-surfaces.md`
+- `docs/planning/github-issues/universal-syntax-ticket-benchmarks-docs.md`
+
+Intent:
+
+- make syntax indexing the default baseline for major recognized code languages
+- treat semantic indexing as enrichment layered on top of syntax
+- keep file-only indexing as the explicit last fallback rather than the common
+  case
+- refactor schema, routing, crate boundaries, and query expectations where
+  needed for the long-term architecture
+
+Candidate child tickets:
+
+- define the universal syntax indexing architecture and capability model
+- refactor core model and metrics for file/syntax/semantic capability tiers
+- create the multi-language syntax indexing subsystem and migrate Rust onto it
+- implement PHP syntax indexing as the proving ground
+- implement Python syntax indexing
+- implement Go syntax indexing
+- implement Java syntax indexing
+- implement JavaScript syntax indexing
+- rework query surfaces for broad syntax coverage
+- update benchmark and token-efficiency evaluation methodology
+
+Planning stance:
+
+- correctness and long-term architecture are favored over backward
+  compatibility for this initiative
+- this epic is intentionally allowed to perform foundational refactors rather
+  than preserving awkward intermediate interfaces
 
 ## Manual Setup Issues to Create Immediately
 
