@@ -6,11 +6,12 @@
 use serde_json::json;
 use tempfile::TempDir;
 
+use core_model::{CapabilityTier, FileRecord, SymbolKind, SymbolRecord};
 use indexer::{DefaultBackendRegistry, DispatchContext};
 use query_engine::StoreQueryService;
 use server_mcp::types::{ErrorCode, Status};
 use server_mcp::ToolRegistry;
-use syntax_platform::RustSyntaxBackend;
+use syntax_platform::{PythonSyntaxBackend, RustSyntaxBackend};
 
 // ── Test infrastructure ──────────────────────────────────────────────────
 
@@ -666,4 +667,349 @@ fn e2e_file_only_repo_unknown_path_not_found() {
     );
     assert_eq!(resp.status, Status::Error);
     assert_eq!(resp.error.unwrap().code, ErrorCode::NotFound);
+}
+
+// ── Multi-tier repo E2E (#182) ──────────────────────────────────────────
+
+/// Indexes a repo with mixed tiers:
+/// - `src/lib.rs` (Rust) → syntax-only with symbols (real indexer)
+/// - `app/models.py` (Python) → syntax-only with symbols (real indexer)
+/// - `README.md` (markdown) → file-only (real indexer, no syntax backend)
+/// - `src/app.ts` (TypeScript) → syntax-plus-semantic (seeded after indexing)
+fn indexed_multi_tier_store() -> (store::MetadataStore, store::BlobStore, TempDir, TempDir) {
+    let repo_dir = TempDir::new().expect("repo temp dir");
+
+    let src = repo_dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("create src dir");
+    std::fs::write(
+        src.join("lib.rs"),
+        "/// A function.\npub fn greet() {}\npub struct Config {}\n",
+    )
+    .expect("write lib.rs");
+
+    let app = repo_dir.path().join("app");
+    std::fs::create_dir_all(&app).expect("create app dir");
+    std::fs::write(
+        app.join("models.py"),
+        "class User:\n    \"\"\"A user.\"\"\"\n    def get_name(self):\n        return self.name\n",
+    )
+    .expect("write models.py");
+
+    std::fs::write(repo_dir.path().join("README.md"), "# Hello\n").expect("write readme");
+
+    let blob_dir = TempDir::new().expect("blob temp dir");
+    let blob_store =
+        store::BlobStore::open(&blob_dir.path().join("blobs")).expect("open blob store");
+    let mut db = store::MetadataStore::open_in_memory().expect("open store");
+
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry.register_syntax(
+        PythonSyntaxBackend::backend_id(),
+        Box::new(PythonSyntaxBackend::new()),
+    );
+
+    let ctx = indexer::PipelineContext {
+        repo_id: "multi-tier-repo".to_string(),
+        source_root: repo_dir.path().to_path_buf(),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
+        correlation_id: None,
+        use_git_diff: false,
+    };
+
+    let result = indexer::run(&ctx, &mut db, &blob_store).expect("indexing should succeed");
+    assert!(result.metrics.symbols_extracted > 0);
+    assert!(result.metrics.files_file_only >= 1);
+
+    // Seed a syntax-plus-semantic file (simulates a TypeScript file that was
+    // enriched by a semantic backend). We cannot run a real semantic backend
+    // in tests, so we directly insert the records at the expected tier.
+    let ts_content = b"export function hello() {}\nexport class App {}\n";
+    let ts_hash = store::content_hash(ts_content);
+    blob_store.put(ts_content).unwrap();
+    db.files()
+        .upsert(&FileRecord {
+            repo_id: "multi-tier-repo".into(),
+            file_path: "src/app.ts".into(),
+            language: "typescript".into(),
+            file_hash: ts_hash,
+            summary: "App source".into(),
+            symbol_count: 2,
+            capability_tier: CapabilityTier::SyntaxPlusSemantic,
+            updated_at: "2026-03-16T00:00:00Z".into(),
+        })
+        .unwrap();
+    for (name, kind) in [("hello", SymbolKind::Function), ("App", SymbolKind::Class)] {
+        let qualified_name = format!("crate::{name}");
+        db.symbols()
+            .upsert(&SymbolRecord {
+                id: core_model::build_symbol_id(
+                    "multi-tier-repo",
+                    "src/app.ts",
+                    &qualified_name,
+                    kind,
+                )
+                .unwrap(),
+                repo_id: "multi-tier-repo".into(),
+                file_path: "src/app.ts".into(),
+                language: "typescript".into(),
+                kind,
+                name: name.into(),
+                qualified_name,
+                signature: format!("function {name}()"),
+                start_line: 1,
+                end_line: 2,
+                start_byte: 0,
+                byte_length: 25,
+                content_hash: format!("hash-{name}"),
+                capability_tier: CapabilityTier::SyntaxPlusSemantic,
+                confidence_score: 0.95,
+                source_backend: "semantic-typescript".into(),
+                indexed_at: "2026-03-16T00:00:00Z".into(),
+                docstring: None,
+                summary: None,
+                parent_symbol_id: None,
+                keywords: None,
+                decorators_or_attributes: None,
+                semantic_refs: None,
+                container_symbol_id: None,
+                namespace_path: None,
+                raw_kind: None,
+                modifiers: None,
+            })
+            .unwrap();
+    }
+    // Note: we do NOT upsert the repo record here — INSERT OR REPLACE on
+    // repos cascades deletes to files/symbols. The seeded TS file is visible
+    // in queries without updating repo-level aggregates.
+
+    (db, blob_store, blob_dir, repo_dir)
+}
+
+#[test]
+fn e2e_multi_tier_file_outline_syntax_file_carries_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call(
+        "get_file_outline",
+        json!({ "repo_id": "multi-tier-repo", "file_path": "src/lib.rs" }),
+    );
+    assert_eq!(resp.status, Status::Success, "error: {:?}", resp.error);
+    let payload = resp.payload.unwrap();
+    assert_eq!(payload["file"]["capability_tier"], "syntax_only");
+    let symbols = payload["symbols"].as_array().unwrap();
+    assert!(!symbols.is_empty());
+    assert_eq!(symbols[0]["capability_tier"], "syntax_only");
+}
+
+#[test]
+fn e2e_multi_tier_file_outline_file_only_carries_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call(
+        "get_file_outline",
+        json!({ "repo_id": "multi-tier-repo", "file_path": "README.md" }),
+    );
+    assert_eq!(resp.status, Status::Success);
+    let payload = resp.payload.unwrap();
+    assert_eq!(payload["file"]["capability_tier"], "file_only");
+    let symbols = payload["symbols"].as_array().unwrap();
+    assert!(symbols.is_empty());
+}
+
+#[test]
+fn e2e_multi_tier_file_outline_semantic_file_carries_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call(
+        "get_file_outline",
+        json!({ "repo_id": "multi-tier-repo", "file_path": "src/app.ts" }),
+    );
+    assert_eq!(resp.status, Status::Success);
+    let payload = resp.payload.unwrap();
+    assert_eq!(payload["file"]["capability_tier"], "syntax_plus_semantic");
+    let symbols = payload["symbols"].as_array().unwrap();
+    assert_eq!(symbols.len(), 2);
+    assert_eq!(symbols[0]["capability_tier"], "syntax_plus_semantic");
+}
+
+#[test]
+fn e2e_multi_tier_file_content_carries_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call(
+        "get_file_content",
+        json!({ "repo_id": "multi-tier-repo", "file_path": "src/lib.rs" }),
+    );
+    assert_eq!(resp.status, Status::Success);
+    let payload = resp.payload.unwrap();
+    assert_eq!(payload["file"]["capability_tier"], "syntax_only");
+    assert!(payload["content"].as_str().unwrap().contains("greet"));
+
+    let resp2 = reg.call(
+        "get_file_content",
+        json!({ "repo_id": "multi-tier-repo", "file_path": "README.md" }),
+    );
+    assert_eq!(resp2.status, Status::Success);
+    let payload2 = resp2.payload.unwrap();
+    assert_eq!(payload2["file"]["capability_tier"], "file_only");
+}
+
+#[test]
+fn e2e_multi_tier_file_tree_entries_carry_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call("get_file_tree", json!({ "repo_id": "multi-tier-repo" }));
+    assert_eq!(resp.status, Status::Success);
+    let entries = resp.payload.unwrap()["entries"].as_array().unwrap().clone();
+    assert!(entries.len() >= 3);
+
+    let readme = entries.iter().find(|e| e["path"] == "README.md").unwrap();
+    assert_eq!(readme["capability_tier"], "file_only");
+    assert_eq!(readme["symbol_count"], 0);
+
+    let rs = entries.iter().find(|e| e["path"] == "src/lib.rs").unwrap();
+    assert_eq!(rs["capability_tier"], "syntax_only");
+    assert!(rs["symbol_count"].as_u64().unwrap() >= 2);
+
+    let py = entries
+        .iter()
+        .find(|e| e["path"] == "app/models.py")
+        .unwrap();
+    assert_eq!(py["capability_tier"], "syntax_only");
+    assert!(py["symbol_count"].as_u64().unwrap() >= 2);
+
+    let ts = entries.iter().find(|e| e["path"] == "src/app.ts").unwrap();
+    assert_eq!(ts["capability_tier"], "syntax_plus_semantic");
+    assert_eq!(ts["symbol_count"], 2);
+}
+
+#[test]
+fn e2e_multi_tier_repo_outline_files_carry_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call("get_repo_outline", json!({ "repo_id": "multi-tier-repo" }));
+    assert_eq!(resp.status, Status::Success);
+    let payload = resp.payload.unwrap();
+    let files = payload["files"].as_array().unwrap();
+    assert!(files.len() >= 3);
+
+    let tiers: Vec<&str> = files
+        .iter()
+        .filter_map(|f| f["capability_tier"].as_str())
+        .collect();
+    assert!(tiers.contains(&"file_only"));
+    assert!(tiers.contains(&"syntax_only"));
+    assert!(tiers.contains(&"syntax_plus_semantic"));
+}
+
+#[test]
+fn e2e_multi_tier_search_symbols_finds_across_languages() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let resp = reg.call(
+        "search_symbols",
+        json!({ "repo_id": "multi-tier-repo", "query": "greet User Config get_name" }),
+    );
+    assert_eq!(resp.status, Status::Success);
+    let items = resp.payload.unwrap()["items"].as_array().unwrap().clone();
+    assert!(
+        items.len() >= 2,
+        "should find symbols from multiple languages"
+    );
+
+    let languages: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i["language"].as_str())
+        .collect();
+    assert!(languages.contains(&"rust"));
+    assert!(languages.contains(&"python"));
+
+    for item in &items {
+        assert!(
+            item["capability_tier"].is_string(),
+            "each result should carry capability_tier"
+        );
+    }
+}
+
+#[test]
+fn e2e_multi_tier_get_symbol_carries_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    let search = reg.call(
+        "search_symbols",
+        json!({ "repo_id": "multi-tier-repo", "query": "greet" }),
+    );
+    let items = search.payload.unwrap()["items"].as_array().unwrap().clone();
+    assert!(!items.is_empty());
+    let id = items[0]["id"].as_str().unwrap();
+
+    let resp = reg.call("get_symbol", json!({ "id": id }));
+    assert_eq!(resp.status, Status::Success);
+    let payload = resp.payload.unwrap();
+    assert_eq!(payload["capability_tier"], "syntax_only");
+    assert_eq!(payload["name"], "greet");
+}
+
+#[test]
+fn e2e_multi_tier_search_symbols_filter_by_capability_tier() {
+    let (db, blob_store, _blob_dir, _repo_dir) = indexed_multi_tier_store();
+    let svc = StoreQueryService::new(&db, &blob_store);
+    let reg = ToolRegistry::new(&svc);
+
+    // Filter to syntax_plus_semantic only — should return TS symbols.
+    let resp = reg.call(
+        "search_symbols",
+        json!({
+            "repo_id": "multi-tier-repo",
+            "query": "hello App greet Config User",
+            "capability_tier": "syntax_plus_semantic"
+        }),
+    );
+    assert_eq!(resp.status, Status::Success);
+    let items = resp.payload.unwrap()["items"].as_array().unwrap().clone();
+    assert!(!items.is_empty(), "should find semantic symbols");
+    for item in &items {
+        assert_eq!(
+            item["capability_tier"], "syntax_plus_semantic",
+            "all results should be syntax_plus_semantic when filtered"
+        );
+    }
+
+    // Filter to syntax_only — should exclude TS symbols.
+    let resp2 = reg.call(
+        "search_symbols",
+        json!({
+            "repo_id": "multi-tier-repo",
+            "query": "hello App greet Config User",
+            "capability_tier": "syntax_only"
+        }),
+    );
+    assert_eq!(resp2.status, Status::Success);
+    let items2 = resp2.payload.unwrap()["items"].as_array().unwrap().clone();
+    assert!(!items2.is_empty());
+    for item in &items2 {
+        assert_eq!(item["capability_tier"], "syntax_only");
+    }
 }

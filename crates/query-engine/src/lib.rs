@@ -129,6 +129,7 @@ pub struct FileTreeEntry {
     pub path: String,
     pub language: String,
     pub symbol_count: u64,
+    pub capability_tier: CapabilityTier,
 }
 
 #[derive(Debug, Clone)]
@@ -444,6 +445,7 @@ pub mod test_support {
                     path: f.file_path.clone(),
                     language: f.language.clone(),
                     symbol_count: f.symbol_count,
+                    capability_tier: f.capability_tier,
                 })
                 .collect();
             Ok(entries)
@@ -466,6 +468,7 @@ pub mod test_support {
                     path: f.file_path.clone(),
                     language: f.language.clone(),
                     symbol_count: f.symbol_count,
+                    capability_tier: f.capability_tier,
                 })
                 .collect();
             Ok(RepoOutline {
