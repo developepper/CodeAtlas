@@ -1,0 +1,10 @@
+{
+  "repo_id": "repo-1",
+  "file_path": "src/main.rs",
+  "language": "rust",
+  "file_hash": "def456",
+  "summary": "Main executable module",
+  "symbol_count": 7,
+  "capability_tier": "syntax_plus_semantic",
+  "updated_at": "2026-03-09T00:00:00Z"
+}

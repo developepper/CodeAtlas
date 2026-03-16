@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use core_model::{
-    FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+    CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus, RepoRecord, SymbolKind,
     SymbolRecord,
 };
 use query_engine::{
@@ -23,7 +23,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             display_name: "TestProject".into(),
             source_root: "/tmp/test".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
-            index_version: "1.0.0".into(),
+            index_version: "1.1.0".into(),
             language_counts: BTreeMap::from([("rust".into(), 3), ("toml".into(), 1)]),
             file_count: 4,
             symbol_count: 5,
@@ -56,10 +56,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
                 file_hash: hash,
                 summary: format!("{path} source file"),
                 symbol_count: *sym_count,
-                quality_mix: QualityMix {
-                    semantic_percent: 0.0,
-                    syntax_percent: 100.0,
-                },
+                capability_tier: CapabilityTier::SyntaxOnly,
                 updated_at: "2026-03-09T00:00:00Z".into(),
             })
             .unwrap();
@@ -108,9 +105,9 @@ fn make_symbol(name: &str, kind: SymbolKind, file_path: &str) -> SymbolRecord {
         start_byte: 0,
         byte_length: 100,
         content_hash: format!("hash-{name}"),
-        quality_level: QualityLevel::Syntax,
+        capability_tier: CapabilityTier::SyntaxOnly,
         confidence_score: 0.8,
-        source_adapter: "syntax-treesitter-v1".into(),
+        source_backend: "syntax-treesitter-v1".into(),
         indexed_at: "2026-03-09T00:00:00Z".into(),
         docstring: None,
         summary: None,
@@ -118,6 +115,10 @@ fn make_symbol(name: &str, kind: SymbolKind, file_path: &str) -> SymbolRecord {
         keywords: None,
         decorators_or_attributes: None,
         semantic_refs: None,
+        container_symbol_id: None,
+        namespace_path: None,
+        raw_kind: None,
+        modifiers: None,
     }
 }
 

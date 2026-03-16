@@ -1,3 +1,4 @@
+#![allow(deprecated)] // QualityLevel used for adapter-api compat
 //! Integration tests for the indexer pipeline.
 //!
 //! These tests exercise the full discovery → parse → persist flow against
@@ -339,18 +340,21 @@ pub fn greet(config: &Config) -> String {
         .expect("list symbols");
     assert!(symbol_ids.len() >= 3);
 
-    // Verify source_adapter provenance on a symbol.
+    // Verify source_backend provenance on a symbol.
     let first_sym = db
         .symbols()
         .get(&symbol_ids[0])
         .expect("get symbol")
         .expect("symbol exists");
     assert!(
-        first_sym.source_adapter.contains("syntax-treesitter"),
-        "source_adapter should identify tree-sitter: {}",
-        first_sym.source_adapter
+        first_sym.source_backend.contains("syntax-treesitter"),
+        "source_backend should identify tree-sitter: {}",
+        first_sym.source_backend
     );
-    assert_eq!(first_sym.quality_level, QualityLevel::Syntax);
+    assert_eq!(
+        first_sym.capability_tier,
+        core_model::CapabilityTier::SyntaxOnly
+    );
 
     // Verify blobs were written for both files.
     let lib_content = std::fs::read(src.join("lib.rs")).expect("read lib.rs");

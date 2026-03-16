@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Integration tests for adapter routing policy.
 //!
 //! These tests exercise the full public API surface of [`DefaultRouter`]

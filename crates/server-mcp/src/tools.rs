@@ -100,9 +100,9 @@ struct SymbolPayload {
     signature: String,
     start_line: u32,
     end_line: u32,
-    quality_level: String,
+    capability_tier: String,
     confidence_score: f32,
-    source_adapter: String,
+    source_backend: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     docstring: Option<String>,
 }
@@ -119,9 +119,9 @@ impl From<&core_model::SymbolRecord> for SymbolPayload {
             signature: r.signature.clone(),
             start_line: r.start_line,
             end_line: r.end_line,
-            quality_level: format!("{:?}", r.quality_level).to_lowercase(),
+            capability_tier: r.capability_tier.as_str().to_string(),
             confidence_score: r.confidence_score,
-            source_adapter: r.source_adapter.clone(),
+            source_backend: r.source_backend.clone(),
             docstring: r.docstring.clone(),
         }
     }
@@ -135,7 +135,7 @@ fn serialize_symbol(record: &core_model::SymbolRecord) -> Result<serde_json::Val
 
 // ── Quality stats computation ─────────────────────────────────────────
 
-/// Compute quality mix from a slice of symbol records.
+/// Compute capability tier stats from a slice of symbol records.
 fn compute_quality_stats(records: &[&core_model::SymbolRecord]) -> QualityStats {
     if records.is_empty() {
         return QualityStats::default();
@@ -143,7 +143,7 @@ fn compute_quality_stats(records: &[&core_model::SymbolRecord]) -> QualityStats 
     let total = records.len() as f64;
     let semantic = records
         .iter()
-        .filter(|r| r.quality_level == core_model::QualityLevel::Semantic)
+        .filter(|r| r.capability_tier.has_semantic())
         .count() as f64;
     QualityStats {
         semantic_percent: (semantic / total) * 100.0,
@@ -165,7 +165,7 @@ pub fn search_symbols(svc: &dyn QueryService, params: serde_json::Value) -> Tool
         filters: QueryFilters {
             kind,
             language: p.language,
-            quality_level: None,
+            capability_tier: None,
             file_path: None,
         },
         limit: p.limit,
@@ -360,7 +360,7 @@ pub fn search_text(svc: &dyn QueryService, params: serde_json::Value) -> ToolRes
         filters: QueryFilters {
             kind,
             language: p.language,
-            quality_level: None,
+            capability_tier: None,
             file_path: None,
         },
         limit: p.limit,

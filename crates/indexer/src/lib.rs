@@ -21,7 +21,7 @@ pub mod stage;
 pub use change_detection::{detect_changes, ChangeSet};
 pub use context::PipelineContext;
 pub use merge::{merge_outputs, MergeOutcome, MergedOutput, SymbolProvenance};
-pub use metrics::{compute_coverage, SemanticCoverageMetrics};
+pub use metrics::{compute_tier_metrics, CapabilityTierMetrics};
 pub use pipeline::{run, IndexMetrics, IndexResult};
 pub use stage::{DiscoveryOutput, FileError, ParseOutput, ParsedFile, PreparedFile};
 

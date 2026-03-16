@@ -26,7 +26,7 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     println!("file: {}:{}", record.file_path, record.start_line);
     println!("language: {}", record.language);
     println!("signature: {}", record.signature);
-    println!("quality: {:?}", record.quality_level);
+    println!("tier: {}", record.capability_tier);
     println!("confidence: {}", record.confidence_score);
     if let Some(ref doc) = record.docstring {
         println!("docstring: {doc}");

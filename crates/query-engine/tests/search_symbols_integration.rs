@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use core_model::{
-    FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+    CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus, RepoRecord, SymbolKind,
     SymbolRecord,
 };
 use query_engine::{QueryError, QueryFilters, QueryService, StoreQueryService, SymbolQuery};
@@ -20,7 +20,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             display_name: "Test".into(),
             source_root: "/tmp/test".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
-            index_version: "1.0.0".into(),
+            index_version: "1.1.0".into(),
             language_counts: BTreeMap::from([("rust".into(), 3)]),
             file_count: 2,
             symbol_count: 5,
@@ -41,10 +41,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
                 file_hash: "sha256:abc".into(),
                 summary: "source file".into(),
                 symbol_count: 0,
-                quality_mix: QualityMix {
-                    semantic_percent: 0.0,
-                    syntax_percent: 100.0,
-                },
+                capability_tier: CapabilityTier::SyntaxOnly,
                 updated_at: "2026-03-09T00:00:00Z".into(),
             })
             .unwrap();
@@ -56,7 +53,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             SymbolKind::Function,
             "src/lib.rs",
             "fn run()",
-            QualityLevel::Syntax,
+            CapabilityTier::SyntaxOnly,
             0.8,
             None,
         ),
@@ -65,7 +62,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             SymbolKind::Function,
             "src/server.rs",
             "fn run_server(port: u16)",
-            QualityLevel::Syntax,
+            CapabilityTier::SyntaxOnly,
             0.7,
             None,
         ),
@@ -74,7 +71,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             SymbolKind::Class,
             "src/lib.rs",
             "struct RunConfig",
-            QualityLevel::Semantic,
+            CapabilityTier::SyntaxPlusSemantic,
             0.95,
             Some(vec!["config".into(), "server".into()]),
         ),
@@ -83,7 +80,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             SymbolKind::Function,
             "src/server.rs",
             "fn handle_request(req: Request) -> Response",
-            QualityLevel::Semantic,
+            CapabilityTier::SyntaxPlusSemantic,
             0.9,
             Some(vec!["http".into(), "handler".into()]),
         ),
@@ -92,7 +89,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir) {
             SymbolKind::Type,
             "src/lib.rs",
             "enum Status",
-            QualityLevel::Syntax,
+            CapabilityTier::SyntaxOnly,
             0.75,
             None,
         ),
@@ -112,7 +109,7 @@ fn make_symbol(
     kind: SymbolKind,
     file_path: &str,
     signature: &str,
-    quality_level: QualityLevel,
+    capability_tier: CapabilityTier,
     confidence: f32,
     keywords: Option<Vec<String>>,
 ) -> SymbolRecord {
@@ -132,9 +129,9 @@ fn make_symbol(
         start_byte: 0,
         byte_length: 100,
         content_hash: format!("hash-{name}"),
-        quality_level,
+        capability_tier,
         confidence_score: confidence,
-        source_adapter: "syntax-treesitter-v1".into(),
+        source_backend: "syntax-treesitter-v1".into(),
         indexed_at: "2026-03-09T00:00:00Z".into(),
         docstring: None,
         summary: None,
@@ -142,6 +139,10 @@ fn make_symbol(
         keywords,
         decorators_or_attributes: None,
         semantic_refs: None,
+        container_symbol_id: None,
+        namespace_path: None,
+        raw_kind: None,
+        modifiers: None,
     }
 }
 
@@ -261,7 +262,7 @@ fn filter_by_file_path() {
 }
 
 #[test]
-fn filter_by_quality_level() {
+fn filter_by_capability_tier() {
     let (store, blob_store, _blob_dir) = seed_store();
     let svc = StoreQueryService::new(&store, &blob_store);
     let result = svc
@@ -269,7 +270,7 @@ fn filter_by_quality_level() {
             repo_id: "repo-1".into(),
             text: "run".into(),
             filters: QueryFilters {
-                quality_level: Some(QualityLevel::Semantic),
+                capability_tier: Some(CapabilityTier::SyntaxPlusSemantic),
                 ..QueryFilters::default()
             },
             limit: 10,
@@ -280,7 +281,7 @@ fn filter_by_quality_level() {
     assert!(result
         .items
         .iter()
-        .all(|s| s.record.quality_level == QualityLevel::Semantic));
+        .all(|s| s.record.capability_tier == CapabilityTier::SyntaxPlusSemantic));
 }
 
 #[test]
@@ -417,7 +418,7 @@ fn results_carry_quality_and_confidence() {
         assert!(item.score > 0.0);
         assert!(item.record.confidence_score >= 0.0);
         assert!(item.record.confidence_score <= 1.0);
-        assert!(!item.record.source_adapter.is_empty());
+        assert!(!item.record.source_backend.is_empty());
     }
 }
 

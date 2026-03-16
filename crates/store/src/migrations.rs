@@ -9,13 +9,14 @@ use rusqlite::Connection;
 use crate::StoreError;
 
 /// Current schema version (latest migration number).
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// All migrations in order. Each entry is `(version, up_sql, down_sql)`.
 const MIGRATIONS: &[(u32, &str, &str)] = &[
     (1, V1_UP, V1_DOWN),
     (2, V2_UP, V2_DOWN),
     (3, V3_UP, V3_DOWN),
+    (4, V4_UP, V4_DOWN),
 ];
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,87 @@ INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');
 ALTER TABLE repos DROP COLUMN freshness_status;
 ALTER TABLE repos DROP COLUMN indexing_status;
 ALTER TABLE repos DROP COLUMN registered_at;
+"#;
+
+// ---------------------------------------------------------------------------
+// V4: capability tier model (Epic 17, Ticket 175)
+// ---------------------------------------------------------------------------
+
+const V4_UP: &str = r#"
+-- Rename quality_level -> capability_tier on symbols and migrate values.
+-- Semantic symbols become semantic_only (not syntax_plus_semantic) because
+-- we cannot retroactively determine whether a syntax baseline existed.
+-- The file-level tier is derived from its symbols below.
+ALTER TABLE symbols RENAME COLUMN quality_level TO capability_tier;
+UPDATE symbols SET capability_tier = 'semantic_only' WHERE capability_tier = 'semantic';
+UPDATE symbols SET capability_tier = 'syntax_only' WHERE capability_tier = 'syntax';
+
+-- Rename source_adapter -> source_backend on symbols.
+ALTER TABLE symbols RENAME COLUMN source_adapter TO source_backend;
+
+-- Add capability_tier to files, replacing semantic_pct/syntax_pct.
+-- Derive file tier from the symbols it contains:
+--   - Has both syntax_only and semantic_only symbols → syntax_plus_semantic
+--   - Has only semantic_only symbols (and semantic_pct > 0) → semantic_only
+--   - Has only syntax_only symbols → syntax_only
+--   - No symbols → file_only
+ALTER TABLE files ADD COLUMN capability_tier TEXT NOT NULL DEFAULT 'file_only';
+
+-- Files with both syntax and semantic symbols.
+UPDATE files SET capability_tier = 'syntax_plus_semantic'
+    WHERE symbol_count > 0
+    AND semantic_pct > 0.0
+    AND syntax_pct > 0.0;
+
+-- Files with only semantic symbols (no syntax contribution).
+UPDATE files SET capability_tier = 'semantic_only'
+    WHERE capability_tier = 'file_only'
+    AND symbol_count > 0
+    AND semantic_pct > 0.0
+    AND syntax_pct = 0.0;
+
+-- Files with only syntax symbols.
+UPDATE files SET capability_tier = 'syntax_only'
+    WHERE capability_tier = 'file_only'
+    AND symbol_count > 0;
+
+ALTER TABLE files DROP COLUMN semantic_pct;
+ALTER TABLE files DROP COLUMN syntax_pct;
+
+-- Structural fields for broad syntax indexing (Epic 17).
+ALTER TABLE symbols ADD COLUMN container_symbol_id TEXT;
+ALTER TABLE symbols ADD COLUMN namespace_path TEXT;
+ALTER TABLE symbols ADD COLUMN raw_kind TEXT;
+ALTER TABLE symbols ADD COLUMN modifiers TEXT;
+
+-- Rebuild FTS to reflect renamed columns.
+INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');
+"#;
+
+const V4_DOWN: &str = r#"
+-- Drop structural fields.
+ALTER TABLE symbols DROP COLUMN modifiers;
+ALTER TABLE symbols DROP COLUMN raw_kind;
+ALTER TABLE symbols DROP COLUMN namespace_path;
+ALTER TABLE symbols DROP COLUMN container_symbol_id;
+
+-- Restore source_adapter name.
+ALTER TABLE symbols RENAME COLUMN source_backend TO source_adapter;
+
+-- Restore quality_level name and values.
+ALTER TABLE symbols RENAME COLUMN capability_tier TO quality_level;
+UPDATE symbols SET quality_level = 'semantic' WHERE quality_level IN ('syntax_plus_semantic', 'semantic_only');
+UPDATE symbols SET quality_level = 'syntax' WHERE quality_level IN ('syntax_only', 'file_only');
+
+-- Restore semantic_pct/syntax_pct on files.
+ALTER TABLE files ADD COLUMN semantic_pct REAL NOT NULL DEFAULT 0.0;
+ALTER TABLE files ADD COLUMN syntax_pct REAL NOT NULL DEFAULT 0.0;
+UPDATE files SET semantic_pct = 100.0 WHERE capability_tier IN ('syntax_plus_semantic', 'semantic_only');
+UPDATE files SET syntax_pct = 100.0 WHERE capability_tier IN ('syntax_only', 'syntax_plus_semantic');
+
+ALTER TABLE files DROP COLUMN capability_tier;
+
+INSERT INTO symbols_fts(symbols_fts) VALUES('rebuild');
 "#;
 
 // ---------------------------------------------------------------------------
@@ -365,17 +447,29 @@ mod tests {
             .unwrap();
         assert_eq!(old_id, "src/lib.rs::Config#class");
 
-        // Apply V3.
+        // Apply V3 and V4 (apply_all runs all pending).
         apply_all(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 3);
+        assert_eq!(current_version(&conn).unwrap(), SCHEMA_VERSION);
 
-        // Symbol ID is now repo-prefixed.
+        // Symbol ID is now repo-prefixed (V3) and quality_level → capability_tier (V4).
         let new_id: String = conn
             .query_row("SELECT id FROM symbols", [], |r| r.get(0))
             .unwrap();
         assert_eq!(new_id, "my-app//src/lib.rs::Config#class");
 
-        // Rollback V3 strips the prefix.
+        // V4: quality_level renamed to capability_tier and value migrated.
+        let tier: String = conn
+            .query_row("SELECT capability_tier FROM symbols", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tier, "syntax_only");
+
+        // V4: source_adapter renamed to source_backend.
+        let backend: String = conn
+            .query_row("SELECT source_backend FROM symbols", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(backend, "treesitter");
+
+        // Rollback V3 strips the prefix (rollback V4 first, then V3).
         rollback_to(&conn, 2).unwrap();
         let reverted_id: String = conn
             .query_row("SELECT id FROM symbols", [], |r| r.get(0))

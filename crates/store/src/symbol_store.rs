@@ -2,7 +2,7 @@
 
 use rusqlite::{params, Connection};
 
-use core_model::{QualityLevel, SymbolKind, SymbolRecord, Validate};
+use core_model::{CapabilityTier, SymbolKind, SymbolRecord, Validate};
 
 use crate::StoreError;
 
@@ -44,15 +44,24 @@ impl<'a> SymbolStore<'a> {
             .transpose()
             .map_err(|e| StoreError::Validation(e.to_string()))?;
 
+        let modifiers_json = record
+            .modifiers
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| StoreError::Validation(e.to_string()))?;
+
         self.conn.execute(
             "INSERT OR REPLACE INTO symbols
                 (id, repo_id, file_path, language, kind, name, qualified_name,
                  signature, start_line, end_line, start_byte, byte_length,
-                 content_hash, quality_level, confidence_score, source_adapter,
+                 content_hash, capability_tier, confidence_score, source_backend,
                  indexed_at, docstring, summary, parent_symbol_id,
-                 keywords, decorators_or_attributes, semantic_refs)
+                 keywords, decorators_or_attributes, semantic_refs,
+                 container_symbol_id, namespace_path, raw_kind, modifiers)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
+                     ?24, ?25, ?26, ?27)",
             params![
                 record.id,
                 record.repo_id,
@@ -67,9 +76,9 @@ impl<'a> SymbolStore<'a> {
                 record.start_byte,
                 record.byte_length,
                 record.content_hash,
-                quality_level_str(record.quality_level),
+                record.capability_tier.as_str(),
                 record.confidence_score,
-                record.source_adapter,
+                record.source_backend,
                 record.indexed_at,
                 record.docstring,
                 record.summary,
@@ -77,6 +86,10 @@ impl<'a> SymbolStore<'a> {
                 keywords_json,
                 decorators_json,
                 refs_json,
+                record.container_symbol_id,
+                record.namespace_path,
+                record.raw_kind,
+                modifiers_json,
             ],
         )?;
         Ok(())
@@ -90,16 +103,17 @@ impl<'a> SymbolStore<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT id, repo_id, file_path, language, kind, name, qualified_name,
                     signature, start_line, end_line, start_byte, byte_length,
-                    content_hash, quality_level, confidence_score, source_adapter,
+                    content_hash, capability_tier, confidence_score, source_backend,
                     indexed_at, docstring, summary, parent_symbol_id,
-                    keywords, decorators_or_attributes, semantic_refs
+                    keywords, decorators_or_attributes, semantic_refs,
+                    container_symbol_id, namespace_path, raw_kind, modifiers
              FROM symbols WHERE id = ?1",
         )?;
 
         let result = stmt
             .query_row(params![id], |row| {
                 let kind_str: String = row.get(4)?;
-                let quality_str: String = row.get(13)?;
+                let tier_str: String = row.get(13)?;
                 let keywords_json: Option<String> = row.get(20)?;
                 let decorators_json: Option<String> = row.get(21)?;
                 let refs_json: Option<String> = row.get(22)?;
@@ -118,9 +132,9 @@ impl<'a> SymbolStore<'a> {
                     start_byte: row.get::<_, i64>(10)? as u64,
                     byte_length: row.get::<_, i64>(11)? as u64,
                     content_hash: row.get(12)?,
-                    quality_level: parse_quality_level(&quality_str),
+                    capability_tier: parse_capability_tier(&tier_str),
                     confidence_score: row.get(14)?,
-                    source_adapter: row.get(15)?,
+                    source_backend: row.get(15)?,
                     indexed_at: row.get(16)?,
                     docstring: row.get(17)?,
                     summary: row.get(18)?,
@@ -134,6 +148,14 @@ impl<'a> SymbolStore<'a> {
                     semantic_refs: refs_json
                         .map(|j| serde_json::from_str(&j).map_err(|e| json_read_err(22, e)))
                         .transpose()?,
+                    container_symbol_id: row.get(23)?,
+                    namespace_path: row.get(24)?,
+                    raw_kind: row.get(25)?,
+                    modifiers: {
+                        let json: Option<String> = row.get(26)?;
+                        json.map(|j| serde_json::from_str(&j).map_err(|e| json_read_err(26, e)))
+                            .transpose()?
+                    },
                 })
             })
             .optional()?;
@@ -182,15 +204,16 @@ impl<'a> SymbolStore<'a> {
         repo_id: &str,
         kind: Option<SymbolKind>,
         language: Option<&str>,
-        quality_level: Option<QualityLevel>,
+        capability_tier: Option<CapabilityTier>,
         file_path: Option<&str>,
     ) -> Result<Vec<SymbolRecord>, StoreError> {
         let mut sql = String::from(
             "SELECT id, repo_id, file_path, language, kind, name, qualified_name,
                     signature, start_line, end_line, start_byte, byte_length,
-                    content_hash, quality_level, confidence_score, source_adapter,
+                    content_hash, capability_tier, confidence_score, source_backend,
                     indexed_at, docstring, summary, parent_symbol_id,
-                    keywords, decorators_or_attributes, semantic_refs
+                    keywords, decorators_or_attributes, semantic_refs,
+                    container_symbol_id, namespace_path, raw_kind, modifiers
              FROM symbols WHERE repo_id = ?1",
         );
 
@@ -207,9 +230,9 @@ impl<'a> SymbolStore<'a> {
             param_strings.push(lang.to_string());
             param_index += 1;
         }
-        if let Some(ql) = quality_level {
-            sql.push_str(&format!(" AND quality_level = ?{param_index}"));
-            param_strings.push(quality_level_str(ql).to_string());
+        if let Some(tier) = capability_tier {
+            sql.push_str(&format!(" AND capability_tier = ?{param_index}"));
+            param_strings.push(tier.as_str().to_string());
             param_index += 1;
         }
         if let Some(fp) = file_path {
@@ -232,7 +255,7 @@ impl<'a> SymbolStore<'a> {
         let rows = stmt
             .query_map(params_vec.as_slice(), |row| {
                 let kind_str: String = row.get(4)?;
-                let quality_str: String = row.get(13)?;
+                let tier_str: String = row.get(13)?;
                 let keywords_json: Option<String> = row.get(20)?;
                 let decorators_json: Option<String> = row.get(21)?;
                 let refs_json: Option<String> = row.get(22)?;
@@ -251,9 +274,9 @@ impl<'a> SymbolStore<'a> {
                     start_byte: row.get::<_, i64>(10)? as u64,
                     byte_length: row.get::<_, i64>(11)? as u64,
                     content_hash: row.get(12)?,
-                    quality_level: parse_quality_level(&quality_str),
+                    capability_tier: parse_capability_tier(&tier_str),
                     confidence_score: row.get(14)?,
-                    source_adapter: row.get(15)?,
+                    source_backend: row.get(15)?,
                     indexed_at: row.get(16)?,
                     docstring: row.get(17)?,
                     summary: row.get(18)?,
@@ -267,6 +290,14 @@ impl<'a> SymbolStore<'a> {
                     semantic_refs: refs_json
                         .map(|j| serde_json::from_str(&j).map_err(|e| json_read_err(22, e)))
                         .transpose()?,
+                    container_symbol_id: row.get(23)?,
+                    namespace_path: row.get(24)?,
+                    raw_kind: row.get(25)?,
+                    modifiers: {
+                        let json: Option<String> = row.get(26)?;
+                        json.map(|j| serde_json::from_str(&j).map_err(|e| json_read_err(26, e)))
+                            .transpose()?
+                    },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -340,18 +371,8 @@ impl<'a> SymbolStore<'a> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn quality_level_str(level: QualityLevel) -> &'static str {
-    match level {
-        QualityLevel::Semantic => "semantic",
-        QualityLevel::Syntax => "syntax",
-    }
-}
-
-fn parse_quality_level(s: &str) -> QualityLevel {
-    match s {
-        "semantic" => QualityLevel::Semantic,
-        _ => QualityLevel::Syntax,
-    }
+fn parse_capability_tier(s: &str) -> CapabilityTier {
+    s.parse().unwrap_or(CapabilityTier::FileOnly)
 }
 
 fn parse_symbol_kind(s: &str) -> SymbolKind {
@@ -408,7 +429,7 @@ impl<T> OptionalRow<T> for Result<T, rusqlite::Error> {
 mod tests {
     use super::*;
     use crate::MetadataStore;
-    use core_model::{FileRecord, FreshnessStatus, IndexingStatus, QualityMix, RepoRecord};
+    use core_model::{CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus, RepoRecord};
     use std::collections::BTreeMap;
 
     fn setup_store() -> MetadataStore {
@@ -439,10 +460,7 @@ mod tests {
                 file_hash: "sha256:abc".to_string(),
                 summary: "test file".to_string(),
                 symbol_count: 0,
-                quality_mix: QualityMix {
-                    semantic_percent: 0.0,
-                    syntax_percent: 100.0,
-                },
+                capability_tier: CapabilityTier::SyntaxOnly,
                 updated_at: "2025-01-15T10:30:00Z".to_string(),
             })
             .unwrap();
@@ -464,9 +482,9 @@ mod tests {
             start_byte: 0,
             byte_length: 25,
             content_hash: "sha256:def456".to_string(),
-            quality_level: QualityLevel::Syntax,
+            capability_tier: CapabilityTier::SyntaxOnly,
             confidence_score: 0.7,
-            source_adapter: "syntax-treesitter-rust".to_string(),
+            source_backend: "syntax-treesitter-rust".to_string(),
             indexed_at: "2025-01-15T10:30:00Z".to_string(),
             docstring: Some("Entry point".to_string()),
             summary: None,
@@ -474,6 +492,10 @@ mod tests {
             keywords: Some(vec!["main".to_string(), "entry".to_string()]),
             decorators_or_attributes: None,
             semantic_refs: None,
+            container_symbol_id: None,
+            namespace_path: None,
+            raw_kind: None,
+            modifiers: None,
         }
     }
 
@@ -502,9 +524,9 @@ mod tests {
         assert_eq!(loaded.start_byte, sym.start_byte);
         assert_eq!(loaded.byte_length, sym.byte_length);
         assert_eq!(loaded.content_hash, sym.content_hash);
-        assert_eq!(loaded.quality_level, sym.quality_level);
+        assert_eq!(loaded.capability_tier, sym.capability_tier);
         assert!((loaded.confidence_score - sym.confidence_score).abs() < f32::EPSILON);
-        assert_eq!(loaded.source_adapter, sym.source_adapter);
+        assert_eq!(loaded.source_backend, sym.source_backend);
         assert_eq!(loaded.indexed_at, sym.indexed_at);
         assert_eq!(loaded.docstring, sym.docstring);
         assert_eq!(loaded.summary, sym.summary);
@@ -530,7 +552,7 @@ mod tests {
         store.symbols().upsert(&sym).unwrap();
 
         sym.confidence_score = 0.9;
-        sym.quality_level = QualityLevel::Semantic;
+        sym.capability_tier = CapabilityTier::SyntaxPlusSemantic;
         store.symbols().upsert(&sym).unwrap();
 
         let loaded = store
@@ -539,7 +561,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!((loaded.confidence_score - 0.9).abs() < f32::EPSILON);
-        assert_eq!(loaded.quality_level, QualityLevel::Semantic);
+        assert_eq!(loaded.capability_tier, CapabilityTier::SyntaxPlusSemantic);
     }
 
     #[test]

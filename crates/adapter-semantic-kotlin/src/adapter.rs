@@ -1,9 +1,10 @@
+use core_model::QualityLevel;
+
 use std::cell::RefCell;
 
 use adapter_api::{
     AdapterCapabilities, AdapterError, AdapterOutput, IndexContext, LanguageAdapter, SourceFile,
 };
-use core_model::QualityLevel;
 use tracing::warn;
 
 use crate::error::KotlinAnalysisError;

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use core_model::{
-    FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+    CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus, RepoRecord, SymbolKind,
     SymbolRecord,
 };
 use store::MetadataStore;
@@ -22,7 +22,7 @@ fn test_repo() -> RepoRecord {
         display_name: "Integration Test Repo".to_string(),
         source_root: "/home/user/repos/integration".to_string(),
         indexed_at: "2025-01-15T10:30:00Z".to_string(),
-        index_version: "1.0.0".to_string(),
+        index_version: "1.1.0".to_string(),
         language_counts,
         file_count: 3,
         symbol_count: 42,
@@ -41,10 +41,7 @@ fn test_file(file_path: &str) -> FileRecord {
         file_hash: format!("sha256:{file_path}"),
         summary: format!("Summary for {file_path}"),
         symbol_count: 3,
-        quality_mix: QualityMix {
-            semantic_percent: 0.0,
-            syntax_percent: 100.0,
-        },
+        capability_tier: CapabilityTier::SyntaxOnly,
         updated_at: "2025-01-15T10:30:00Z".to_string(),
     }
 }
@@ -64,9 +61,9 @@ fn test_symbol(file_path: &str, name: &str, kind: SymbolKind) -> SymbolRecord {
         start_byte: 0,
         byte_length: 50,
         content_hash: "sha256:content".to_string(),
-        quality_level: QualityLevel::Syntax,
+        capability_tier: CapabilityTier::SyntaxOnly,
         confidence_score: 0.7,
-        source_adapter: "syntax-treesitter-rust".to_string(),
+        source_backend: "syntax-treesitter-rust".to_string(),
         indexed_at: "2025-01-15T10:30:00Z".to_string(),
         docstring: None,
         summary: None,
@@ -74,6 +71,10 @@ fn test_symbol(file_path: &str, name: &str, kind: SymbolKind) -> SymbolRecord {
         keywords: None,
         decorators_or_attributes: None,
         semantic_refs: None,
+        container_symbol_id: None,
+        namespace_path: None,
+        raw_kind: None,
+        modifiers: None,
     }
 }
 
@@ -382,7 +383,7 @@ fn test_repo_with_id(repo_id: &str, source_root: &str) -> RepoRecord {
         display_name: repo_id.to_string(),
         source_root: source_root.to_string(),
         indexed_at: "2025-01-15T10:30:00Z".to_string(),
-        index_version: "1.0.0".to_string(),
+        index_version: "1.1.0".to_string(),
         language_counts: BTreeMap::new(),
         file_count: 0,
         symbol_count: 0,
@@ -401,10 +402,7 @@ fn test_file_for_repo(repo_id: &str, file_path: &str) -> FileRecord {
         file_hash: format!("sha256:{repo_id}:{file_path}"),
         summary: format!("Summary for {file_path} in {repo_id}"),
         symbol_count: 1,
-        quality_mix: QualityMix {
-            semantic_percent: 0.0,
-            syntax_percent: 100.0,
-        },
+        capability_tier: CapabilityTier::SyntaxOnly,
         updated_at: "2025-01-15T10:30:00Z".to_string(),
     }
 }
@@ -429,9 +427,9 @@ fn test_symbol_for_repo(
         start_byte: 0,
         byte_length: 50,
         content_hash: "sha256:content".to_string(),
-        quality_level: QualityLevel::Syntax,
+        capability_tier: CapabilityTier::SyntaxOnly,
         confidence_score: 0.7,
-        source_adapter: "syntax-treesitter-rust".to_string(),
+        source_backend: "syntax-treesitter-rust".to_string(),
         indexed_at: "2025-01-15T10:30:00Z".to_string(),
         docstring: None,
         summary: None,
@@ -439,6 +437,10 @@ fn test_symbol_for_repo(
         keywords: None,
         decorators_or_attributes: None,
         semantic_refs: None,
+        container_symbol_id: None,
+        namespace_path: None,
+        raw_kind: None,
+        modifiers: None,
     }
 }
 

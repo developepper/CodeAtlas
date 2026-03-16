@@ -126,10 +126,10 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
             result.metrics.coverage.duplicates_resolved
         );
     }
-    if !result.metrics.coverage.adapter_symbol_counts.is_empty() {
-        println!("adapter_breakdown:");
-        for (adapter, count) in &result.metrics.coverage.adapter_symbol_counts {
-            println!("  {adapter}: {count}");
+    if !result.metrics.coverage.backend_symbol_counts.is_empty() {
+        println!("backend_breakdown:");
+        for (backend, count) in &result.metrics.coverage.backend_symbol_counts {
+            println!("  {backend}: {count}");
         }
     }
 

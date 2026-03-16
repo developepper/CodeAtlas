@@ -2,7 +2,7 @@
 
 use rusqlite::{params, Connection};
 
-use core_model::{FileRecord, QualityMix, Validate};
+use core_model::{CapabilityTier, FileRecord, Validate};
 
 use crate::StoreError;
 
@@ -28,8 +28,8 @@ impl<'a> FileStore<'a> {
         self.conn.execute(
             "INSERT OR REPLACE INTO files
                 (repo_id, file_path, language, file_hash, summary,
-                 symbol_count, semantic_pct, syntax_pct, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 symbol_count, capability_tier, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 record.repo_id,
                 record.file_path,
@@ -37,8 +37,7 @@ impl<'a> FileStore<'a> {
                 record.file_hash,
                 record.summary,
                 record.symbol_count,
-                record.quality_mix.semantic_percent,
-                record.quality_mix.syntax_percent,
+                record.capability_tier.as_str(),
                 record.updated_at,
             ],
         )?;
@@ -49,12 +48,13 @@ impl<'a> FileStore<'a> {
     pub fn get(&self, repo_id: &str, file_path: &str) -> Result<Option<FileRecord>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT repo_id, file_path, language, file_hash, summary,
-                    symbol_count, semantic_pct, syntax_pct, updated_at
+                    symbol_count, capability_tier, updated_at
              FROM files WHERE repo_id = ?1 AND file_path = ?2",
         )?;
 
         let result = stmt
             .query_row(params![repo_id, file_path], |row| {
+                let tier_str: String = row.get(6)?;
                 Ok(FileRecord {
                     repo_id: row.get(0)?,
                     file_path: row.get(1)?,
@@ -62,11 +62,8 @@ impl<'a> FileStore<'a> {
                     file_hash: row.get(3)?,
                     summary: row.get(4)?,
                     symbol_count: row.get::<_, i64>(5)? as u64,
-                    quality_mix: QualityMix {
-                        semantic_percent: row.get(6)?,
-                        syntax_percent: row.get(7)?,
-                    },
-                    updated_at: row.get(8)?,
+                    capability_tier: tier_str.parse().unwrap_or(CapabilityTier::FileOnly),
+                    updated_at: row.get(7)?,
                 })
             })
             .optional()?;
@@ -238,7 +235,7 @@ mod tests {
                 display_name: "Test".to_string(),
                 source_root: "/tmp/test".to_string(),
                 indexed_at: "2025-01-15T10:30:00Z".to_string(),
-                index_version: "1.0.0".to_string(),
+                index_version: "1.1.0".to_string(),
                 language_counts: BTreeMap::new(),
                 file_count: 0,
                 symbol_count: 0,
@@ -259,10 +256,7 @@ mod tests {
             file_hash: "sha256:abc123".to_string(),
             summary: "Main entry point".to_string(),
             symbol_count: 5,
-            quality_mix: QualityMix {
-                semantic_percent: 0.0,
-                syntax_percent: 100.0,
-            },
+            capability_tier: CapabilityTier::SyntaxOnly,
             updated_at: "2025-01-15T10:30:00Z".to_string(),
         }
     }
@@ -285,14 +279,7 @@ mod tests {
         assert_eq!(loaded.file_hash, file.file_hash);
         assert_eq!(loaded.summary, file.summary);
         assert_eq!(loaded.symbol_count, file.symbol_count);
-        assert!(
-            (loaded.quality_mix.semantic_percent - file.quality_mix.semantic_percent).abs()
-                < f32::EPSILON
-        );
-        assert!(
-            (loaded.quality_mix.syntax_percent - file.quality_mix.syntax_percent).abs()
-                < f32::EPSILON
-        );
+        assert_eq!(loaded.capability_tier, file.capability_tier);
         assert_eq!(loaded.updated_at, file.updated_at);
     }
 

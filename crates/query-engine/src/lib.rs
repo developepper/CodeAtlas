@@ -1,6 +1,6 @@
 use std::fmt;
 
-use core_model::{FileRecord, QualityLevel, RepoRecord, SymbolKind, SymbolRecord};
+use core_model::{CapabilityTier, FileRecord, RepoRecord, SymbolKind, SymbolRecord};
 
 pub mod ranking;
 pub mod store_service;
@@ -56,7 +56,7 @@ pub struct SymbolQuery {
 pub struct QueryFilters {
     pub kind: Option<SymbolKind>,
     pub language: Option<String>,
-    pub quality_level: Option<QualityLevel>,
+    pub capability_tier: Option<CapabilityTier>,
     pub file_path: Option<String>,
 }
 
@@ -186,8 +186,8 @@ pub mod test_support {
     use std::collections::BTreeMap;
 
     use core_model::{
-        build_symbol_id, FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix,
-        RepoRecord, SymbolKind, SymbolRecord,
+        build_symbol_id, CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus, RepoRecord,
+        SymbolKind, SymbolRecord,
     };
 
     use crate::{
@@ -213,9 +213,9 @@ pub mod test_support {
             start_byte: 0,
             byte_length: 50,
             content_hash: "hash".into(),
-            quality_level: QualityLevel::Syntax,
+            capability_tier: CapabilityTier::SyntaxOnly,
             confidence_score: 0.8,
-            source_adapter: "syntax-treesitter-v1".into(),
+            source_backend: "syntax-treesitter-v1".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
             docstring: None,
             summary: None,
@@ -223,6 +223,10 @@ pub mod test_support {
             keywords: None,
             decorators_or_attributes: None,
             semantic_refs: None,
+            container_symbol_id: None,
+            namespace_path: None,
+            raw_kind: None,
+            modifiers: None,
         }
     }
 
@@ -234,10 +238,7 @@ pub mod test_support {
             file_hash: "hash".into(),
             summary: "A source file".into(),
             symbol_count: 3,
-            quality_mix: QualityMix {
-                semantic_percent: 0.0,
-                syntax_percent: 100.0,
-            },
+            capability_tier: CapabilityTier::SyntaxOnly,
             updated_at: "2026-03-09T00:00:00Z".into(),
         }
     }
@@ -250,7 +251,7 @@ pub mod test_support {
             display_name: "Test".into(),
             source_root: "/tmp/repo".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
-            index_version: "1.0.0".into(),
+            index_version: "1.1.0".into(),
             language_counts,
             file_count: 2,
             symbol_count: 5,
@@ -318,8 +319,8 @@ pub mod test_support {
                     }
                 })
                 .filter(|s| {
-                    if let Some(ql) = query.filters.quality_level {
-                        s.quality_level == ql
+                    if let Some(ct) = query.filters.capability_tier {
+                        s.capability_tier == ct
                     } else {
                         true
                     }

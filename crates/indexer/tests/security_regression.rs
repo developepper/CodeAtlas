@@ -1,3 +1,4 @@
+#![allow(deprecated)] // QualityLevel used for adapter-api compat
 //! Security regression tests for the indexer pipeline.
 //!
 //! Covers:

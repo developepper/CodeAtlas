@@ -75,7 +75,7 @@ impl MigrationContract for CoreModelMigrationContract {
 
 #[must_use]
 pub const fn current_index_schema_version() -> SchemaVersion {
-    SchemaVersion::new(1, 0, 0)
+    SchemaVersion::new(1, 1, 0)
 }
 
 pub fn parse_schema_version(value: &str) -> Result<SchemaVersion, ValidationError> {
@@ -249,6 +249,7 @@ mod tests {
         let current = contract.current_version();
         assert_eq!(current, current_index_schema_version());
 
+        // Same major version → NoAction.
         let from = SchemaVersion::new(1, 0, 0);
         let decision = contract.decision_for(from);
         assert_eq!(decision, MigrationDecision::NoAction);

@@ -1,28 +1,26 @@
-//! Semantic coverage metrics computation.
+//! Capability tier metrics computation.
 //!
 //! Computes quality KPIs from parse output to quantify the value of
 //! semantic adapters over syntax baselines (spec §13.1, §15.3).
 
 use std::collections::BTreeMap;
 
-use core_model::QualityLevel;
-
 use crate::merge::MergeOutcome;
 use crate::stage::ParseOutput;
 
-/// Semantic coverage metrics for an indexing run.
+/// Capability tier metrics for an indexing run.
 ///
 /// Quantifies how many symbols were produced by semantic adapters versus
-/// syntax-only adapters, and breaks down contributions per adapter.
+/// syntax-only adapters, and breaks down contributions per backend.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SemanticCoverageMetrics {
+pub struct CapabilityTierMetrics {
     /// Total symbols extracted across all files.
     pub total_symbols: usize,
-    /// Symbols produced by semantic adapters.
+    /// Symbols produced by semantic backends.
     pub semantic_symbols: usize,
-    /// Symbols produced by syntax adapters.
+    /// Symbols produced by syntax backends.
     pub syntax_symbols: usize,
-    /// Percentage of symbols from semantic adapters (0.0..=100.0).
+    /// Percentage of symbols from semantic backends (0.0..=100.0).
     pub semantic_coverage_percent: f32,
     /// Sum of confidence scores across all symbols.
     pub total_confidence: f32,
@@ -30,12 +28,14 @@ pub struct SemanticCoverageMetrics {
     pub avg_confidence: f32,
     /// Number of duplicate symbols resolved during merge.
     pub duplicates_resolved: usize,
-    /// Symbol count per source adapter (e.g. "semantic-typescript-v1" → 42).
-    pub adapter_symbol_counts: BTreeMap<String, usize>,
+    /// Symbol count per source backend (e.g. "semantic-typescript-v1" → 42).
+    pub backend_symbol_counts: BTreeMap<String, usize>,
     /// Number of files that have at least one semantic symbol.
     pub files_with_semantic: usize,
     /// Total number of parsed files.
     pub total_files: usize,
+    /// Number of files indexed at file level only (no symbols extracted).
+    pub files_file_only: usize,
     /// Number of overlapping symbols where semantic adapter won the merge.
     pub wins: usize,
     /// Number of overlapping symbols where syntax adapter won the merge.
@@ -47,30 +47,32 @@ pub struct SemanticCoverageMetrics {
     pub win_rate: f32,
 }
 
-/// Computes semantic coverage metrics from parse output.
-pub fn compute_coverage(parse_output: &ParseOutput) -> SemanticCoverageMetrics {
+/// Computes capability tier metrics from parse output.
+pub fn compute_tier_metrics(parse_output: &ParseOutput) -> CapabilityTierMetrics {
     let mut total_symbols: usize = 0;
     let mut semantic_symbols: usize = 0;
     let mut syntax_symbols: usize = 0;
     let mut total_confidence: f32 = 0.0;
-    let mut adapter_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut backend_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut files_with_semantic: usize = 0;
+    let mut files_file_only: usize = 0;
 
     for parsed in &parse_output.parsed_files {
         let sym_count = parsed.symbol_provenance.len();
         total_symbols += sym_count;
 
+        if sym_count == 0 {
+            files_file_only += 1;
+        }
+
         let mut file_has_semantic = false;
 
         for (i, provenance) in parsed.symbol_provenance.iter().enumerate() {
-            match provenance.quality_level {
-                QualityLevel::Semantic => {
-                    semantic_symbols += 1;
-                    file_has_semantic = true;
-                }
-                QualityLevel::Syntax => {
-                    syntax_symbols += 1;
-                }
+            if provenance.capability_tier.has_semantic() {
+                semantic_symbols += 1;
+                file_has_semantic = true;
+            } else {
+                syntax_symbols += 1;
             }
 
             // Accumulate confidence from the actual symbol output.
@@ -80,8 +82,8 @@ pub fn compute_coverage(parse_output: &ParseOutput) -> SemanticCoverageMetrics {
                     .unwrap_or(provenance.default_confidence);
             }
 
-            *adapter_counts
-                .entry(provenance.source_adapter.clone())
+            *backend_counts
+                .entry(provenance.source_backend.clone())
                 .or_insert(0) += 1;
         }
 
@@ -102,7 +104,7 @@ pub fn compute_coverage(parse_output: &ParseOutput) -> SemanticCoverageMetrics {
                 MergeOutcome::SemanticWin => wins += 1,
                 MergeOutcome::SyntaxWin => losses += 1,
                 MergeOutcome::Tie => ties += 1,
-                MergeOutcome::Unique | MergeOutcome::SameQuality => {}
+                MergeOutcome::Unique | MergeOutcome::SameTier => {}
             }
         }
     }
@@ -125,7 +127,7 @@ pub fn compute_coverage(parse_output: &ParseOutput) -> SemanticCoverageMetrics {
         0.0
     };
 
-    SemanticCoverageMetrics {
+    CapabilityTierMetrics {
         total_symbols,
         semantic_symbols,
         syntax_symbols,
@@ -133,9 +135,10 @@ pub fn compute_coverage(parse_output: &ParseOutput) -> SemanticCoverageMetrics {
         total_confidence,
         avg_confidence,
         duplicates_resolved,
-        adapter_symbol_counts: adapter_counts,
+        backend_symbol_counts: backend_counts,
         files_with_semantic,
         total_files: parse_output.parsed_files.len(),
+        files_file_only,
         wins,
         losses,
         ties,
@@ -149,20 +152,20 @@ fn count_duplicates_resolved(parse_output: &ParseOutput) -> usize {
     let mut count = 0;
     for parsed in &parse_output.parsed_files {
         // A composite source_adapter like "semantic-v1+syntax-v1" means
-        // merge happened. Count unique adapters per file to estimate.
-        let mut adapters_in_file: Vec<&str> = Vec::new();
+        // merge happened. Count unique backends per file to estimate.
+        let mut backends_in_file: Vec<&str> = Vec::new();
         for p in &parsed.symbol_provenance {
-            if !adapters_in_file.contains(&p.source_adapter.as_str()) {
-                adapters_in_file.push(&p.source_adapter);
+            if !backends_in_file.contains(&p.source_backend.as_str()) {
+                backends_in_file.push(&p.source_backend);
             }
         }
-        // If multiple adapters contributed, at least some merging occurred.
-        if adapters_in_file.len() > 1 {
+        // If multiple backends contributed, at least some merging occurred.
+        if backends_in_file.len() > 1 {
             // Conservative: count the number of symbols from the non-primary
-            // adapter as a lower bound on duplicates that were resolved.
+            // backend as a lower bound on duplicates that were resolved.
             // The actual count would require the MergedOutput.duplicates_resolved
             // field which is not preserved in ParsedFile.
-            count += adapters_in_file.len() - 1;
+            count += backends_in_file.len() - 1;
         }
     }
     count
@@ -176,8 +179,9 @@ fn count_duplicates_resolved(parse_output: &ParseOutput) -> usize {
 mod tests {
     use std::path::PathBuf;
 
+    #[allow(deprecated)]
     use adapter_api::{AdapterOutput, ExtractedSymbol, SourceSpan};
-    use core_model::{QualityLevel, SymbolKind};
+    use core_model::{CapabilityTier, SymbolKind};
 
     use crate::merge::{MergeOutcome, SymbolProvenance};
     use crate::stage::{ParseOutput, ParsedFile};
@@ -202,6 +206,7 @@ mod tests {
         }
     }
 
+    #[allow(deprecated)]
     fn make_parsed_file(
         path: &str,
         symbols: Vec<ExtractedSymbol>,
@@ -213,7 +218,7 @@ mod tests {
             output: AdapterOutput {
                 symbols,
                 source_adapter: "test-adapter".to_string(),
-                quality_level: QualityLevel::Syntax,
+                quality_level: core_model::QualityLevel::Syntax,
             },
             symbol_provenance: provenances,
             content_hash: "sha256:test".to_string(),
@@ -228,7 +233,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert_eq!(metrics.total_symbols, 0);
         assert_eq!(metrics.semantic_symbols, 0);
         assert_eq!(metrics.syntax_symbols, 0);
@@ -236,7 +241,7 @@ mod tests {
         assert!((metrics.avg_confidence - 0.0).abs() < 1e-6);
         assert_eq!(metrics.files_with_semantic, 0);
         assert_eq!(metrics.total_files, 0);
-        assert!(metrics.adapter_symbol_counts.is_empty());
+        assert!(metrics.backend_symbol_counts.is_empty());
         assert_eq!(metrics.wins, 0);
         assert_eq!(metrics.losses, 0);
         assert_eq!(metrics.ties, 0);
@@ -251,14 +256,14 @@ mod tests {
                 vec![make_symbol("foo", 0.7), make_symbol("bar", 0.7)],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-treesitter-rust".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-treesitter-rust".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::Unique,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-treesitter-rust".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-treesitter-rust".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::Unique,
                     },
@@ -267,7 +272,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert_eq!(metrics.total_symbols, 2);
         assert_eq!(metrics.semantic_symbols, 0);
         assert_eq!(metrics.syntax_symbols, 2);
@@ -276,7 +281,7 @@ mod tests {
         assert_eq!(metrics.files_with_semantic, 0);
         assert_eq!(metrics.total_files, 1);
         assert_eq!(
-            metrics.adapter_symbol_counts.get("syntax-treesitter-rust"),
+            metrics.backend_symbol_counts.get("syntax-treesitter-rust"),
             Some(&2)
         );
     }
@@ -293,20 +298,20 @@ mod tests {
                 ],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-typescript-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-typescript-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Unique,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-typescript-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-typescript-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Unique,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-treesitter-typescript".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-treesitter-typescript".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::Unique,
                     },
@@ -315,7 +320,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert_eq!(metrics.total_symbols, 3);
         assert_eq!(metrics.semantic_symbols, 2);
         assert_eq!(metrics.syntax_symbols, 1);
@@ -328,12 +333,12 @@ mod tests {
 
         assert_eq!(metrics.files_with_semantic, 1);
         assert_eq!(
-            metrics.adapter_symbol_counts.get("semantic-typescript-v1"),
+            metrics.backend_symbol_counts.get("semantic-typescript-v1"),
             Some(&2)
         );
         assert_eq!(
             metrics
-                .adapter_symbol_counts
+                .backend_symbol_counts
                 .get("syntax-treesitter-typescript"),
             Some(&1)
         );
@@ -347,8 +352,8 @@ mod tests {
                     "src/a.ts",
                     vec![make_symbol("a", 0.9)],
                     vec![SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-typescript-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-typescript-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Unique,
                     }],
@@ -357,8 +362,8 @@ mod tests {
                     "src/b.rs",
                     vec![make_symbol("b", 0.7)],
                     vec![SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-treesitter-rust".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-treesitter-rust".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::Unique,
                     }],
@@ -367,7 +372,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert_eq!(metrics.total_symbols, 2);
         assert_eq!(metrics.semantic_symbols, 1);
         assert_eq!(metrics.syntax_symbols, 1);
@@ -384,14 +389,14 @@ mod tests {
                 vec![make_symbol("Config", 0.9), make_symbol("create", 0.9)],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-kotlin-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-kotlin-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Unique,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-kotlin-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-kotlin-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Unique,
                     },
@@ -400,7 +405,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert!((metrics.semantic_coverage_percent - 100.0).abs() < 1e-6);
         assert!((metrics.avg_confidence - 0.9).abs() < 1e-6);
         assert_eq!(metrics.files_with_semantic, 1);
@@ -429,8 +434,8 @@ mod tests {
                 "src/main.rs",
                 vec![sym],
                 vec![SymbolProvenance {
-                    quality_level: QualityLevel::Syntax,
-                    source_adapter: "syntax-treesitter-rust".to_string(),
+                    capability_tier: CapabilityTier::SyntaxOnly,
+                    source_backend: "syntax-treesitter-rust".to_string(),
                     default_confidence: 0.7,
                     merge_outcome: MergeOutcome::Unique,
                 }],
@@ -438,27 +443,27 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         // Should fall back to default_confidence of 0.7.
         assert!((metrics.avg_confidence - 0.7).abs() < 1e-6);
     }
 
     #[test]
-    fn adapter_counts_are_sorted() {
+    fn backend_counts_are_sorted() {
         let output = ParseOutput {
             parsed_files: vec![make_parsed_file(
                 "src/lib.rs",
                 vec![make_symbol("a", 0.9), make_symbol("b", 0.7)],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Unique,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-v1".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-v1".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::Unique,
                     },
@@ -467,8 +472,8 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
-        let keys: Vec<&String> = metrics.adapter_symbol_counts.keys().collect();
+        let metrics = compute_tier_metrics(&output);
+        let keys: Vec<&String> = metrics.backend_symbol_counts.keys().collect();
         // BTreeMap is sorted.
         assert_eq!(keys, vec!["semantic-v1", "syntax-v1"]);
     }
@@ -482,14 +487,14 @@ mod tests {
                     vec![make_symbol("x", 0.9), make_symbol("y", 0.85)],
                     vec![
                         SymbolProvenance {
-                            quality_level: QualityLevel::Semantic,
-                            source_adapter: "semantic-v1".to_string(),
+                            capability_tier: CapabilityTier::SemanticOnly,
+                            source_backend: "semantic-v1".to_string(),
                             default_confidence: 0.9,
                             merge_outcome: MergeOutcome::Unique,
                         },
                         SymbolProvenance {
-                            quality_level: QualityLevel::Semantic,
-                            source_adapter: "semantic-v1".to_string(),
+                            capability_tier: CapabilityTier::SemanticOnly,
+                            source_backend: "semantic-v1".to_string(),
                             default_confidence: 0.9,
                             merge_outcome: MergeOutcome::Unique,
                         },
@@ -499,8 +504,8 @@ mod tests {
                     "src/b.rs",
                     vec![make_symbol("z", 0.7)],
                     vec![SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-v1".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-v1".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::Unique,
                     }],
@@ -509,8 +514,8 @@ mod tests {
             file_errors: vec![],
         };
 
-        let m1 = compute_coverage(&build());
-        let m2 = compute_coverage(&build());
+        let m1 = compute_tier_metrics(&build());
+        let m2 = compute_tier_metrics(&build());
 
         assert_eq!(m1, m2);
     }
@@ -523,14 +528,14 @@ mod tests {
                 vec![make_symbol("Config", 0.9), make_symbol("create", 0.9)],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::SemanticWin,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::SemanticWin,
                     },
@@ -539,7 +544,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert_eq!(metrics.wins, 2);
         assert_eq!(metrics.losses, 0);
         assert_eq!(metrics.ties, 0);
@@ -558,20 +563,20 @@ mod tests {
                 ],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::SemanticWin,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-v1".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-v1".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::SyntaxWin,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Tie,
                     },
@@ -580,7 +585,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert_eq!(metrics.wins, 1);
         assert_eq!(metrics.losses, 1);
         assert_eq!(metrics.ties, 1);
@@ -601,20 +606,20 @@ mod tests {
                 ],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::SemanticWin,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-v1".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-v1".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::Unique,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Syntax,
-                        source_adapter: "syntax-v1".to_string(),
+                        capability_tier: CapabilityTier::SyntaxOnly,
+                        source_backend: "syntax-v1".to_string(),
                         default_confidence: 0.7,
                         merge_outcome: MergeOutcome::Unique,
                     },
@@ -623,7 +628,7 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
+        let metrics = compute_tier_metrics(&output);
         assert_eq!(metrics.wins, 1);
         assert_eq!(metrics.losses, 0);
         assert_eq!(metrics.ties, 0);
@@ -632,9 +637,9 @@ mod tests {
     }
 
     #[test]
-    fn win_rate_excludes_same_quality_overlaps() {
+    fn win_rate_excludes_same_tier_overlaps() {
         // Two semantic adapters conflict on "Config", and one semantic
-        // wins over syntax on "create". The same-quality overlap must
+        // wins over syntax on "create". The same-tier overlap must
         // not appear in win/loss/tie or affect win_rate.
         let output = ParseOutput {
             parsed_files: vec![make_parsed_file(
@@ -642,14 +647,14 @@ mod tests {
                 vec![make_symbol("Config", 0.9), make_symbol("create", 0.9)],
                 vec![
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-a".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-a".to_string(),
                         default_confidence: 0.9,
-                        merge_outcome: MergeOutcome::SameQuality,
+                        merge_outcome: MergeOutcome::SameTier,
                     },
                     SymbolProvenance {
-                        quality_level: QualityLevel::Semantic,
-                        source_adapter: "semantic-a".to_string(),
+                        capability_tier: CapabilityTier::SemanticOnly,
+                        source_backend: "semantic-a".to_string(),
                         default_confidence: 0.9,
                         merge_outcome: MergeOutcome::SemanticWin,
                     },
@@ -658,8 +663,8 @@ mod tests {
             file_errors: vec![],
         };
 
-        let metrics = compute_coverage(&output);
-        // SameQuality is excluded from the KPI denominator.
+        let metrics = compute_tier_metrics(&output);
+        // SameTier is excluded from the KPI denominator.
         assert_eq!(metrics.wins, 1);
         assert_eq!(metrics.losses, 0);
         assert_eq!(metrics.ties, 0);

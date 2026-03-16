@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use core_model::{
-    FileRecord, FreshnessStatus, IndexingStatus, QualityLevel, QualityMix, RepoRecord, SymbolKind,
+    CapabilityTier, FileRecord, FreshnessStatus, IndexingStatus, RepoRecord, SymbolKind,
     SymbolRecord,
 };
 use query_engine::{QueryError, QueryService, StoreQueryService};
@@ -20,7 +20,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir, Vec<SymbolRecord>)
             display_name: "Test".into(),
             source_root: "/tmp/test".into(),
             indexed_at: "2026-03-09T00:00:00Z".into(),
-            index_version: "1.0.0".into(),
+            index_version: "1.1.0".into(),
             language_counts: BTreeMap::from([("rust".into(), 3)]),
             file_count: 1,
             symbol_count: 3,
@@ -40,18 +40,30 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir, Vec<SymbolRecord>)
             file_hash: "sha256:abc".into(),
             summary: "source file".into(),
             symbol_count: 3,
-            quality_mix: QualityMix {
-                semantic_percent: 50.0,
-                syntax_percent: 50.0,
-            },
+            capability_tier: CapabilityTier::SyntaxPlusSemantic,
             updated_at: "2026-03-09T00:00:00Z".into(),
         })
         .unwrap();
 
     let symbols = vec![
-        make_symbol("alpha", SymbolKind::Function, QualityLevel::Syntax, 0.8),
-        make_symbol("Beta", SymbolKind::Class, QualityLevel::Semantic, 0.95),
-        make_symbol("GAMMA", SymbolKind::Constant, QualityLevel::Syntax, 0.7),
+        make_symbol(
+            "alpha",
+            SymbolKind::Function,
+            CapabilityTier::SyntaxOnly,
+            0.8,
+        ),
+        make_symbol(
+            "Beta",
+            SymbolKind::Class,
+            CapabilityTier::SyntaxPlusSemantic,
+            0.95,
+        ),
+        make_symbol(
+            "GAMMA",
+            SymbolKind::Constant,
+            CapabilityTier::SyntaxOnly,
+            0.7,
+        ),
     ];
 
     for sym in &symbols {
@@ -66,7 +78,7 @@ fn seed_store() -> (MetadataStore, store::BlobStore, TempDir, Vec<SymbolRecord>)
 fn make_symbol(
     name: &str,
     kind: SymbolKind,
-    quality_level: QualityLevel,
+    capability_tier: CapabilityTier,
     confidence: f32,
 ) -> SymbolRecord {
     let file_path = "src/lib.rs";
@@ -86,9 +98,9 @@ fn make_symbol(
         start_byte: 0,
         byte_length: 100,
         content_hash: format!("hash-{name}"),
-        quality_level,
+        capability_tier,
         confidence_score: confidence,
-        source_adapter: "syntax-treesitter-v1".into(),
+        source_backend: "syntax-treesitter-v1".into(),
         indexed_at: "2026-03-09T00:00:00Z".into(),
         docstring: None,
         summary: None,
@@ -96,6 +108,10 @@ fn make_symbol(
         keywords: None,
         decorators_or_attributes: None,
         semantic_refs: None,
+        container_symbol_id: None,
+        namespace_path: None,
+        raw_kind: None,
+        modifiers: None,
     }
 }
 
@@ -125,9 +141,9 @@ fn get_symbol_returns_all_fields() {
     assert_eq!(result.kind, SymbolKind::Class);
     assert_eq!(result.name, "Beta");
     assert_eq!(result.qualified_name, "crate::Beta");
-    assert_eq!(result.quality_level, QualityLevel::Semantic);
+    assert_eq!(result.capability_tier, CapabilityTier::SyntaxPlusSemantic);
     assert!((result.confidence_score - 0.95).abs() < f32::EPSILON);
-    assert_eq!(result.source_adapter, "syntax-treesitter-v1");
+    assert_eq!(result.source_backend, "syntax-treesitter-v1");
 }
 
 #[test]

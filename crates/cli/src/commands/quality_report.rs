@@ -155,10 +155,10 @@ pub fn run(args: &[String]) -> Result<(), CliError> {
     println!();
 
     // Per-adapter breakdown
-    if !c.adapter_symbol_counts.is_empty() {
+    if !c.backend_symbol_counts.is_empty() {
         println!("Adapter Breakdown");
         println!("-----------------");
-        for (adapter, count) in &c.adapter_symbol_counts {
+        for (adapter, count) in &c.backend_symbol_counts {
             let pct = if c.total_symbols > 0 {
                 (*count as f32 / c.total_symbols as f32) * 100.0
             } else {

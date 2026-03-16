@@ -8,9 +8,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use adapter_api::{AdapterError, AdapterOutput, SourceFile};
+#[allow(deprecated)]
+use core_model::QualityLevel;
 use core_model::{
-    build_symbol_id, current_index_schema_version, FileRecord, FreshnessStatus, IndexingStatus,
-    QualityLevel, QualityMix, RepoRecord, SymbolRecord, Validate,
+    build_symbol_id, current_index_schema_version, CapabilityTier, FileRecord, FreshnessStatus,
+    IndexingStatus, RepoRecord, SymbolRecord, Validate,
 };
 use repo_walker::{detect_language, walk_repository, WalkerOptions};
 use time::format_description::well_known::Rfc3339;
@@ -106,7 +108,7 @@ pub struct ParsedFile {
     pub language: String,
     pub output: AdapterOutput,
     /// Per-symbol provenance, parallel to `output.symbols`. Each entry
-    /// records the `quality_level`, `source_adapter`, and `default_confidence`
+    /// records the `capability_tier`, `source_backend`, and `default_confidence`
     /// of the adapter that produced the corresponding symbol.
     pub symbol_provenance: Vec<crate::merge::SymbolProvenance>,
     pub content_hash: String,
@@ -139,12 +141,13 @@ pub struct ParseOutput {
 ///
 /// - Symbols are deduplicated by `(qualified_name, kind)`.
 /// - Higher-confidence records win conflicts.
-/// - Provenance (`source_adapter`, `quality_level`) is preserved.
+/// - Provenance (`source_backend`, `capability_tier`) is preserved.
 ///
 /// Individual file failures are recorded in `file_errors`; the pipeline
 /// continues with the remaining files. If one adapter fails but another
 /// succeeds for the same file, the successful result is used and the
 /// failure is recorded as a non-fatal error.
+#[allow(deprecated)]
 pub fn parse(ctx: &PipelineContext<'_>, discovery: &DiscoveryOutput) -> ParseOutput {
     let span = info_span!(
         "stage_parse",
@@ -345,7 +348,8 @@ pub fn persist(
 
     struct FileStats {
         symbol_count: u64,
-        semantic_count: u64,
+        has_syntax: bool,
+        has_semantic: bool,
     }
 
     let mut file_stats: Vec<FileStats> = Vec::with_capacity(parse_output.parsed_files.len());
@@ -366,15 +370,19 @@ pub fn persist(
             )?;
         }
 
-        let semantic = parsed
+        let has_syntax = parsed
             .symbol_provenance
             .iter()
-            .filter(|p| p.quality_level == QualityLevel::Semantic)
-            .count() as u64;
+            .any(|p| p.capability_tier == CapabilityTier::SyntaxOnly);
+        let has_semantic = parsed
+            .symbol_provenance
+            .iter()
+            .any(|p| p.capability_tier.has_semantic());
 
         file_stats.push(FileStats {
             symbol_count: sym_count,
-            semantic_count: semantic,
+            has_syntax,
+            has_semantic,
         });
     }
 
@@ -461,17 +469,14 @@ pub fn persist(
     for (parsed, stats) in parse_output.parsed_files.iter().zip(file_stats.iter()) {
         let file_path_str = parsed.relative_path.to_string_lossy();
 
-        let quality_mix = if stats.symbol_count > 0 {
-            let sem_pct = (stats.semantic_count as f32 / stats.symbol_count as f32) * 100.0;
-            QualityMix {
-                semantic_percent: sem_pct,
-                syntax_percent: 100.0 - sem_pct,
-            }
+        let capability_tier = if stats.has_syntax && stats.has_semantic {
+            CapabilityTier::SyntaxPlusSemantic
+        } else if stats.has_semantic {
+            CapabilityTier::SemanticOnly
+        } else if stats.has_syntax {
+            CapabilityTier::SyntaxOnly
         } else {
-            QualityMix {
-                semantic_percent: 0.0,
-                syntax_percent: 0.0,
-            }
+            CapabilityTier::FileOnly
         };
 
         let file_record = FileRecord {
@@ -481,7 +486,7 @@ pub fn persist(
             file_hash: parsed.content_hash.clone(),
             summary: enrich::file_summary(&parsed.language, &parsed.output.symbols),
             symbol_count: stats.symbol_count,
-            quality_mix,
+            capability_tier,
             updated_at: now.clone(),
         };
 
@@ -504,7 +509,7 @@ pub fn persist(
             .map_err(PipelineError::Persist)?;
 
         for (sym_idx, sym) in parsed.output.symbols.iter().enumerate() {
-            // Use per-symbol provenance for quality_level, source_adapter,
+            // Use per-symbol provenance for capability_tier, source_backend,
             // and default_confidence. This is critical for merged outputs
             // where symbols may originate from different adapters.
             let provenance = &parsed.symbol_provenance[sym_idx];
@@ -537,9 +542,9 @@ pub fn persist(
                 start_byte: sym.span.start_byte,
                 byte_length: sym.span.byte_length,
                 content_hash: parsed.content_hash.clone(),
-                quality_level: provenance.quality_level,
+                capability_tier: provenance.capability_tier,
                 confidence_score: confidence,
-                source_adapter: provenance.source_adapter.clone(),
+                source_backend: provenance.source_backend.clone(),
                 indexed_at: now.clone(),
                 docstring: sym.docstring.clone(),
                 summary: Some(enrich::symbol_summary(sym)),
@@ -551,6 +556,10 @@ pub fn persist(
                 },
                 decorators_or_attributes: None,
                 semantic_refs: None,
+                container_symbol_id: None,
+                namespace_path: None,
+                raw_kind: None,
+                modifiers: None,
             };
 
             record.validate().map_err(|e| {
