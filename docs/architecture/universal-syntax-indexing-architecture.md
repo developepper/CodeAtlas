@@ -482,6 +482,11 @@ Implementation should not begin until this architecture is explicit enough that
 Ticket 1 can be reviewed as a concrete technical design, not a second planning
 pass.
 
+Operationally, the gate for implementation work is that Ticket 1 is merged or
+otherwise explicitly ratified as the canonical architecture decision for Epic
+17. Tickets 2 and later should not proceed in parallel on independent design
+assumptions before that gate is met.
+
 Minimum readiness:
 
 - subsystem responsibilities are explicit
