@@ -3,48 +3,6 @@
 version = 3
 
 [[package]]
-name = "adapter-api"
-version = "0.1.0"
-dependencies = [
- "core-model",
-]
-
-[[package]]
-name = "adapter-semantic-kotlin"
-version = "0.1.0"
-dependencies = [
- "adapter-api",
- "core-model",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
-]
-
-[[package]]
-name = "adapter-semantic-typescript"
-version = "0.1.0"
-dependencies = [
- "adapter-api",
- "core-model",
- "serde",
- "serde_json",
- "tempfile",
- "tracing",
-]
-
-[[package]]
-name = "adapter-syntax-treesitter"
-version = "0.1.0"
-dependencies = [
- "adapter-api",
- "core-model",
- "tempfile",
- "tree-sitter",
- "tree-sitter-rust",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -270,10 +228,6 @@ checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 name = "cli"
 version = "0.1.0"
 dependencies = [
- "adapter-api",
- "adapter-semantic-kotlin",
- "adapter-semantic-typescript",
- "adapter-syntax-treesitter",
  "core-model",
  "indexer",
  "libc",
@@ -281,11 +235,15 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "query-engine",
+ "semantic-api",
+ "semantic-kotlin",
+ "semantic-typescript",
  "serde",
  "serde_json",
  "server-mcp",
  "service",
  "store",
+ "syntax-platform",
  "tempfile",
  "time",
  "tokio",
@@ -739,13 +697,13 @@ dependencies = [
 name = "indexer"
 version = "0.1.0"
 dependencies = [
- "adapter-api",
- "adapter-syntax-treesitter",
  "core-model",
  "criterion",
  "query-engine",
  "repo-walker",
+ "semantic-api",
  "store",
+ "syntax-platform",
  "tempfile",
  "time",
  "tracing",
@@ -925,7 +883,7 @@ dependencies = [
  "futures-sink",
  "js-sys",
  "pin-project-lite",
- "thiserror",
+ "thiserror 1.0.69",
  "tracing",
 ]
 
@@ -943,7 +901,7 @@ dependencies = [
  "ordered-float",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -961,7 +919,7 @@ dependencies = [
  "percent-encoding",
  "rand",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.69",
  "tracing",
 ]
 
@@ -1064,13 +1022,12 @@ dependencies = [
 name = "query-engine"
 version = "0.1.0"
 dependencies = [
- "adapter-api",
- "adapter-syntax-treesitter",
  "core-model",
  "criterion",
  "indexer",
  "query-engine",
  "store",
+ "syntax-platform",
  "tempfile",
  "tracing",
  "tracing-subscriber",
@@ -1231,6 +1188,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "semantic-api"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "syntax-platform",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "semantic-kotlin"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "semantic-api",
+ "serde",
+ "serde_json",
+ "syntax-platform",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "semantic-typescript"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "semantic-api",
+ "serde",
+ "serde_json",
+ "syntax-platform",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1307,14 +1299,13 @@ dependencies = [
 name = "server-mcp"
 version = "0.1.0"
 dependencies = [
- "adapter-api",
- "adapter-syntax-treesitter",
  "core-model",
  "indexer",
  "query-engine",
  "serde",
  "serde_json",
  "store",
+ "syntax-platform",
  "tempfile",
  "tracing",
  "tracing-subscriber",
@@ -1430,6 +1421,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
+name = "syntax-platform"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "thiserror 2.0.18",
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1448,7 +1449,16 @@ version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.69",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
+dependencies = [
+ "thiserror-impl 2.0.18",
 ]
 
 [[package]]
@@ -1456,6 +1466,17 @@ name = "thiserror-impl"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -1,21 +1,19 @@
-//! Contract test suite for the Kotlin semantic adapter.
+//! Contract test suite for the Kotlin semantic backend.
 //!
-//! Uses the shared contract harness from `adapter-api` to verify that
-//! the Kotlin semantic adapter satisfies all behavioral contracts.
+//! Verifies that the Kotlin semantic backend satisfies behavioral
+//! contracts for symbol extraction, qualified naming, and determinism.
 //!
 //! These tests use a mock runtime to avoid requiring a real JVM process.
-//! The mock returns analysis responses that match the fixture source code,
-//! verifying the mapping logic end-to-end.
 
-use adapter_api::contract::{self, ContractFixture};
-use adapter_api::LanguageAdapter;
-use adapter_semantic_kotlin::adapter::KotlinSemanticAdapter;
-use adapter_semantic_kotlin::error::KotlinAnalysisError;
-use adapter_semantic_kotlin::protocol::KotlinResponse;
-use adapter_semantic_kotlin::runtime::KotlinRuntime;
+use semantic_api::SemanticBackend;
+use semantic_kotlin::adapter::KotlinSemanticAdapter;
+use semantic_kotlin::error::KotlinAnalysisError;
+use semantic_kotlin::protocol::KotlinResponse;
+use semantic_kotlin::runtime::KotlinRuntime;
+use syntax_platform::PreparedFile;
 
 /// A mock runtime that returns a canned analysis response matching the
-/// Kotlin baseline fixture from the contract test harness.
+/// Kotlin baseline fixture.
 struct FixtureRuntime;
 
 impl KotlinRuntime for FixtureRuntime {
@@ -61,36 +59,6 @@ impl KotlinRuntime for FixtureRuntime {
     }
 }
 
-/// Returns an analysis response body matching the Kotlin baseline fixture.
-///
-/// The fixture source is:
-/// ```kotlin
-/// /** Configuration for processing. */
-/// data class Config(
-///     val name: String,
-///     val limit: Int
-/// )
-///
-/// /** Creates a new config with defaults. */
-/// fun create(name: String): Config {
-///     return Config(name, 100)
-/// }
-///
-/// class Processor {
-///     /** Processes the config. */
-///     fun process(config: Config): Boolean {
-///         return config.limit > 0
-///     }
-/// }
-///
-/// /** Operating mode. */
-/// enum class Mode {
-///     Fast,
-///     Precise
-/// }
-///
-/// const val MAX_SIZE: Int = 1024
-/// ```
 fn fixture_analysis_body() -> serde_json::Value {
     serde_json::json!([
         {
@@ -147,26 +115,8 @@ fn fixture_analysis_body() -> serde_json::Value {
             "startByte": 330,
             "byteLength": 51,
             "childItems": [
-                {
-                    "name": "Fast",
-                    "kind": "enum_entry",
-                    "modifiers": "",
-                    "startLine": 21,
-                    "endLine": 21,
-                    "startByte": 350,
-                    "byteLength": 4,
-                    "childItems": []
-                },
-                {
-                    "name": "Precise",
-                    "kind": "enum_entry",
-                    "modifiers": "",
-                    "startLine": 22,
-                    "endLine": 22,
-                    "startByte": 360,
-                    "byteLength": 7,
-                    "childItems": []
-                }
+                {"name": "Fast", "kind": "enum_entry", "modifiers": "", "startLine": 21, "endLine": 21, "startByte": 350, "byteLength": 4, "childItems": []},
+                {"name": "Precise", "kind": "enum_entry", "modifiers": "", "startLine": 22, "endLine": 22, "startByte": 360, "byteLength": 7, "childItems": []}
             ]
         },
         {
@@ -187,102 +137,129 @@ fn make_adapter() -> KotlinSemanticAdapter<FixtureRuntime> {
     KotlinSemanticAdapter::new(FixtureRuntime)
 }
 
-// ---------------------------------------------------------------------------
-// Aggregate contract suite
-// ---------------------------------------------------------------------------
-
-#[test]
-fn kotlin_semantic_passes_all_contracts() {
-    let adapter = make_adapter();
-    let fixture = ContractFixture::kotlin_baseline();
-    contract::run_all_contracts(&adapter, &fixture);
+fn make_fixture_file() -> PreparedFile {
+    PreparedFile {
+        relative_path: std::path::PathBuf::from("src/Config.kt"),
+        absolute_path: std::path::PathBuf::from("/tmp/test-repo/src/Config.kt"),
+        content: b"/** Configuration for processing. */\ndata class Config(\n    val name: String,\n    val limit: Int\n)\n\n/** Creates a new config with defaults. */\nfun create(name: String): Config {\n    return Config(name, 100)\n}\n\nclass Processor {\n    /** Processes the config. */\n    fun process(config: Config): Boolean {\n        return config.limit > 0\n    }\n}\n\n/** Operating mode. */\nenum class Mode {\n    Fast,\n    Precise\n}\n\nconst val MAX_SIZE: Int = 1024\n".to_vec(),
+        language: "kotlin".to_string(),
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Individual contract tests (for granular failure diagnostics)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn contract_adapter_identity_is_stable() {
+fn extract_fixture_symbols() -> Vec<semantic_api::SemanticSymbol> {
     let adapter = make_adapter();
-    contract::assert_adapter_identity_is_stable(&adapter);
-}
-
-#[test]
-fn contract_capabilities_are_valid() {
-    let adapter = make_adapter();
-    contract::assert_capabilities_are_valid(&adapter);
-}
-
-#[test]
-fn contract_provenance_fields() {
-    let adapter = make_adapter();
-    let fixture = ContractFixture::kotlin_baseline();
-    contract::assert_provenance_fields(&adapter, &fixture);
-}
-
-#[test]
-fn contract_expected_symbols() {
-    let adapter = make_adapter();
-    let fixture = ContractFixture::kotlin_baseline();
-    contract::assert_expected_symbols(&adapter, &fixture);
-}
-
-#[test]
-fn contract_symbols_are_valid() {
-    let adapter = make_adapter();
-    let fixture = ContractFixture::kotlin_baseline();
-    contract::assert_symbols_are_valid(&adapter, &fixture);
-}
-
-#[test]
-fn contract_extraction_is_deterministic() {
-    let adapter = make_adapter();
-    let fixture = ContractFixture::kotlin_baseline();
-    contract::assert_extraction_is_deterministic(&adapter, &fixture);
-}
-
-#[test]
-fn contract_unsupported_language_rejected() {
-    let adapter = make_adapter();
-    contract::assert_unsupported_language_rejected(&adapter);
-}
-
-#[test]
-fn contract_empty_file_produces_no_symbols() {
-    let adapter = make_adapter();
-    contract::assert_empty_file_produces_no_symbols(&adapter);
-}
-
-// ---------------------------------------------------------------------------
-// Exact qualified name and symbol ID assertions
-// ---------------------------------------------------------------------------
-
-fn extract_fixture_symbols() -> Vec<adapter_api::ExtractedSymbol> {
-    let adapter = make_adapter();
-    let fixture = ContractFixture::kotlin_baseline();
-    let ctx = adapter_api::IndexContext {
-        repo_id: "test-repo".to_string(),
-        source_root: std::path::PathBuf::from("/tmp/test-repo"),
-    };
-    let file = adapter_api::SourceFile {
-        relative_path: fixture.relative_path.clone(),
-        absolute_path: std::path::PathBuf::from("/tmp/test-repo").join(&fixture.relative_path),
-        content: fixture.source_code.clone(),
-        language: fixture.language.clone(),
-    };
-    adapter.index_file(&ctx, &file).unwrap().symbols
+    let file = make_fixture_file();
+    adapter.enrich_symbols(&file, None).unwrap().symbols
 }
 
 fn find_symbol<'a>(
-    symbols: &'a [adapter_api::ExtractedSymbol],
+    symbols: &'a [semantic_api::SemanticSymbol],
     name: &str,
-) -> &'a adapter_api::ExtractedSymbol {
+) -> &'a semantic_api::SemanticSymbol {
     symbols.iter().find(|s| s.name == name).unwrap_or_else(|| {
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
         panic!("symbol '{name}' not found in: {names:?}")
     })
 }
+
+// ---------------------------------------------------------------------------
+// Backend identity and capability tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn backend_identity_is_stable() {
+    let adapter = make_adapter();
+    assert_eq!(adapter.language(), "kotlin");
+    assert_eq!(
+        KotlinSemanticAdapter::<FixtureRuntime>::backend_id().0,
+        "semantic-kotlin"
+    );
+}
+
+#[test]
+fn capabilities_are_valid() {
+    let adapter = make_adapter();
+    let cap = adapter.capability();
+    assert!(cap.supports_type_refs);
+    assert!(cap.supports_call_refs);
+    assert!((cap.default_confidence - 0.9).abs() < f32::EPSILON);
+}
+
+#[test]
+fn rejects_unsupported_language() {
+    let adapter = make_adapter();
+    let file = PreparedFile {
+        language: "python".to_string(),
+        ..make_fixture_file()
+    };
+    let err = adapter
+        .enrich_symbols(&file, None)
+        .expect_err("should reject");
+    assert!(err.to_string().contains("unsupported language"));
+}
+
+#[test]
+fn empty_file_produces_no_symbols() {
+    let adapter = make_adapter();
+    let file = PreparedFile {
+        content: Vec::new(),
+        ..make_fixture_file()
+    };
+    let output = adapter.enrich_symbols(&file, None).unwrap();
+    assert!(output.symbols.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Symbol extraction tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn extracts_expected_symbols() {
+    let symbols = extract_fixture_symbols();
+    let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+    for expected in &[
+        "Config",
+        "create",
+        "Processor",
+        "process",
+        "Mode",
+        "MAX_SIZE",
+    ] {
+        assert!(
+            names.contains(expected),
+            "expected symbol '{expected}' not found in: {names:?}"
+        );
+    }
+}
+
+#[test]
+fn extraction_is_deterministic() {
+    let out1 = extract_fixture_symbols();
+    let out2 = extract_fixture_symbols();
+
+    assert_eq!(out1.len(), out2.len());
+    for (a, b) in out1.iter().zip(out2.iter()) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(a.qualified_name, b.qualified_name);
+        assert_eq!(a.span, b.span);
+        assert_eq!(a.confidence_score, b.confidence_score);
+    }
+}
+
+#[test]
+fn provenance_fields_are_correct() {
+    let adapter = make_adapter();
+    let file = make_fixture_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
+
+    assert_eq!(output.backend_id.0, "semantic-kotlin");
+    assert_eq!(output.language, "kotlin");
+}
+
+// ---------------------------------------------------------------------------
+// Exact qualified name and symbol ID assertions
+// ---------------------------------------------------------------------------
 
 #[test]
 fn fixture_qualified_names_match_canonical_rules() {
@@ -313,29 +290,27 @@ fn fixture_symbol_kinds_are_correct() {
 
     assert_eq!(
         find_symbol(&symbols, "Config").kind,
-        core_model::SymbolKind::Class,
-        "data class should map to Class"
+        core_model::SymbolKind::Class
     );
     assert_eq!(
         find_symbol(&symbols, "create").kind,
-        core_model::SymbolKind::Function,
+        core_model::SymbolKind::Function
     );
     assert_eq!(
         find_symbol(&symbols, "Processor").kind,
-        core_model::SymbolKind::Class,
+        core_model::SymbolKind::Class
     );
     assert_eq!(
         find_symbol(&symbols, "process").kind,
-        core_model::SymbolKind::Method,
+        core_model::SymbolKind::Method
     );
     assert_eq!(
         find_symbol(&symbols, "Mode").kind,
-        core_model::SymbolKind::Type,
-        "enum should map to Type"
+        core_model::SymbolKind::Type
     );
     assert_eq!(
         find_symbol(&symbols, "MAX_SIZE").kind,
-        core_model::SymbolKind::Constant,
+        core_model::SymbolKind::Constant
     );
 }
 
@@ -398,10 +373,6 @@ fn fixture_symbol_ids_are_stable_across_runs() {
             b.kind,
         )
         .unwrap();
-        assert_eq!(
-            id_a, id_b,
-            "symbol ID not stable for '{}': '{}' vs '{}'",
-            a.name, id_a, id_b
-        );
+        assert_eq!(id_a, id_b, "symbol ID not stable for '{}'", a.name);
     }
 }

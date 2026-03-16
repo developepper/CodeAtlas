@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use adapter_api::{AdapterPolicy, AdapterRouter, IndexContext};
+use crate::dispatch::DispatchContext;
+use crate::registry::BackendRegistry;
 
 /// Configuration and shared state for a single pipeline run.
 ///
@@ -13,12 +14,10 @@ pub struct PipelineContext<'a> {
     pub repo_id: String,
     /// Absolute path to the repository root on disk.
     pub source_root: PathBuf,
-    /// Adapter router for selecting language adapters.
-    pub router: &'a dyn AdapterRouter,
-    /// Optional adapter selection policy override. When `Some`, all files
-    /// use this policy regardless of language. When `None`, each file uses
-    /// the per-language default from [`adapter_api::router::default_policy`].
-    pub policy_override: Option<AdapterPolicy>,
+    /// Backend registry for selecting syntax and semantic backends.
+    pub registry: &'a dyn BackendRegistry,
+    /// Dispatch context controlling which backends are invoked.
+    pub dispatch_context: DispatchContext,
     /// Optional correlation ID for structured log tracing.
     pub correlation_id: Option<String>,
     /// When `true`, use git-diff to accelerate change detection on
@@ -28,14 +27,6 @@ pub struct PipelineContext<'a> {
 }
 
 impl<'a> PipelineContext<'a> {
-    /// Builds the [`IndexContext`] passed to adapter invocations.
-    pub fn index_context(&self) -> IndexContext {
-        IndexContext {
-            repo_id: self.repo_id.clone(),
-            source_root: self.source_root.clone(),
-        }
-    }
-
     /// Returns the source root as a [`Path`] reference.
     pub fn source_root(&self) -> &Path {
         &self.source_root

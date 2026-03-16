@@ -1,18 +1,15 @@
-#![allow(deprecated)]
-//! Integration tests for the Kotlin semantic adapter with the real runtime.
+//! Integration tests for the Kotlin semantic backend with the real runtime.
 //!
 //! These tests exercise `KotlinSemanticAdapter<KotlinAnalysisProcess>` — the
-//! concrete adapter+runtime wiring that will run in production. This is the
-//! acceptance-level test for issue #66: "adapter runtime + baseline extraction
-//! works on fixture project."
+//! concrete adapter+runtime wiring that will run in production.
 //!
 //! ## How it works
 //!
 //! A lightweight mock bridge script (written in Python) is created at test
 //! time and speaks the same Content-Length framed JSON protocol as the real
 //! JVM bridge. The `KotlinAnalysisProcess` spawns it as a real subprocess,
-//! exercising the full lifecycle: spawn → reader thread → ping handshake →
-//! analyze request → response parsing → shutdown.
+//! exercising the full lifecycle: spawn -> reader thread -> ping handshake ->
+//! analyze request -> response parsing -> shutdown.
 //!
 //! ## Test tiers
 //!
@@ -23,19 +20,20 @@
 //! 2. **`#[ignore]` tests** require a working Java installation and the real
 //!    Kotlin analysis bridge JAR. Run them with:
 //!    ```sh
-//!    KOTLIN_BRIDGE_JAR=/path/to/bridge.jar cargo test -p adapter-semantic-kotlin --ignored
+//!    KOTLIN_BRIDGE_JAR=/path/to/bridge.jar cargo test -p semantic-kotlin --ignored
 //!    ```
 
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use adapter_api::{IndexContext, LanguageAdapter, SourceFile};
-use adapter_semantic_kotlin::adapter::KotlinSemanticAdapter;
-use adapter_semantic_kotlin::config::KotlinAnalysisConfig;
-use adapter_semantic_kotlin::process::KotlinAnalysisProcess;
-use adapter_semantic_kotlin::runtime::KotlinRuntime;
 use core_model::SymbolKind;
+use semantic_api::SemanticBackend;
+use semantic_kotlin::adapter::KotlinSemanticAdapter;
+use semantic_kotlin::config::KotlinAnalysisConfig;
+use semantic_kotlin::process::KotlinAnalysisProcess;
+use semantic_kotlin::runtime::KotlinRuntime;
+use syntax_platform::PreparedFile;
 use tempfile::TempDir;
 
 /// Fixture Kotlin source used for integration testing.
@@ -67,15 +65,6 @@ const val MAX_SIZE: Int = 1024
 "#;
 
 /// A mock bridge script that speaks the Content-Length framed JSON protocol.
-///
-/// It reads requests from stdin, parses the `command` field, and responds:
-/// - `ping` → success response (handshake for readiness probe)
-/// - `analyze` → success response with canned analysis body matching the fixture
-/// - `shutdown` → exits cleanly
-///
-/// This is intentionally a real subprocess so that `KotlinAnalysisProcess`
-/// exercises its full lifecycle: spawn, reader thread, stdin/stdout I/O,
-/// Content-Length framing, and graceful shutdown.
 const MOCK_BRIDGE_SCRIPT: &str = r#"#!/usr/bin/env python3
 """Mock Kotlin analysis bridge for integration testing."""
 import json
@@ -248,15 +237,6 @@ if __name__ == "__main__":
     main()
 "#;
 
-/// A thin shell wrapper that acts as a fake `java` binary.
-///
-/// It strips the `-jar` flag and runs the remaining argument (the bridge
-/// script) with `python3`. This lets `build_command()` produce
-/// `fake_java -jar mock_bridge.py` which becomes `python3 mock_bridge.py`.
-///
-/// Using a wrapper avoids ETXTBSY errors on Linux — the kernel only
-/// returns that error when exec'ing a file that is still being written,
-/// and here we exec `/bin/sh` (the wrapper) which delegates to `python3`.
 const FAKE_JAVA_WRAPPER: &str = r#"#!/bin/sh
 # Fake java: find the argument after -jar and run it with python3.
 while [ $# -gt 0 ]; do
@@ -269,17 +249,9 @@ exit 1
 "#;
 
 // ---------------------------------------------------------------------------
-// File-write helpers — avoid ETXTBSY in CI
-//
-// On Linux CI (especially Docker containers using overlayfs or tmpfs), the
-// kernel may return ETXTBSY when exec'ing a file whose write descriptor was
-// only just closed. These helpers ensure:
-// 1. Data and metadata are flushed with sync_all before the fd is closed.
-// 2. Executable mode is set atomically at creation time (no separate chmod).
-// 3. The parent directory is synced to flush directory entries.
+// File-write helpers
 // ---------------------------------------------------------------------------
 
-/// Writes `content` to `path`, syncs, and closes the fd.
 fn sync_write(path: &std::path::Path, content: &[u8]) {
     use std::io::Write;
     let mut f = fs::File::create(path).unwrap_or_else(|e| panic!("create {}: {e}", path.display()));
@@ -289,8 +261,6 @@ fn sync_write(path: &std::path::Path, content: &[u8]) {
         .unwrap_or_else(|e| panic!("sync {}: {e}", path.display()));
 }
 
-/// Writes `content` to `path` with mode 0o755 set at creation time, syncs,
-/// and closes the fd. Avoids a separate `set_permissions` call.
 #[cfg(unix)]
 fn sync_write_executable(path: &std::path::Path, content: &[u8]) {
     use std::io::Write;
@@ -313,10 +283,9 @@ fn sync_write_executable(path: &std::path::Path, content: &[u8]) {
     sync_write(path, content);
 }
 
-/// Syncs a directory to flush directory entry metadata.
 fn sync_dir(path: &std::path::Path) {
     let d = fs::File::open(path).unwrap_or_else(|e| panic!("open dir {}: {e}", path.display()));
-    let _ = d.sync_all(); // best-effort; not all filesystems support dir sync
+    let _ = d.sync_all();
 }
 
 /// Helper: creates a temp directory with a Kotlin fixture file and mock bridge.
@@ -332,28 +301,17 @@ impl FixtureProject {
         let tempdir = tempfile::tempdir().expect("create tempdir");
         let root = tempdir.path().to_path_buf();
 
-        // Write fixture source file.
         let src_dir = root.join("src");
         fs::create_dir_all(&src_dir).expect("create src dir");
         sync_write(&src_dir.join("Config.kt"), KOTLIN_FIXTURE.as_bytes());
         sync_dir(&src_dir);
 
-        // Write mock bridge script.
         let bridge_script = root.join("mock_bridge.py");
         sync_write(&bridge_script, MOCK_BRIDGE_SCRIPT.as_bytes());
 
-        // Write fake java wrapper with executable mode set atomically at
-        // creation time. Using OpenOptions::mode avoids a separate
-        // set_permissions call which could re-introduce a write reference
-        // on some filesystems. sync_all + explicit drop ensures the
-        // kernel's i_writecount is decremented before any exec attempt.
         let fake_java = root.join("fake_java.sh");
         sync_write_executable(&fake_java, FAKE_JAVA_WRAPPER.as_bytes());
 
-        // Sync the parent directory to flush directory entries. On some
-        // CI filesystems (overlayfs/tmpfs in containers), directory
-        // metadata may lag behind file data, and exec can race with
-        // the directory entry becoming visible.
         sync_dir(&root);
 
         Self {
@@ -364,18 +322,11 @@ impl FixtureProject {
         }
     }
 
-    fn make_context(&self) -> IndexContext {
-        IndexContext {
-            repo_id: "fixture-project".to_string(),
-            source_root: self.root.clone(),
-        }
-    }
-
-    fn make_source_file(&self) -> SourceFile {
+    fn make_prepared_file(&self) -> PreparedFile {
         let rel = PathBuf::from("src/Config.kt");
         let abs = self.root.join(&rel);
         let content = fs::read(&abs).expect("read fixture");
-        SourceFile {
+        PreparedFile {
             relative_path: rel,
             absolute_path: abs,
             content,
@@ -383,16 +334,6 @@ impl FixtureProject {
         }
     }
 
-    /// Creates a `KotlinAnalysisProcess` using the mock bridge script.
-    ///
-    /// The mock bridge is a Python script that speaks the same Content-Length
-    /// framed JSON protocol as the real JVM bridge. `java_path` is set to a
-    /// thin shell wrapper (`fake_java.sh`) that strips `-jar` and runs the
-    /// bridge script with `python3`.
-    ///
-    /// Using a wrapper (rather than exec'ing the Python script directly)
-    /// avoids ETXTBSY errors on Linux when parallel tests write and execute
-    /// the script simultaneously.
     fn make_mock_process(&self) -> KotlinAnalysisProcess {
         let config = KotlinAnalysisConfig::new(
             self.fake_java.clone(),
@@ -405,8 +346,6 @@ impl FixtureProject {
     }
 }
 
-/// Helper: creates a `KotlinAnalysisProcess` with paths that don't exist,
-/// for testing error handling through the real runtime type.
 fn make_unavailable_process(working_dir: &std::path::Path) -> KotlinAnalysisProcess {
     let config = KotlinAnalysisConfig::new(
         PathBuf::from("/nonexistent/java"),
@@ -416,8 +355,6 @@ fn make_unavailable_process(working_dir: &std::path::Path) -> KotlinAnalysisProc
     KotlinAnalysisProcess::new(config)
 }
 
-/// Helper: creates a `KotlinAnalysisProcess` using env vars for Java + bridge JAR.
-/// Returns `None` if the required env var `KOTLIN_BRIDGE_JAR` is not set.
 fn make_real_process(working_dir: &std::path::Path) -> Option<KotlinAnalysisProcess> {
     let jar_path = std::env::var("KOTLIN_BRIDGE_JAR").ok()?;
     let java_path = std::env::var("JAVA_PATH").unwrap_or_else(|_| "java".to_string());
@@ -430,7 +367,7 @@ fn make_real_process(working_dir: &std::path::Path) -> Option<KotlinAnalysisProc
 }
 
 // ---------------------------------------------------------------------------
-// Tier 1: Always-run tests — mock bridge subprocess
+// Tier 1: Always-run tests -- mock bridge subprocess
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -450,17 +387,13 @@ fn mock_bridge_extracts_expected_symbols_from_fixture() {
     process.start().expect("mock bridge should start");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
+    let file = project.make_prepared_file();
     let output = adapter
-        .index_file(&ctx, &file)
-        .expect("index_file must succeed with mock bridge");
+        .enrich_symbols(&file, None)
+        .expect("enrich_symbols must succeed with mock bridge");
 
-    // Verify provenance
-    assert_eq!(output.source_adapter, "semantic-kotlin-v1");
-    assert_eq!(output.quality_level, core_model::QualityLevel::Semantic);
+    assert_eq!(output.backend_id.0, "semantic-kotlin");
 
-    // Verify expected symbols are present
     let names: Vec<&str> = output.symbols.iter().map(|s| s.name.as_str()).collect();
     for expected in &["Config", "create", "process", "Mode", "MAX_SIZE"] {
         assert!(
@@ -483,9 +416,8 @@ fn mock_bridge_symbol_kinds_are_correct() {
     process.start().expect("mock bridge should start");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
-    let output = adapter.index_file(&ctx, &file).unwrap();
+    let file = project.make_prepared_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
 
     let find = |name: &str| {
         output
@@ -498,11 +430,15 @@ fn mock_bridge_symbol_kinds_are_correct() {
             })
     };
 
-    assert_eq!(find("Config").kind, SymbolKind::Class, "data class → Class");
+    assert_eq!(
+        find("Config").kind,
+        SymbolKind::Class,
+        "data class -> Class"
+    );
     assert_eq!(find("create").kind, SymbolKind::Function);
     assert_eq!(find("Processor").kind, SymbolKind::Class);
     assert_eq!(find("process").kind, SymbolKind::Method);
-    assert_eq!(find("Mode").kind, SymbolKind::Type, "enum → Type");
+    assert_eq!(find("Mode").kind, SymbolKind::Type, "enum -> Type");
     assert_eq!(find("MAX_SIZE").kind, SymbolKind::Constant);
 }
 
@@ -513,9 +449,8 @@ fn mock_bridge_qualified_names_are_canonical() {
     process.start().expect("mock bridge should start");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
-    let output = adapter.index_file(&ctx, &file).unwrap();
+    let file = project.make_prepared_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
 
     let find = |name: &str| {
         output
@@ -548,9 +483,8 @@ fn mock_bridge_symbol_ids_match_canonical_form() {
     process.start().expect("mock bridge should start");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
-    let output = adapter.index_file(&ctx, &file).unwrap();
+    let file = project.make_prepared_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
     let file_path = "src/Config.kt";
 
     let find = |name: &str| {
@@ -599,9 +533,8 @@ fn mock_bridge_confidence_metadata_present() {
     process.start().expect("mock bridge should start");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
-    let output = adapter.index_file(&ctx, &file).unwrap();
+    let file = project.make_prepared_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
 
     for sym in &output.symbols {
         let score = sym
@@ -622,11 +555,10 @@ fn mock_bridge_extraction_is_deterministic() {
     process.start().expect("mock bridge should start");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
+    let file = project.make_prepared_file();
 
-    let out1 = adapter.index_file(&ctx, &file).unwrap();
-    let out2 = adapter.index_file(&ctx, &file).unwrap();
+    let out1 = adapter.enrich_symbols(&file, None).unwrap();
+    let out2 = adapter.enrich_symbols(&file, None).unwrap();
 
     assert_eq!(out1.symbols.len(), out2.symbols.len());
     for (a, b) in out1.symbols.iter().zip(out2.symbols.iter()) {
@@ -649,16 +581,14 @@ fn mock_bridge_extraction_is_deterministic() {
 // -- Error path tests with real runtime type --
 
 #[test]
-fn real_runtime_type_wires_up_with_adapter() {
+fn real_runtime_type_wires_up_with_backend() {
     let project = FixtureProject::new();
     let process = make_unavailable_process(&project.root);
     let adapter = KotlinSemanticAdapter::new(process);
 
-    assert_eq!(adapter.adapter_id(), "semantic-kotlin-v1");
     assert_eq!(adapter.language(), "kotlin");
 
-    let caps = adapter.capabilities();
-    assert_eq!(caps.quality_level, core_model::QualityLevel::Semantic);
+    let caps = adapter.capability();
     assert!(caps.supports_type_refs);
     assert!(caps.supports_call_refs);
 }
@@ -669,13 +599,12 @@ fn real_runtime_rejects_unsupported_language() {
     let process = make_unavailable_process(&project.root);
     let adapter = KotlinSemanticAdapter::new(process);
 
-    let ctx = project.make_context();
-    let file = SourceFile {
+    let file = PreparedFile {
         language: "python".to_string(),
-        ..project.make_source_file()
+        ..project.make_prepared_file()
     };
     let err = adapter
-        .index_file(&ctx, &file)
+        .enrich_symbols(&file, None)
         .expect_err("should reject unsupported language");
     assert!(err.to_string().contains("unsupported language"));
 }
@@ -686,27 +615,24 @@ fn real_runtime_empty_file_short_circuits() {
     let process = make_unavailable_process(&project.root);
     let adapter = KotlinSemanticAdapter::new(process);
 
-    let ctx = project.make_context();
-    let file = SourceFile {
+    let file = PreparedFile {
         content: Vec::new(),
-        ..project.make_source_file()
+        ..project.make_prepared_file()
     };
-    let output = adapter.index_file(&ctx, &file).unwrap();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
     assert!(output.symbols.is_empty());
-    assert_eq!(output.source_adapter, "semantic-kotlin-v1");
-    assert_eq!(output.quality_level, core_model::QualityLevel::Semantic);
+    assert_eq!(output.backend_id.0, "semantic-kotlin");
 }
 
 #[test]
-fn real_runtime_propagates_spawn_failure_as_adapter_error() {
+fn real_runtime_propagates_spawn_failure_as_semantic_error() {
     let project = FixtureProject::new();
     let process = make_unavailable_process(&project.root);
     let adapter = KotlinSemanticAdapter::new(process);
 
-    let ctx = project.make_context();
-    let file = project.make_source_file();
+    let file = project.make_prepared_file();
     let err = adapter
-        .index_file(&ctx, &file)
+        .enrich_symbols(&file, None)
         .expect_err("should fail with unavailable runtime");
 
     let msg = err.to_string();
@@ -730,8 +656,6 @@ fn fixture_project_has_real_kotlin_source_on_disk() {
 // ---------------------------------------------------------------------------
 // Tier 2: Full end-to-end tests (require Java + real bridge JAR)
 // ---------------------------------------------------------------------------
-//
-// Run with: KOTLIN_BRIDGE_JAR=/path/to/bridge.jar cargo test -p adapter-semantic-kotlin --ignored
 
 #[test]
 #[ignore]
@@ -742,14 +666,12 @@ fn e2e_fixture_project_extracts_expected_symbols() {
     process.start().expect("bridge must start for e2e test");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
+    let file = project.make_prepared_file();
     let output = adapter
-        .index_file(&ctx, &file)
-        .expect("index_file must succeed with real runtime");
+        .enrich_symbols(&file, None)
+        .expect("enrich_symbols must succeed with real runtime");
 
-    assert_eq!(output.source_adapter, "semantic-kotlin-v1");
-    assert_eq!(output.quality_level, core_model::QualityLevel::Semantic);
+    assert_eq!(output.backend_id.0, "semantic-kotlin");
 
     let names: Vec<&str> = output.symbols.iter().map(|s| s.name.as_str()).collect();
     for expected in &["Config", "create", "process", "Mode", "MAX_SIZE"] {
@@ -775,9 +697,8 @@ fn e2e_fixture_project_symbol_ids_match_canonical_form() {
     process.start().expect("bridge must start");
 
     let adapter = KotlinSemanticAdapter::new(process);
-    let ctx = project.make_context();
-    let file = project.make_source_file();
-    let output = adapter.index_file(&ctx, &file).unwrap();
+    let file = project.make_prepared_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
     let file_path = "src/Config.kt";
 
     let find = |name: &str| {

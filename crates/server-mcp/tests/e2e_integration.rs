@@ -3,39 +3,24 @@
 //! Indexes a real fixture repo via the indexer pipeline, then exercises
 //! all MCP tools through the ToolRegistry backed by StoreQueryService.
 
-use adapter_api::{AdapterPolicy, AdapterRouter, LanguageAdapter};
-use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
 use serde_json::json;
 use tempfile::TempDir;
 
+use indexer::{DefaultBackendRegistry, DispatchContext};
 use query_engine::StoreQueryService;
 use server_mcp::types::{ErrorCode, Status};
 use server_mcp::ToolRegistry;
+use syntax_platform::RustSyntaxBackend;
 
 // ── Test infrastructure ──────────────────────────────────────────────────
 
-struct TestRouter {
-    adapters: Vec<TreeSitterAdapter>,
-}
-
-impl TestRouter {
-    fn new() -> Self {
-        let adapters = supported_languages()
-            .iter()
-            .filter_map(|lang| create_adapter(lang))
-            .collect();
-        Self { adapters }
-    }
-}
-
-impl AdapterRouter for TestRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        self.adapters
-            .iter()
-            .filter(|a| a.language() == language)
-            .map(|a| a as &dyn LanguageAdapter)
-            .collect()
-    }
+fn make_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    registry.register_syntax(
+        RustSyntaxBackend::backend_id(),
+        Box::new(RustSyntaxBackend::new()),
+    );
+    registry
 }
 
 /// Indexes a fixture repo and returns the store for querying.
@@ -77,12 +62,12 @@ fn indexed_store_with_blobs() -> (store::MetadataStore, store::BlobStore, TempDi
         store::BlobStore::open(&blob_dir.path().join("blobs")).expect("open blob store");
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
-    let router = TestRouter::new();
+    let registry = make_registry();
     let ctx = indexer::PipelineContext {
         repo_id: "e2e-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -579,12 +564,12 @@ fn indexed_file_only_store() -> (store::MetadataStore, store::BlobStore, TempDir
         store::BlobStore::open(&blob_dir.path().join("blobs")).expect("open blob store");
     let mut db = store::MetadataStore::open_in_memory().expect("open store");
 
-    let router = TestRouter::new(); // Only Rust adapters — no Python/Go.
+    let registry = make_registry(); // Only Rust backend — no Python/Go.
     let ctx = indexer::PipelineContext {
         repo_id: "file-only-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };

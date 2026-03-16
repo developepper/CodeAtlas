@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/adapter-api", "crates/adapter-semantic-kotlin", "crates/adapter-semantic-typescript", "crates/adapter-syntax-treesitter", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/server-mcp", "crates/service", "crates/store", "crates/workspace-placeholder"]
+members = ["crates/adapter-semantic-kotlin", "crates/adapter-semantic-typescript", "crates/cli", "crates/core-model", "crates/indexer", "crates/query-engine", "crates/repo-walker", "crates/semantic-api", "crates/server-mcp", "crates/service", "crates/store", "crates/syntax-platform", "crates/workspace-placeholder"]
 resolver = "2"
 
 [workspace.package]
@@ -9,10 +9,8 @@ rust-version = "1.81"
 repository = "https://github.com/developepper/CodeAtlas"
 
 [workspace.dependencies]
-adapter-api = { path = "crates/adapter-api" }
-adapter-semantic-kotlin = { path = "crates/adapter-semantic-kotlin" }
-adapter-semantic-typescript = { path = "crates/adapter-semantic-typescript" }
-adapter-syntax-treesitter = { path = "crates/adapter-syntax-treesitter" }
+semantic-kotlin = { path = "crates/adapter-semantic-kotlin" }
+semantic-typescript = { path = "crates/adapter-semantic-typescript" }
 core-model = { path = "crates/core-model" }
 globset = "0.4.16"
 indexer = { path = "crates/indexer" }
@@ -27,7 +25,10 @@ tree-sitter-rust = "0.24"
 tracing = "0.1.41"
 rusqlite = { version = "0.35", features = ["bundled"] }
 server-mcp = { path = "crates/server-mcp" }
+semantic-api = { path = "crates/semantic-api" }
 store = { path = "crates/store" }
+syntax-platform = { path = "crates/syntax-platform" }
+thiserror = "2"
 sha2 = "0.10"
 tracing-subscriber = { version = "0.3.19", features = ["json", "env-filter"] }
 opentelemetry = "0.27"

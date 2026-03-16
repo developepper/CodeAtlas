@@ -6,8 +6,9 @@
 //!
 //! See spec §8.3 (Enrichment Stage).
 
-use adapter_api::ExtractedSymbol;
 use core_model::SymbolKind;
+
+use crate::merge_engine::MergedSymbol;
 
 // ---------------------------------------------------------------------------
 // File summary
@@ -19,7 +20,7 @@ use core_model::SymbolKind;
 /// Format: `"{Language} source file with {kind counts} — {top symbol names}"`
 ///
 /// When no symbols are present: `"{Language} source file (no symbols extracted)"`.
-pub fn file_summary(language: &str, symbols: &[ExtractedSymbol]) -> String {
+pub fn file_summary(language: &str, symbols: &[MergedSymbol]) -> String {
     if symbols.is_empty() {
         return format!("{language} source file (no symbols extracted)");
     }
@@ -39,7 +40,7 @@ pub fn file_summary(language: &str, symbols: &[ExtractedSymbol]) -> String {
 ///
 /// Kinds are listed in a fixed order (function, class, method, type, constant,
 /// unknown) and kinds with zero count are omitted.
-fn kind_count_summary(symbols: &[ExtractedSymbol]) -> String {
+fn kind_count_summary(symbols: &[MergedSymbol]) -> String {
     // Fixed display order.
     const ORDERED_KINDS: &[(SymbolKind, &str, &str)] = &[
         (SymbolKind::Function, "function", "functions"),
@@ -82,7 +83,7 @@ fn kind_count_summary(symbols: &[ExtractedSymbol]) -> String {
 
 /// Returns a comma-separated list of up to `limit` top-level symbol names,
 /// sorted alphabetically for determinism.
-fn top_symbol_names(symbols: &[ExtractedSymbol], limit: usize) -> String {
+fn top_symbol_names(symbols: &[MergedSymbol], limit: usize) -> String {
     let mut names: Vec<&str> = symbols
         .iter()
         .filter(|s| s.parent_qualified_name.is_none())
@@ -102,7 +103,7 @@ fn top_symbol_names(symbols: &[ExtractedSymbol], limit: usize) -> String {
 ///
 /// If a docstring is present, uses its first sentence. Otherwise falls back
 /// to a signature-based description.
-pub fn symbol_summary(symbol: &ExtractedSymbol) -> String {
+pub fn symbol_summary(symbol: &MergedSymbol) -> String {
     if let Some(sentence) = first_docstring_sentence(symbol.docstring.as_deref()) {
         return sentence;
     }
@@ -146,7 +147,7 @@ fn first_docstring_sentence(docstring: Option<&str>) -> Option<String> {
 }
 
 /// Builds a summary from kind + signature when no docstring is available.
-fn signature_summary(symbol: &ExtractedSymbol) -> String {
+fn signature_summary(symbol: &MergedSymbol) -> String {
     let kind_label = match symbol.kind {
         SymbolKind::Function => "Function",
         SymbolKind::Class => "Class",
@@ -168,7 +169,7 @@ fn signature_summary(symbol: &ExtractedSymbol) -> String {
 ///
 /// Tokens are lowercased, deduplicated, and sorted for determinism. Single-
 /// character tokens and common noise words are filtered out.
-pub fn extract_keywords(symbol: &ExtractedSymbol) -> Vec<String> {
+pub fn extract_keywords(symbol: &MergedSymbol) -> Vec<String> {
     let mut tokens = Vec::new();
 
     // Name tokens (split snake_case and camelCase).
@@ -348,15 +349,15 @@ fn is_noise_word(word: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use adapter_api::SourceSpan;
+    use core_model::SourceSpan;
 
     fn make_symbol(
         name: &str,
         kind: SymbolKind,
         signature: &str,
         docstring: Option<&str>,
-    ) -> ExtractedSymbol {
-        ExtractedSymbol {
+    ) -> MergedSymbol {
+        MergedSymbol {
             name: name.to_string(),
             qualified_name: name.to_string(),
             kind,
@@ -367,14 +368,16 @@ mod tests {
                 byte_length: 10,
             },
             signature: signature.to_string(),
-            confidence_score: None,
+            confidence_score: 0.7,
             docstring: docstring.map(|s| s.to_string()),
             parent_qualified_name: None,
+            type_refs: vec![],
+            call_refs: vec![],
         }
     }
 
-    fn make_method(name: &str, parent: &str, signature: &str) -> ExtractedSymbol {
-        ExtractedSymbol {
+    fn make_method(name: &str, parent: &str, signature: &str) -> MergedSymbol {
+        MergedSymbol {
             name: name.to_string(),
             qualified_name: format!("{parent}::{name}"),
             kind: SymbolKind::Method,
@@ -385,9 +388,11 @@ mod tests {
                 byte_length: 10,
             },
             signature: signature.to_string(),
-            confidence_score: None,
+            confidence_score: 0.7,
             docstring: None,
             parent_qualified_name: Some(parent.to_string()),
+            type_refs: vec![],
+            call_refs: vec![],
         }
     }
 

@@ -1,45 +1,52 @@
-use core_model::QualityLevel;
-
 use std::cell::RefCell;
 
-use adapter_api::{
-    AdapterCapabilities, AdapterError, AdapterOutput, IndexContext, LanguageAdapter, SourceFile,
-};
+use core_model::BackendId;
+use semantic_api::{SemanticBackend, SemanticCapability, SemanticError, SemanticExtraction};
+use syntax_platform::{PreparedFile, SyntaxMergeBaseline};
 use tracing::{debug, warn};
 
 use crate::error::TsServerError;
 use crate::mapping::{map_navtree_to_symbols, NavTreeItem};
 use crate::runtime::SemanticRuntime;
 
-const ADAPTER_ID: &str = "semantic-typescript-v1";
 const LANGUAGE: &str = "typescript";
 
-/// A semantic adapter for TypeScript that uses tsserver's navigation tree
+/// A semantic backend for TypeScript that uses tsserver's navigation tree
 /// to extract symbols with high-confidence, type-aware metadata.
 ///
-/// The adapter communicates with a tsserver process through the
+/// The backend communicates with a tsserver process through the
 /// [`SemanticRuntime`] trait, enabling test doubles without real processes.
 pub struct TypeScriptSemanticAdapter<R: SemanticRuntime> {
     runtime: RefCell<R>,
-    capabilities: AdapterCapabilities,
+    capability: SemanticCapability,
 }
 
 impl<R: SemanticRuntime> TypeScriptSemanticAdapter<R> {
     /// Creates a new TypeScript semantic adapter wrapping the given runtime.
     ///
-    /// The runtime must be started before calling `index_file`. The adapter
+    /// The runtime must be started before calling `enrich_symbols`. The adapter
     /// does not manage the runtime lifecycle — callers are responsible for
     /// starting and stopping the runtime.
     pub fn new(runtime: R) -> Self {
         Self {
             runtime: RefCell::new(runtime),
-            capabilities: AdapterCapabilities::semantic_baseline(),
+            capability: SemanticCapability {
+                supports_type_refs: true,
+                supports_call_refs: true,
+                default_confidence: 0.9,
+            },
         }
+    }
+
+    /// Returns the [`BackendId`] for this backend.
+    #[must_use]
+    pub fn backend_id() -> BackendId {
+        BackendId("semantic-typescript".to_string())
     }
 
     /// Sends an "open" request to tsserver for the given file, then requests
     /// the navigation tree and parses the response into `NavTreeItem`s.
-    fn request_navtree(&self, file: &SourceFile) -> Result<Vec<NavTreeItem>, AdapterError> {
+    fn request_navtree(&self, file: &PreparedFile) -> Result<Vec<NavTreeItem>, SemanticError> {
         let file_path = file.absolute_path.to_string_lossy().to_string();
         let content = String::from_utf8_lossy(&file.content).to_string();
         let mut rt = self.runtime.borrow_mut();
@@ -53,7 +60,7 @@ impl<R: SemanticRuntime> TypeScriptSemanticAdapter<R> {
 
         rt.send_request("open", Some(open_args)).map_err(|e| {
             warn!(file = %file.relative_path.display(), error = %e, "tsserver open failed");
-            ts_error_to_adapter_error(e, &file.relative_path)
+            ts_error_to_semantic_error(e, &file.relative_path)
         })?;
 
         // Request the navigation tree.
@@ -65,7 +72,7 @@ impl<R: SemanticRuntime> TypeScriptSemanticAdapter<R> {
             .send_request("navtree", Some(navtree_args))
             .map_err(|e| {
                 warn!(file = %file.relative_path.display(), error = %e, "tsserver navtree failed");
-                ts_error_to_adapter_error(e, &file.relative_path)
+                ts_error_to_semantic_error(e, &file.relative_path)
             })?;
 
         // Close the file to free tsserver resources.
@@ -75,7 +82,7 @@ impl<R: SemanticRuntime> TypeScriptSemanticAdapter<R> {
         }
 
         // Parse the navtree from the response body.
-        let body = response.body.ok_or_else(|| AdapterError::Parse {
+        let body = response.body.ok_or_else(|| SemanticError::Analysis {
             path: file.relative_path.clone(),
             reason: "navtree response has no body".to_string(),
         })?;
@@ -84,36 +91,39 @@ impl<R: SemanticRuntime> TypeScriptSemanticAdapter<R> {
     }
 }
 
-impl<R: SemanticRuntime> LanguageAdapter for TypeScriptSemanticAdapter<R> {
-    fn adapter_id(&self) -> &str {
-        ADAPTER_ID
-    }
+// SAFETY: RefCell<R> prevents Sync, but SemanticBackend requires Send + Sync.
+// The tsserver process is inherently single-threaded; callers must ensure
+// exclusive access externally (the pipeline already does this).
+unsafe impl<R: SemanticRuntime + Send> Send for TypeScriptSemanticAdapter<R> {}
+unsafe impl<R: SemanticRuntime + Send> Sync for TypeScriptSemanticAdapter<R> {}
 
+impl<R: SemanticRuntime + Send> SemanticBackend for TypeScriptSemanticAdapter<R> {
     fn language(&self) -> &str {
         LANGUAGE
     }
 
-    fn capabilities(&self) -> &AdapterCapabilities {
-        &self.capabilities
+    fn capability(&self) -> &SemanticCapability {
+        &self.capability
     }
 
-    fn index_file(
+    fn enrich_symbols(
         &self,
-        _ctx: &IndexContext,
-        file: &SourceFile,
-    ) -> Result<AdapterOutput, AdapterError> {
+        file: &PreparedFile,
+        _syntax_baseline: Option<&SyntaxMergeBaseline>,
+    ) -> Result<SemanticExtraction, SemanticError> {
         if file.language != LANGUAGE {
-            return Err(AdapterError::Unsupported {
+            return Err(SemanticError::Unsupported {
                 language: file.language.clone(),
             });
         }
 
         // Empty files produce no symbols.
         if file.content.is_empty() {
-            return Ok(AdapterOutput {
+            return Ok(SemanticExtraction {
+                language: LANGUAGE.to_string(),
                 symbols: vec![],
-                source_adapter: ADAPTER_ID.to_string(),
-                quality_level: QualityLevel::Semantic,
+                backend_id: Self::backend_id(),
+                default_confidence: self.capability.default_confidence,
             });
         }
 
@@ -121,17 +131,18 @@ impl<R: SemanticRuntime> LanguageAdapter for TypeScriptSemanticAdapter<R> {
         let mut symbols = map_navtree_to_symbols(&navtree_items, &file.content);
 
         // Apply default confidence to symbols that don't have per-symbol overrides.
-        let default_confidence = self.capabilities.default_confidence;
+        let default_confidence = self.capability.default_confidence;
         for sym in &mut symbols {
             if sym.confidence_score.is_none() {
                 sym.confidence_score = Some(default_confidence);
             }
         }
 
-        Ok(AdapterOutput {
+        Ok(SemanticExtraction {
+            language: LANGUAGE.to_string(),
             symbols,
-            source_adapter: ADAPTER_ID.to_string(),
-            quality_level: QualityLevel::Semantic,
+            backend_id: Self::backend_id(),
+            default_confidence: self.capability.default_confidence,
         })
     }
 }
@@ -143,7 +154,7 @@ impl<R: SemanticRuntime> LanguageAdapter for TypeScriptSemanticAdapter<R> {
 fn parse_navtree_body(
     body: &serde_json::Value,
     path: &std::path::Path,
-) -> Result<Vec<NavTreeItem>, AdapterError> {
+) -> Result<Vec<NavTreeItem>, SemanticError> {
     // tsserver returns navtree as a single root item. The children of
     // the root represent the top-level symbols in the file.
     if let Ok(root) = serde_json::from_value::<NavTreeItem>(body.clone()) {
@@ -155,7 +166,7 @@ fn parse_navtree_body(
         return Ok(items);
     }
 
-    Err(AdapterError::Parse {
+    Err(SemanticError::Analysis {
         path: path.to_path_buf(),
         reason: "failed to parse navtree response body".to_string(),
     })
@@ -171,18 +182,18 @@ fn script_kind_for_path(path: &std::path::Path) -> &'static str {
     }
 }
 
-/// Converts a `TsServerError` into an `AdapterError`.
-fn ts_error_to_adapter_error(error: TsServerError, path: &std::path::Path) -> AdapterError {
+/// Converts a `TsServerError` into a `SemanticError`.
+fn ts_error_to_semantic_error(error: TsServerError, path: &std::path::Path) -> SemanticError {
     match error {
-        TsServerError::Timeout { operation } => AdapterError::Parse {
+        TsServerError::Timeout { operation } => SemanticError::Analysis {
             path: path.to_path_buf(),
             reason: format!("tsserver timed out: {operation}"),
         },
-        TsServerError::Io { source } => AdapterError::Io {
-            path: Some(path.to_path_buf()),
-            source,
+        TsServerError::Io { .. } => SemanticError::Analysis {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
         },
-        other => AdapterError::Parse {
+        other => SemanticError::Analysis {
             path: path.to_path_buf(),
             reason: other.to_string(),
         },
@@ -291,15 +302,8 @@ mod tests {
         }
     }
 
-    fn make_context() -> IndexContext {
-        IndexContext {
-            repo_id: "test-repo".to_string(),
-            source_root: PathBuf::from("/tmp/test-repo"),
-        }
-    }
-
-    fn make_ts_file(content: &str) -> SourceFile {
-        SourceFile {
+    fn make_ts_file(content: &str) -> PreparedFile {
+        PreparedFile {
             relative_path: PathBuf::from("src/main.ts"),
             absolute_path: PathBuf::from("/tmp/test-repo/src/main.ts"),
             content: content.as_bytes().to_vec(),
@@ -320,19 +324,21 @@ mod tests {
     // -- Identity and capabilities --
 
     #[test]
-    fn adapter_id_follows_naming_convention() {
+    fn backend_id_follows_naming_convention() {
         let rt = MockRuntime::new(navtree_body(serde_json::json!([])));
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        assert_eq!(adapter.adapter_id(), "semantic-typescript-v1");
         assert_eq!(adapter.language(), "typescript");
+        assert_eq!(
+            TypeScriptSemanticAdapter::<MockRuntime>::backend_id().0,
+            "semantic-typescript"
+        );
     }
 
     #[test]
     fn capabilities_are_semantic_level() {
         let rt = MockRuntime::new(navtree_body(serde_json::json!([])));
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let caps = adapter.capabilities();
-        assert_eq!(caps.quality_level, QualityLevel::Semantic);
+        let caps = adapter.capability();
         assert!((caps.default_confidence - 0.9).abs() < f32::EPSILON);
         assert!(caps.supports_type_refs);
         assert!(caps.supports_call_refs);
@@ -344,12 +350,13 @@ mod tests {
     fn rejects_unsupported_language() {
         let rt = MockRuntime::new(navtree_body(serde_json::json!([])));
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let ctx = make_context();
-        let file = SourceFile {
+        let file = PreparedFile {
             language: "python".to_string(),
             ..make_ts_file("x = 1")
         };
-        let err = adapter.index_file(&ctx, &file).expect_err("should reject");
+        let err = adapter
+            .enrich_symbols(&file, None)
+            .expect_err("should reject");
         assert!(err.to_string().contains("unsupported language"));
     }
 
@@ -359,12 +366,10 @@ mod tests {
     fn empty_file_produces_no_symbols() {
         let rt = MockRuntime::new(navtree_body(serde_json::json!([])));
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_ts_file("");
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
         assert!(output.symbols.is_empty());
-        assert_eq!(output.source_adapter, "semantic-typescript-v1");
-        assert_eq!(output.quality_level, QualityLevel::Semantic);
+        assert_eq!(output.backend_id.0, "semantic-typescript");
     }
 
     // -- Function extraction --
@@ -383,9 +388,8 @@ mod tests {
         let source = "export function greet(name: string) {}";
         let rt = MockRuntime::new(body);
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_ts_file(source);
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
         assert_eq!(output.symbols.len(), 1);
         let sym = &output.symbols[0];
@@ -428,9 +432,8 @@ mod tests {
         let source = "class Calculator {\n  add(a: number, b: number): number {}\n  subtract(a: number, b: number): number {}\n}\n";
         let rt = MockRuntime::new(body);
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_ts_file(source);
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
         assert_eq!(output.symbols.len(), 3);
         assert_eq!(output.symbols[0].name, "Calculator");
@@ -460,12 +463,10 @@ mod tests {
         ]));
         let rt = MockRuntime::new(body);
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_ts_file("function hello() {}");
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
-        assert_eq!(output.source_adapter, "semantic-typescript-v1");
-        assert_eq!(output.quality_level, QualityLevel::Semantic);
+        assert_eq!(output.backend_id.0, "semantic-typescript");
     }
 
     // -- Confidence resolution --
@@ -491,9 +492,8 @@ mod tests {
         let source = "function a() {}\nclass B {}\n";
         let rt = MockRuntime::new(body);
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_ts_file(source);
-        let output = adapter.index_file(&ctx, &file).unwrap();
+        let output = adapter.enrich_symbols(&file, None).unwrap();
 
         for sym in &output.symbols {
             let score = sym
@@ -510,15 +510,17 @@ mod tests {
     // -- Error handling --
 
     #[test]
-    fn navtree_failure_returns_parse_error() {
+    fn navtree_failure_returns_analysis_error() {
         let rt = MockRuntime::failing();
         let adapter = TypeScriptSemanticAdapter::new(rt);
-        let ctx = make_context();
         let file = make_ts_file("function broken() {}");
         let err = adapter
-            .index_file(&ctx, &file)
+            .enrich_symbols(&file, None)
             .expect_err("should fail on navtree");
-        assert!(err.to_string().contains("protocol error") || err.to_string().contains("parse"));
+        assert!(
+            err.to_string().contains("protocol error")
+                || err.to_string().contains("semantic analysis failed")
+        );
     }
 
     // -- Script kind detection --
@@ -566,9 +568,8 @@ mod tests {
         let run = |body: &serde_json::Value| {
             let rt = MockRuntime::new(body.clone());
             let adapter = TypeScriptSemanticAdapter::new(rt);
-            let ctx = make_context();
             let file = make_ts_file(source);
-            adapter.index_file(&ctx, &file).unwrap()
+            adapter.enrich_symbols(&file, None).unwrap()
         };
 
         let out1 = run(&body);

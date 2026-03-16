@@ -59,13 +59,12 @@ impl fmt::Display for ValidationError {
 impl Error for ValidationError {}
 
 // ---------------------------------------------------------------------------
-// Capability tier (replaces QualityLevel for the long-term architecture)
+// Capability tier
 // ---------------------------------------------------------------------------
 
 /// Capability tier for a file or symbol after indexing.
 ///
-/// This is the canonical representation introduced by Epic 17. It replaces
-/// the previous two-value `QualityLevel` enum.
+/// Introduced by Epic 17 as the canonical indexing quality representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityTier {
@@ -126,39 +125,45 @@ impl fmt::Display for CapabilityTier {
 }
 
 // ---------------------------------------------------------------------------
-// QualityLevel (deprecated — retained for adapter-api compatibility until
-// Ticket 3 retires adapter-api)
+// BackendId
 // ---------------------------------------------------------------------------
 
-#[deprecated(
-    note = "Use CapabilityTier instead; QualityLevel is removed when adapter-api is retired in Ticket 3"
-)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QualityLevel {
-    Semantic,
-    Syntax,
-}
+/// Opaque backend identifier.
+///
+/// Format: `"{kind}-{language}"` (e.g. `"syntax-rust"`, `"semantic-typescript"`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BackendId(pub String);
 
-#[allow(deprecated)]
-impl From<QualityLevel> for CapabilityTier {
-    fn from(ql: QualityLevel) -> Self {
-        match ql {
-            QualityLevel::Semantic => CapabilityTier::SemanticOnly,
-            QualityLevel::Syntax => CapabilityTier::SyntaxOnly,
-        }
+impl fmt::Display for BackendId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
 // ---------------------------------------------------------------------------
-// SourceSpan (moved from adapter-api for cross-subsystem sharing)
+// FileOnlyReason
+// ---------------------------------------------------------------------------
+
+/// Why a file was indexed as file-only (no extracted symbols).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileOnlyReason {
+    /// Language was not recognized by the walker.
+    LanguageUnrecognized,
+    /// No syntax backend registered for this language.
+    NoSyntaxBackendRegistered,
+    /// Syntax extraction was disabled by policy for this language.
+    SyntaxDisabledByPolicy,
+    /// All registered syntax backends failed at runtime.
+    AllSyntaxBackendsFailed,
+}
+
+// ---------------------------------------------------------------------------
+// SourceSpan
 // ---------------------------------------------------------------------------
 
 /// Byte-and-line position of a symbol in its source file.
 ///
-/// Previously defined in `adapter-api`. Moved to `core-model` so that
-/// `syntax-platform`, `semantic-api`, and `indexer` can all reference it
-/// without depending on `adapter-api`.
+/// Shared across `syntax-platform`, `semantic-api`, and `indexer`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceSpan {
     /// 1-based start line.
@@ -373,15 +378,6 @@ pub struct FileRecord {
     pub symbol_count: u64,
     pub capability_tier: CapabilityTier,
     pub updated_at: String,
-}
-
-/// Deprecated — replaced by `CapabilityTier` on `FileRecord`.
-/// Retained temporarily for adapter-api compatibility until Ticket 3.
-#[deprecated(note = "Use CapabilityTier on FileRecord instead; removed in Ticket 3")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct QualityMix {
-    pub semantic_percent: f32,
-    pub syntax_percent: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -883,19 +879,7 @@ mod tests {
         assert!(CapabilityTier::SemanticOnly.has_symbols());
     }
 
-    #[allow(deprecated)]
-    #[test]
-    fn quality_level_converts_to_capability_tier() {
-        use super::QualityLevel;
-        assert_eq!(
-            CapabilityTier::from(QualityLevel::Semantic),
-            CapabilityTier::SemanticOnly
-        );
-        assert_eq!(
-            CapabilityTier::from(QualityLevel::Syntax),
-            CapabilityTier::SyntaxOnly
-        );
-    }
+    // QualityLevel removed in Ticket 3 — conversion test no longer needed.
 
     // -- SourceSpan tests --
 

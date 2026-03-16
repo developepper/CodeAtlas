@@ -1,12 +1,12 @@
 [package]
-name = "adapter-api"
+name = "syntax-platform"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
-[features]
-test-harness = []
-
 [dependencies]
 core-model.workspace = true
+thiserror = "2"
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true

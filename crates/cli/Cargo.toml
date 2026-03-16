@@ -15,12 +15,12 @@ name = "codeatlas"
 path = "src/main.rs"
 
 [dependencies]
-adapter-api.workspace = true
-adapter-semantic-kotlin.workspace = true
-adapter-semantic-typescript.workspace = true
-adapter-syntax-treesitter.workspace = true
 core-model.workspace = true
 indexer.workspace = true
+semantic-api.workspace = true
+semantic-kotlin.workspace = true
+semantic-typescript.workspace = true
+syntax-platform.workspace = true
 query-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true

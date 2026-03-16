@@ -11,37 +11,20 @@
 //!
 //! See spec §16.2 (Determinism Requirements).
 
-use adapter_api::{AdapterPolicy, AdapterRouter, LanguageAdapter};
-use adapter_syntax_treesitter::{create_adapter, supported_languages, TreeSitterAdapter};
-use indexer::{run, PipelineContext};
+use indexer::{run, DefaultBackendRegistry, DispatchContext, PipelineContext};
+use syntax_platform::RustSyntaxBackend;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
-// Router
+// Registry helper
 // ---------------------------------------------------------------------------
 
-struct TreeSitterRouter {
-    adapters: Vec<TreeSitterAdapter>,
-}
-
-impl TreeSitterRouter {
-    fn new() -> Self {
-        let adapters = supported_languages()
-            .iter()
-            .filter_map(|lang| create_adapter(lang))
-            .collect();
-        Self { adapters }
-    }
-}
-
-impl AdapterRouter for TreeSitterRouter {
-    fn select(&self, language: &str, _policy: AdapterPolicy) -> Vec<&dyn LanguageAdapter> {
-        self.adapters
-            .iter()
-            .filter(|a| a.language() == language)
-            .map(|a| a as &dyn LanguageAdapter)
-            .collect()
-    }
+fn make_registry() -> DefaultBackendRegistry {
+    let mut registry = DefaultBackendRegistry::new();
+    let rust_backend = RustSyntaxBackend::new();
+    let rust_id = RustSyntaxBackend::backend_id();
+    registry.register_syntax(rust_id, Box::new(rust_backend));
+    registry
 }
 
 // ---------------------------------------------------------------------------
@@ -198,15 +181,15 @@ fn full_index_produces_identical_state_across_independent_runs() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
 
     // Run 1: fresh DB.
     let mut db1 = store::MetadataStore::open_in_memory().unwrap();
     let ctx = PipelineContext {
         repo_id: "det-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -271,14 +254,14 @@ fn reindex_same_content_is_idempotent() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().unwrap();
 
     let ctx = PipelineContext {
         repo_id: "idem-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -319,14 +302,14 @@ fn symbol_ids_stable_when_identity_unchanged() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().unwrap();
 
     let ctx = PipelineContext {
         repo_id: "id-stable-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -375,14 +358,14 @@ fn file_hashes_stable_for_unchanged_files() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().unwrap();
 
     let ctx = PipelineContext {
         repo_id: "hash-stable-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -429,15 +412,15 @@ fn incremental_and_full_reindex_produce_equivalent_state() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
 
     // Path A: full index → modify → incremental re-index.
     let mut db_incremental = store::MetadataStore::open_in_memory().unwrap();
     let ctx = PipelineContext {
         repo_id: "equiv-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -503,14 +486,14 @@ fn store_ordering_is_deterministic() {
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().unwrap();
 
     let ctx = PipelineContext {
         repo_id: "order-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -556,14 +539,14 @@ pub fn run_delta() {}
 
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
     let mut db = store::MetadataStore::open_in_memory().unwrap();
 
     let ctx = PipelineContext {
         repo_id: "tie-repo".to_string(),
         source_root: repo_dir.path().to_path_buf(),
-        router: &router,
-        policy_override: Some(AdapterPolicy::SyntaxOnly),
+        registry: &registry,
+        dispatch_context: DispatchContext::default(),
         correlation_id: None,
         use_git_diff: false,
     };
@@ -621,15 +604,15 @@ pub fn run_delta() {}
 fn lifecycle_determinism_across_independent_runs() {
     let blob_dir = TempDir::new().expect("blob temp dir");
     let blob_store = store::BlobStore::open(&blob_dir.path().join("blobs")).unwrap();
-    let router = TreeSitterRouter::new();
+    let registry = make_registry();
 
     let run_lifecycle = |db: &mut store::MetadataStore| {
         let repo_dir = TempDir::new().expect("create temp dir");
         let ctx = PipelineContext {
             repo_id: "lc-repo".to_string(),
             source_root: repo_dir.path().to_path_buf(),
-            router: &router,
-            policy_override: Some(AdapterPolicy::SyntaxOnly),
+            registry: &registry,
+            dispatch_context: DispatchContext::default(),
             correlation_id: None,
             use_git_diff: false,
         };

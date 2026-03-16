@@ -1,0 +1,11 @@
+[package]
+name = "semantic-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+core-model.workspace = true
+syntax-platform.workspace = true
+thiserror.workspace = true

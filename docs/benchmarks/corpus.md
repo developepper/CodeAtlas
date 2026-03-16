@@ -26,7 +26,8 @@ Each fixture produces **9 expected symbols** covering all constructs.
 
 ### TypeScript (`RegressionFixture::typescript()`)
 
-Source: inline in `crates/adapter-api/src/regression.rs`
+Source: previously in `crates/adapter-api/src/regression.rs` (retired in
+Ticket 3; regression fixtures now live in semantic adapter contract tests)
 
 Defines a service abstraction with:
 - `ServiceConfig` interface (3 properties)
@@ -38,7 +39,8 @@ Defines a service abstraction with:
 
 ### Kotlin (`RegressionFixture::kotlin()`)
 
-Source: inline in `crates/adapter-api/src/regression.rs`
+Source: previously in `crates/adapter-api/src/regression.rs` (retired in
+Ticket 3; regression fixtures now live in semantic adapter contract tests)
 
 Mirrors the TypeScript fixture with idiomatic Kotlin equivalents:
 - `ServiceConfig` data class

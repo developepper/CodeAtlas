@@ -1,16 +1,16 @@
-//! Quality regression test suite for the Kotlin semantic adapter.
+//! Quality regression test suite for the Kotlin semantic backend.
 //!
-//! Verifies that the Kotlin semantic adapter maintains measurable
-//! quality improvements over a syntax baseline, using regression fixtures
-//! and KPI thresholds that are enforced in CI.
+//! Verifies that the Kotlin semantic backend produces expected symbols
+//! with correct qualified names and confidence, using regression fixtures.
 //!
 //! These tests use a mock runtime to avoid requiring a real JVM process.
 
-use adapter_api::regression::{self, RegressionFixture};
-use adapter_semantic_kotlin::adapter::KotlinSemanticAdapter;
-use adapter_semantic_kotlin::error::KotlinAnalysisError;
-use adapter_semantic_kotlin::protocol::KotlinResponse;
-use adapter_semantic_kotlin::runtime::KotlinRuntime;
+use semantic_api::SemanticBackend;
+use semantic_kotlin::adapter::KotlinSemanticAdapter;
+use semantic_kotlin::error::KotlinAnalysisError;
+use semantic_kotlin::protocol::KotlinResponse;
+use semantic_kotlin::runtime::KotlinRuntime;
+use syntax_platform::PreparedFile;
 
 /// A mock runtime that returns analysis responses matching the Kotlin
 /// regression fixture source code.
@@ -59,15 +59,6 @@ impl KotlinRuntime for RegressionRuntime {
     }
 }
 
-/// Analysis response matching the Kotlin regression fixture.
-///
-/// The fixture source defines:
-/// - `ServiceConfig` (data class)
-/// - `createService` (top-level function)
-/// - `ServiceImpl` (class with start, stop, handleRequest methods)
-/// - `ServiceStatus` (enum class)
-/// - `RequestHandler` (typealias)
-/// - `DEFAULT_TIMEOUT` (const val)
 fn regression_analysis_body() -> serde_json::Value {
     serde_json::json!([
         {
@@ -102,39 +93,9 @@ fn regression_analysis_body() -> serde_json::Value {
             "startByte": 286,
             "byteLength": 380,
             "childItems": [
-                {
-                    "name": "start",
-                    "kind": "fun",
-                    "modifiers": "",
-                    "signature": "fun start()",
-                    "startLine": 16,
-                    "endLine": 18,
-                    "startByte": 365,
-                    "byteLength": 75,
-                    "childItems": []
-                },
-                {
-                    "name": "stop",
-                    "kind": "fun",
-                    "modifiers": "",
-                    "signature": "fun stop()",
-                    "startLine": 21,
-                    "endLine": 23,
-                    "startByte": 478,
-                    "byteLength": 55,
-                    "childItems": []
-                },
-                {
-                    "name": "handleRequest",
-                    "kind": "fun",
-                    "modifiers": "",
-                    "signature": "fun handleRequest(path: String, body: Any?): Boolean",
-                    "startLine": 26,
-                    "endLine": 28,
-                    "startByte": 575,
-                    "byteLength": 85,
-                    "childItems": []
-                }
+                {"name": "start", "kind": "fun", "modifiers": "", "signature": "fun start()", "startLine": 16, "endLine": 18, "startByte": 365, "byteLength": 75, "childItems": []},
+                {"name": "stop", "kind": "fun", "modifiers": "", "signature": "fun stop()", "startLine": 21, "endLine": 23, "startByte": 478, "byteLength": 55, "childItems": []},
+                {"name": "handleRequest", "kind": "fun", "modifiers": "", "signature": "fun handleRequest(path: String, body: Any?): Boolean", "startLine": 26, "endLine": 28, "startByte": 575, "byteLength": 85, "childItems": []}
             ]
         },
         {
@@ -147,46 +108,10 @@ fn regression_analysis_body() -> serde_json::Value {
             "startByte": 710,
             "byteLength": 80,
             "childItems": [
-                {
-                    "name": "Starting",
-                    "kind": "enum_entry",
-                    "modifiers": "",
-                    "startLine": 33,
-                    "endLine": 33,
-                    "startByte": 740,
-                    "byteLength": 8,
-                    "childItems": []
-                },
-                {
-                    "name": "Running",
-                    "kind": "enum_entry",
-                    "modifiers": "",
-                    "startLine": 34,
-                    "endLine": 34,
-                    "startByte": 754,
-                    "byteLength": 7,
-                    "childItems": []
-                },
-                {
-                    "name": "Stopping",
-                    "kind": "enum_entry",
-                    "modifiers": "",
-                    "startLine": 35,
-                    "endLine": 35,
-                    "startByte": 767,
-                    "byteLength": 8,
-                    "childItems": []
-                },
-                {
-                    "name": "Stopped",
-                    "kind": "enum_entry",
-                    "modifiers": "",
-                    "startLine": 36,
-                    "endLine": 36,
-                    "startByte": 781,
-                    "byteLength": 7,
-                    "childItems": []
-                }
+                {"name": "Starting", "kind": "enum_entry", "modifiers": "", "startLine": 33, "endLine": 33, "startByte": 740, "byteLength": 8, "childItems": []},
+                {"name": "Running", "kind": "enum_entry", "modifiers": "", "startLine": 34, "endLine": 34, "startByte": 754, "byteLength": 7, "childItems": []},
+                {"name": "Stopping", "kind": "enum_entry", "modifiers": "", "startLine": 35, "endLine": 35, "startByte": 767, "byteLength": 8, "childItems": []},
+                {"name": "Stopped", "kind": "enum_entry", "modifiers": "", "startLine": 36, "endLine": 36, "startByte": 781, "byteLength": 7, "childItems": []}
             ]
         },
         {
@@ -218,96 +143,100 @@ fn make_adapter() -> KotlinSemanticAdapter<RegressionRuntime> {
     KotlinSemanticAdapter::new(RegressionRuntime)
 }
 
-// ---------------------------------------------------------------------------
-// Quality regression tests
-// ---------------------------------------------------------------------------
-
-#[test]
-fn kotlin_quality_regression_passes_thresholds() {
-    let adapter = make_adapter();
-    let fixture = RegressionFixture::kotlin();
-    let result = regression::run_quality_regression(&adapter, &fixture);
-    result.assert_thresholds();
+fn make_regression_file() -> PreparedFile {
+    PreparedFile {
+        relative_path: std::path::PathBuf::from("src/Service.kt"),
+        absolute_path: std::path::PathBuf::from("/tmp/test-repo/src/Service.kt"),
+        content: b"/** Service configuration. */\ndata class ServiceConfig(\n    val host: String,\n    val port: Int,\n    val timeout: Long\n)\n\nfun createService(config: ServiceConfig): ServiceImpl {\n    return ServiceImpl(config)\n}\n\nclass ServiceImpl(private val config: ServiceConfig) {\n    fun start() { println(\"starting\") }\n    fun stop() { println(\"stopping\") }\n    fun handleRequest(path: String, body: Any?): Boolean { return path.isNotEmpty() }\n}\n\nenum class ServiceStatus {\n    Starting, Running, Stopping, Stopped\n}\n\ntypealias RequestHandler = (String, Any?) -> Boolean\n\nconst val DEFAULT_TIMEOUT: Long = 30000\n".to_vec(),
+        language: "kotlin".to_string(),
+    }
 }
 
 #[test]
-fn kotlin_quality_regression_is_deterministic() {
+fn regression_extracts_expected_symbols() {
     let adapter = make_adapter();
-    let fixture = RegressionFixture::kotlin();
-    regression::assert_regression_is_deterministic(&adapter, &fixture);
-}
+    let file = make_regression_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
 
-#[test]
-fn kotlin_regression_win_rate_is_total() {
-    let adapter = make_adapter();
-    let fixture = RegressionFixture::kotlin();
-    let result = regression::run_quality_regression(&adapter, &fixture);
-
-    assert_eq!(
-        result.kpi.losses, 0,
-        "semantic adapter must not lose to syntax on any symbol"
-    );
-    assert!(
-        result.kpi.wins > 0,
-        "semantic adapter must have at least one win over syntax"
-    );
-}
-
-#[test]
-fn kotlin_regression_extracts_expected_symbols() {
-    let adapter = make_adapter();
-    let fixture = RegressionFixture::kotlin();
-    let result = regression::run_quality_regression(&adapter, &fixture);
-
-    let names: Vec<&str> = result
-        .output
-        .symbols
-        .iter()
-        .map(|s| s.name.as_str())
-        .collect();
-
-    for expected in &fixture.expected_symbols {
+    let names: Vec<&str> = output.symbols.iter().map(|s| s.name.as_str()).collect();
+    for expected in &[
+        "ServiceConfig",
+        "createService",
+        "ServiceImpl",
+        "start",
+        "stop",
+        "handleRequest",
+        "ServiceStatus",
+        "RequestHandler",
+        "DEFAULT_TIMEOUT",
+    ] {
         assert!(
-            names.contains(&expected.name.as_str()),
-            "expected symbol '{}' not found in regression output: {:?}",
-            expected.name,
-            names
+            names.contains(expected),
+            "expected symbol '{expected}' not found in: {names:?}"
         );
     }
 }
 
 #[test]
-fn kotlin_regression_qualified_names_are_correct() {
-    let adapter = make_adapter();
-    let fixture = RegressionFixture::kotlin();
-    let result = regression::run_quality_regression(&adapter, &fixture);
+fn regression_is_deterministic() {
+    let file = make_regression_file();
 
-    for expected in &fixture.expected_symbols {
-        if let Some(sym) = result
-            .output
-            .symbols
-            .iter()
-            .find(|s| s.name == expected.name)
-        {
-            assert_eq!(
-                sym.qualified_name, expected.qualified_name,
-                "qualified name mismatch for '{}'",
-                expected.name
-            );
-        }
+    let out1 = {
+        let adapter = make_adapter();
+        adapter.enrich_symbols(&file, None).unwrap()
+    };
+    let out2 = {
+        let adapter = make_adapter();
+        adapter.enrich_symbols(&file, None).unwrap()
+    };
+
+    assert_eq!(out1.symbols.len(), out2.symbols.len());
+    for (a, b) in out1.symbols.iter().zip(out2.symbols.iter()) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.kind, b.kind);
+        assert_eq!(a.qualified_name, b.qualified_name);
+        assert_eq!(a.span, b.span);
     }
 }
 
 #[test]
-fn kotlin_regression_report_is_generated() {
+fn regression_qualified_names_are_correct() {
     let adapter = make_adapter();
-    let fixture = RegressionFixture::kotlin();
-    let result = regression::run_quality_regression(&adapter, &fixture);
-    let report = result.report();
+    let file = make_regression_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
 
-    // Print the report so CI can capture it with --nocapture.
-    println!("\n{report}\n");
+    let find = |name: &str| {
+        output
+            .symbols
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("symbol '{name}' not found"))
+    };
 
-    assert!(report.contains("Quality Regression Report"));
-    assert!(report.contains("Win rate"));
+    assert_eq!(find("ServiceConfig").qualified_name, "ServiceConfig");
+    assert_eq!(find("createService").qualified_name, "createService");
+    assert_eq!(find("start").qualified_name, "ServiceImpl::start");
+    assert_eq!(find("stop").qualified_name, "ServiceImpl::stop");
+    assert_eq!(
+        find("handleRequest").qualified_name,
+        "ServiceImpl::handleRequest"
+    );
+}
+
+#[test]
+fn regression_all_symbols_have_confidence() {
+    let adapter = make_adapter();
+    let file = make_regression_file();
+    let output = adapter.enrich_symbols(&file, None).unwrap();
+
+    for sym in &output.symbols {
+        let score = sym
+            .confidence_score
+            .unwrap_or_else(|| panic!("symbol '{}' missing confidence", sym.name));
+        assert!(
+            (0.0..=1.0).contains(&score),
+            "confidence out of range for '{}'",
+            sym.name
+        );
+    }
 }
