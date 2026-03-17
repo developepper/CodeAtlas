@@ -234,6 +234,32 @@ Planning note:
 - Reviewed issue-body drafts live under:
   `docs/planning/github-issues/universal-syntax-*.md`
 
+### Epic 18: Code-Derived Repository Intelligence (#194)
+
+- Make CodeAtlas feel more intimate with a repository by deriving and
+  persisting executable truths from source code itself rather than relying on
+  prose or session-by-session rediscovery.
+- Add exact-slice retrieval so clients can request only the relevant
+  implementation spans instead of whole files.
+- Persist language-agnostic relationship edges such as containment,
+  dependencies, references, and calls where derivable.
+- Add graph-aware retrieval, workflow/path queries, and derived structural
+  facts such as hotspots, central symbols, and likely coordinators.
+- Improve retrieval ranking and explanation so structural evidence, graph
+  distance, and write-path importance influence results.
+
+Planning note:
+
+- This epic is a natural follow-on to Epic 17 because broad syntax coverage is
+  the substrate that makes repository-intelligence features more widely useful.
+- The preferred early direction is ecosystem-agnostic and code-derived.
+- Planning artifact:
+  `docs/planning/code-derived-repository-intelligence.md`
+- Architecture notes:
+  `docs/architecture/code-derived-repository-intelligence-notes.md`
+- Reviewed issue-body drafts live under:
+  `docs/planning/github-issues/code-derived-repository-intelligence-*.md`
+
 ## Commercial Model Principles
 
 CodeAtlas can remain open source and still support a healthy business model if

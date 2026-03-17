@@ -222,6 +222,58 @@ Planning stance:
 - this epic is intentionally allowed to perform foundational refactors rather
   than preserving awkward intermediate interfaces
 
+### Epic 18: Code-Derived Repository Intelligence (#194)
+
+Planning artifact:
+`docs/planning/code-derived-repository-intelligence.md`.
+
+Reviewed issue docs for the issue-creation pass:
+
+- `docs/planning/github-issues/code-derived-repository-intelligence-epic.md`
+- `docs/planning/github-issues/code-derived-issue-creation-order.md`
+- `docs/planning/github-issues/code-derived-ticket-architecture.md`
+- `docs/planning/github-issues/code-derived-ticket-slice-retrieval-core.md`
+- `docs/planning/github-issues/code-derived-ticket-slice-retrieval-surfaces.md`
+- `docs/planning/github-issues/code-derived-ticket-graph-persistence.md`
+- `docs/planning/github-issues/code-derived-ticket-graph-query-surfaces.md`
+- `docs/planning/github-issues/code-derived-ticket-derived-facts.md`
+- `docs/planning/github-issues/code-derived-ticket-path-retrieval.md`
+- `docs/planning/github-issues/code-derived-ticket-ranking-explanations.md`
+- `docs/planning/github-issues/code-derived-ticket-benchmarks.md`
+
+Intent:
+
+- make CodeAtlas feel more intimate with a repository by learning more from the
+  code itself rather than from prose or repeated broad file reads
+- add exact-slice retrieval so clients can request only the code spans they
+  actually need
+- persist language-agnostic relationship edges and expose graph-aware query
+  surfaces
+- derive structural facts and workflow/path evidence from source/index artifacts
+- improve ranking and explanation using structural evidence rather than only
+  textual matching
+
+Child tickets (created):
+
+- #195 define the code-derived repository intelligence architecture
+- #196 persist exact slice retrieval primitives
+- #197 expose exact slice retrieval through service, MCP, and CLI
+- #198 add relationship graph persistence for language-agnostic edges
+
+Child tickets (deferred until #195 is reviewed):
+
+- add graph-aware query surfaces
+- add conservative derived structural facts
+- add workflow/path retrieval
+- rework ranking and explanation metadata
+- benchmark context reduction and answer quality
+
+Planning stance:
+
+- code-derived evidence is preferred over human-authored descriptions
+- the initial execution slices should stay ecosystem-agnostic
+- correctness and explainability matter more than broad but weak graph coverage
+
 ## Manual Setup Issues to Create Immediately
 
 - Configure repository labels.
